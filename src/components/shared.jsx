@@ -1,0 +1,136 @@
+import React, { useState } from 'react';
+import { C } from '../globals.js';
+
+/* Design intent (interface-design skill):
+   Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
+   procedure or updating a task between customers.
+   Feel: warm craft-first workroom — kraft paper, moss green, quiet borders.
+   Depth: borders-only, 1.5px, low-opacity — no drop shadows except modals.
+   Typography: Manrope (UI text), IBM Plex Mono (dates/short data). */
+
+function Icon({ name, size = 18, style }) {
+  return <span className="material-symbols-outlined" style={{ fontSize: size, lineHeight: 1, ...style }}>{name}</span>;
+}
+
+/** Primary action button — solid moss green. */
+function Btn({ children, onClick, style, disabled, type = "button", title }) {
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} title={title}
+      style={{
+        background: disabled ? C.faint : C.moss, color: "#fff", border: "none",
+        borderRadius: 9, padding: "10px 20px", fontSize: 15, fontWeight: 700,
+        cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
+        display: "inline-flex", alignItems: "center", gap: 7,
+        opacity: disabled ? 0.7 : 1, transition: "background .15s",
+        ...(style || {}),
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = C.mossDeep; }}
+      onMouseLeave={e => { if (!disabled) e.currentTarget.style.background = C.moss; }}
+    >{children}</button>
+  );
+}
+
+/** Secondary / outline button. */
+function OBtn({ children, onClick, style, active, disabled, title, type = "button" }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} title={title}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        background: active ? C.mossSoft : (hov ? C.s2 : C.sur), color: active ? C.moss : C.txt,
+        border: `1.5px solid ${active ? C.moss : C.bdr}`, borderRadius: 9,
+        padding: "9px 18px", fontSize: 15, cursor: disabled ? "not-allowed" : "pointer",
+        fontFamily: "inherit", fontWeight: active ? 700 : 500,
+        display: "inline-flex", alignItems: "center", gap: 7,
+        opacity: disabled ? 0.5 : 1, transition: "all .15s",
+        ...(style || {}),
+      }}
+    >{children}</button>
+  );
+}
+
+/** Quiet icon-only button (delete, edit, drag handle actions). */
+function IconBtn({ icon, onClick, title, style, danger }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} title={title}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? (danger ? C.red + "14" : C.s2) : "transparent",
+        border: "none", borderRadius: 7, padding: 6, cursor: "pointer",
+        color: danger ? C.red : (hov ? C.txt : C.mut), display: "flex",
+        alignItems: "center", justifyContent: "center", transition: "all .15s",
+        ...(style || {}),
+      }}
+    ><Icon name={icon} /></button>
+  );
+}
+
+function Pill({ children, color, style }) {
+  color = color || C.moss;
+  return (
+    <span style={{
+      background: color + "18", color, borderRadius: 99, padding: "3px 11px",
+      fontSize: 13, fontWeight: 700, border: `1px solid ${color}38`,
+      whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
+      ...(style || {}),
+    }}>{children}</span>
+  );
+}
+
+function Chk({ checked, onChange, label, size = 18 }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", userSelect: "none" }}>
+      <div onClick={onChange} style={{
+        width: size, height: size, borderRadius: 5, flexShrink: 0,
+        border: `1.5px solid ${checked ? C.moss : C.bdr2}`, background: checked ? C.moss : C.sur,
+        display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
+      }}>
+        {checked && <svg width={size - 6} height={size - 6} viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+      </div>
+      {label && <span style={{ fontSize: 15, color: checked ? C.txt : C.txt2 }}>{label}</span>}
+    </label>
+  );
+}
+
+/** Section heading used at the top of each main view. */
+function SectionHeader({ title, sub, right }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14, marginBottom: 22 }}>
+      <div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: C.txt, letterSpacing: -0.4 }}>{title}</div>
+        {sub && <div style={{ fontSize: 14, color: C.mut, marginTop: 4 }}>{sub}</div>}
+      </div>
+      {right && <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{right}</div>}
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, sub, action }) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "64px 24px", textAlign: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14,
+    }}>
+      <div style={{ width: 52, height: 52, borderRadius: 99, background: C.mossSoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+        <Icon name={icon} size={26} style={{ color: C.moss }} />
+      </div>
+      <div style={{ fontSize: 17, fontWeight: 700, color: C.txt, marginBottom: 6 }}>{title}</div>
+      {sub && <div style={{ fontSize: 14, color: C.mut, maxWidth: 380, marginBottom: action ? 20 : 0 }}>{sub}</div>}
+      {action}
+    </div>
+  );
+}
+
+/** Small colored initial-letter avatar for a user. */
+function Avatar({ name, size = 26, color }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 99, background: color || C.moss,
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+      color: "#fff", fontWeight: 700, fontSize: size * 0.42,
+    }}>{(name || "?").charAt(0).toUpperCase()}</div>
+  );
+}
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar };
