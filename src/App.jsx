@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { C, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
+import MyDashboard from './components/MyDashboard.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import Projects from './components/Projects.jsx';
@@ -20,7 +21,7 @@ function BootScreen() {
 function App() {
   const [user, setUser] = useState(() => getCurrentUser());
   const [booting, setBooting] = useState(() => REMOTE_MODE && !!getCurrentUser() && !isRemoteWarm());
-  const [section, setSection] = useState("library");
+  const [section, setSection] = useState("dashboard");
   const [sopFocus, setSopFocus] = useState(null); // {id, mode}
   const [projectFocus, setProjectFocus] = useState(null); // project id
 
@@ -49,6 +50,7 @@ function App() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
       <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library") setSopFocus(null); if (s !== "projects") setProjectFocus(null); }} user={user} onLogout={() => setUser(null)} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} />}
         {section === "library" && (
           <SOPLibrary user={user} focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} />
         )}

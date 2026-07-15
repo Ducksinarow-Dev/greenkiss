@@ -387,3 +387,4 @@ function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
 }
 
 export default Projects;
+export { ProjectCard, ProgressBar, MemberStack };

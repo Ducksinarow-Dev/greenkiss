@@ -4,6 +4,7 @@ import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
 const NAV_ITEMS = [
+  { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
   { key: "projects", label: "Projects", icon: "folder_special" },
