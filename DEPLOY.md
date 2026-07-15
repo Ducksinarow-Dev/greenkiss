@@ -6,8 +6,8 @@ One-time setup, then every future release is just `npm run release`.
 
 1. cPanel → **MySQL Databases** → create a database (e.g. `youruser_greenkiss`) and a user with all privileges on it. Note the host (usually `localhost`), db name, user, password.
 2. cPanel → **phpMyAdmin** → select the new database → **Import** → upload `schema.sql` from this repo.
-   - This creates `kv_store`, `users`, `tokens`, `revisions`, and seeds one admin user: **Hayden**, PIN **1234**.
-   - **Change that PIN immediately after your first login** (Sidebar → click your name → Change my PIN, or Admin Panel → Users → edit).
+   - This creates `kv_store`, `users`, `tokens`, `revisions`, and seeds two admin users: **Hayden** and **Megan**, both PIN **1234**. Admin Panel access is role-gated (role=admin), not name-gated — these two are simply the only seeded admins.
+   - **Both should change their PIN immediately after first login** (Sidebar → click your name → Change my PIN, or Admin Panel → Users → edit).
 
 ## 2. Server config
 
@@ -36,7 +36,7 @@ Use the same `CRON_KEY` value you put in `config.php`. (Backups also run automat
 
 ## 5. First login
 
-Visit the site, log in as **Hayden** / PIN **1234**, then immediately change the PIN (Sidebar → your name → Change my PIN). Add real staff accounts from Admin Panel → Users.
+Visit the site, log in as **Hayden** or **Megan** / PIN **1234**, then immediately change the PIN (Sidebar → your name → Change my PIN). Add real staff accounts from Admin Panel → Users — non-admin staff default to editor (SOP/task/project/content work) or viewer (read-only); only Hayden and Megan need the admin role.
 
 ---
 

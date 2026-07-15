@@ -23,10 +23,15 @@ CREATE TABLE IF NOT EXISTS users (
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Seed user: Hayden / admin / PIN 1234 (bcrypt hash below).
--- CHANGE THIS PIN AFTER YOUR FIRST LOGIN — see DEPLOY.md.
+-- Seed users: Hayden + Megan, both admin, both PIN 1234 (bcrypt hashes below).
+-- Admin Panel is restricted to these two (role-gated, not name-gated — see
+-- api.php requireRole calls). CHANGE THESE PINS AFTER FIRST LOGIN — see DEPLOY.md.
 INSERT INTO users (id, name, pin_hash, role, created_at)
 VALUES ('u_hayden0', 'Hayden', '$2b$10$4SDOtPIlGc/nXwwkym1FTuEpixXNh3rE1wr4aDQdYbUm1ig2NqGvq', 'admin', UTC_TIMESTAMP())
+ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO users (id, name, pin_hash, role, created_at)
+VALUES ('u_megan00', 'Megan', '$2y$10$SYATm60c.gYR5woNgtW3dOCWRRYnwPE4r2lwz0TfNIoTWijUCL9MG', 'admin', UTC_TIMESTAMP())
 ON DUPLICATE KEY UPDATE id = id;
 
 -- ─── tokens ───────────────────────────────────────────────────────────
