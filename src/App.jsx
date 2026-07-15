@@ -4,6 +4,7 @@ import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
 import TaskManager from './components/TaskManager.jsx';
+import Projects from './components/Projects.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
 
@@ -21,6 +22,7 @@ function App() {
   const [booting, setBooting] = useState(() => REMOTE_MODE && !!getCurrentUser() && !isRemoteWarm());
   const [section, setSection] = useState("library");
   const [sopFocus, setSopFocus] = useState(null); // {id, mode}
+  const [projectFocus, setProjectFocus] = useState(null); // project id
 
   // Page reload with an existing remote session: the token/user survive in
   // sessionStorage but the in-memory kv cache doesn't, so warm it before
@@ -41,15 +43,17 @@ function App() {
   if (booting) return <BootScreen />;
 
   const goToSop = (id) => { setSopFocus({ id, mode: "view" }); setSection("library"); };
+  const goToProject = (id) => { setProjectFocus(id); setSection("projects"); };
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
-      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library") setSopFocus(null); }} user={user} onLogout={() => setUser(null)} />
+      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library") setSopFocus(null); if (s !== "projects") setProjectFocus(null); }} user={user} onLogout={() => setUser(null)} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
         {section === "library" && (
           <SOPLibrary user={user} focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} />
         )}
         {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} />}
+        {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />

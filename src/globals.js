@@ -43,8 +43,10 @@
  *
  * @typedef {Object} SubTask
  * @property {string} id
- * @property {string} label
+ * @property {string} text
  * @property {boolean} done
+ * @property {string} [assigneeId] user id
+ * @property {string} [dueDate] ISO date (yyyy-mm-dd)
  *
  * @typedef {Object} Task
  * @property {string} id
@@ -55,9 +57,23 @@
  * @property {string} assignedTo user id
  * @property {string} dueDate ISO date (yyyy-mm-dd)
  * @property {string} relatedSopId
+ * @property {string} [projectId] linked Project.id, empty for standalone tasks
  * @property {SubTask[]} subTasks
  * @property {string} createdAt
  * @property {number} [order]
+ *
+ * @typedef {Object} Project
+ * @property {string} id
+ * @property {string} name
+ * @property {string} description
+ * @property {"active"|"on_hold"|"done"|"archived"} status
+ * @property {string} startDate ISO date (yyyy-mm-dd)
+ * @property {string} dueDate ISO date (yyyy-mm-dd)
+ * @property {string} leadId user id
+ * @property {string[]} memberIds user ids
+ * @property {string} color hex
+ * @property {string} createdAt
+ * @property {string} updatedAt
  *
  * @typedef {Object} User
  * @property {string} id
@@ -721,6 +737,63 @@ const TASK_PRIORITIES = [
 ];
 const taskPriorityMeta = Object.fromEntries(TASK_PRIORITIES.map(p => [p.key, p]));
 
+/** True if a date string is in the past (before today) and the item isn't
+ * already done. Shared by task cards, project timelines, and My Dashboard. */
+const isOverdue = (dateStr, done) => !!dateStr && !done && new Date(dateStr) < new Date(new Date().toDateString());
+const isDueToday = (dateStr) => !!dateStr && dateStr === new Date().toISOString().slice(0, 10);
+/** True if a date string falls within the next 7 days (inclusive of today, exclusive of overdue). */
+const isDueThisWeek = (dateStr) => {
+  if (!dateStr) return false;
+  const today = new Date(new Date().toISOString().slice(0, 10));
+  const d = new Date(dateStr);
+  const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
+  return d >= today && d <= in7;
+};
+
+/* ─── PROJECT STORAGE ────────────────────────────────────────────── */
+/** @returns {Project[]} */
+const getProjects = () => db.getSync("projects") || [];
+/** @param {Project[]} p */
+const saveProjects = (p) => db.setSync("projects", p);
+/** @param {string} id @returns {Project|null} */
+const getProject = (id) => getProjects().find(p => p.id === id) || null;
+const addProject = (project) => {
+  const next = [...getProjects(), { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], ...project }];
+  saveProjects(next);
+  return next;
+};
+const updateProject = (id, changes) => {
+  const next = getProjects().map(p => p.id === id ? { ...p, ...changes, updatedAt: nowISO() } : p);
+  saveProjects(next);
+};
+const deleteProject = (id) => {
+  saveProjects(getProjects().filter(p => p.id !== id));
+  // Unlink rather than delete — a project's tasks survive as standalone tasks.
+  saveTasks(getTasks().map(t => t.projectId === id ? { ...t, projectId: "" } : t));
+};
+const defProject = () => ({
+  id: uid(), name: "", description: "", status: "active", startDate: "", dueDate: "",
+  leadId: "", memberIds: [], color: C.moss, createdAt: nowISO(), updatedAt: nowISO(),
+});
+
+const PROJECT_STATUSES = [
+  { key: "active", label: "Active", col: C.moss },
+  { key: "on_hold", label: "On Hold", col: C.clay },
+  { key: "done", label: "Done", col: C.txt2 },
+  { key: "archived", label: "Archived", col: C.faint },
+];
+const projectStatusMeta = Object.fromEntries(PROJECT_STATUSES.map(s => [s.key, s]));
+
+/** Live progress for a project — counts its linked tasks, not subtasks.
+ * @param {string} projectId @param {Task[]} allTasks
+ * @returns {{done:number, total:number, pct:number}} */
+const projectProgress = (projectId, allTasks) => {
+  const tasks = (allTasks || []).filter(t => t.projectId === projectId);
+  const done = tasks.filter(t => t.status === "done").length;
+  const total = tasks.length;
+  return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+};
+
 /* ─── USER STORAGE ───────────────────────────────────────────────── *
  * Dev mode: full CRUD against the local "users" list (incl. plaintext
  * PIN, as v1). Remote mode: getUsers() stays a synchronous read of the
@@ -809,7 +882,7 @@ function backupDownloadUrl(file) {
 }
 async function backupRestore(file) { return apiCall("backup_restore", { method: "POST", body: { file } }); }
 
-const EXPORT_KEYS = ["sops", "categories", "tasks", "acks"];
+const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content"];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
   const out = { exportedAt: nowISO(), app: "greenkiss", data: {} };
@@ -840,6 +913,9 @@ export {
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,
   getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, taskStatusMeta, TASK_PRIORITIES, taskPriorityMeta,
+  isOverdue, isDueToday, isDueThisWeek,
+  getProjects, saveProjects, getProject, addProject, updateProject, deleteProject, defProject,
+  PROJECT_STATUSES, projectStatusMeta, projectProgress,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
   backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,
 };

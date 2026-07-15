@@ -1,27 +1,44 @@
 import React, { useState } from 'react';
 import {
   C, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
-  getUsers, getSOPs, fmtDateShort, canEdit,
+  getUsers, getSOPs, getProjects, fmtDateShort, canEdit, isOverdue,
   TASK_STATUSES, TASK_PRIORITIES, taskPriorityMeta, inp,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl } from './shared.jsx';
 
 const emptyForm = () => ({
   title: "", description: "", status: "todo", priority: "medium",
-  assignedTo: "", dueDate: "", relatedSopId: "", subTasks: [],
+  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [],
 });
 
-function TaskModal({ initial, users, sops, onSave, onDelete, onClose, isNew }) {
+function SubTaskRow({ sub, users, onChange, onRemove }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "6px 0" }}>
+      <Chk checked={sub.done} onChange={() => onChange({ done: !sub.done })} />
+      <span style={{ flex: "1 1 140px", minWidth: 100, fontSize: 14, textDecoration: sub.done ? "line-through" : "none", color: sub.done ? C.mut : C.txt }}>{sub.text}</span>
+      <select value={sub.assigneeId || ""} onChange={e => onChange({ assigneeId: e.target.value })}
+        style={inp({ width: "auto", flex: "0 0 auto", fontSize: 12, padding: "5px 8px" })} title="Assignee">
+        <option value="">Unassigned</option>
+        {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+      </select>
+      <input type="date" value={sub.dueDate || ""} onChange={e => onChange({ dueDate: e.target.value })}
+        style={inp({ width: "auto", flex: "0 0 auto", fontSize: 12, padding: "5px 8px" })} />
+      <IconBtn icon="close" title="Remove" onClick={onRemove} />
+    </div>
+  );
+}
+
+function TaskModal({ initial, users, sops, projects, onSave, onDelete, onClose, isNew }) {
   const [form, setForm] = useState(initial);
   const [subInput, setSubInput] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const addSub = () => {
     if (!subInput.trim()) return;
-    set("subTasks", [...(form.subTasks || []), { id: uid(), label: subInput.trim(), done: false }]);
+    set("subTasks", [...(form.subTasks || []), { id: uid(), text: subInput.trim(), done: false, assigneeId: "", dueDate: "" }]);
     setSubInput("");
   };
-  const toggleSub = (id) => set("subTasks", (form.subTasks || []).map(s => s.id === id ? { ...s, done: !s.done } : s));
+  const changeSub = (id, changes) => set("subTasks", (form.subTasks || []).map(s => s.id === id ? { ...s, ...changes } : s));
   const removeSub = (id) => set("subTasks", (form.subTasks || []).filter(s => s.id !== id));
 
   return (
@@ -76,23 +93,28 @@ function TaskModal({ initial, users, sops, onSave, onDelete, onClose, isNew }) {
             </div>
           </div>
 
-          <div>
-            <label style={labelStyle}>Related SOP</label>
-            <select value={form.relatedSopId} onChange={e => set("relatedSopId", e.target.value)} style={inp()}>
-              <option value="">None</option>
-              {sops.map(s => <option key={s.id} value={s.id}>{s.title || "Untitled SOP"}</option>)}
-            </select>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 140px" }}>
+              <label style={labelStyle}>Project</label>
+              <select value={form.projectId || ""} onChange={e => set("projectId", e.target.value)} style={inp()}>
+                <option value="">No project</option>
+                {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name || "Untitled project"}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: "1 1 140px" }}>
+              <label style={labelStyle}>Related SOP</label>
+              <select value={form.relatedSopId} onChange={e => set("relatedSopId", e.target.value)} style={inp()}>
+                <option value="">None</option>
+                {sops.map(s => <option key={s.id} value={s.id}>{s.title || "Untitled SOP"}</option>)}
+              </select>
+            </div>
           </div>
 
           <div>
             <label style={labelStyle}>Sub-tasks</label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", marginBottom: 8 }}>
               {(form.subTasks || []).map(s => (
-                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Chk checked={s.done} onChange={() => toggleSub(s.id)} label={<span style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? C.mut : C.txt }}>{s.label}</span>} />
-                  <div style={{ flex: 1 }} />
-                  <IconBtn icon="close" title="Remove" onClick={() => removeSub(s.id)} />
-                </div>
+                <SubTaskRow key={s.id} sub={s} users={users} onChange={c => changeSub(s.id, c)} onRemove={() => removeSub(s.id)} />
               ))}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -115,13 +137,14 @@ function TaskModal({ initial, users, sops, onSave, onDelete, onClose, isNew }) {
 
 const labelStyle = lbl();
 
-function TaskCard({ task, users, sops, onOpen, onDragStart, onDragOver, isDragOver, onQuickToggle, onOpenSop }) {
+function TaskCard({ task, users, sops, projects, onOpen, onDragStart, onDragOver, isDragOver, onQuickToggle, onOpenSop }) {
   const pm = taskPriorityMeta[task.priority] || TASK_PRIORITIES[1];
   const assignee = users.find(u => u.id === task.assignedTo);
   const sop = sops.find(s => s.id === task.relatedSopId);
+  const project = (projects || []).find(p => p.id === task.projectId);
   const subTasks = task.subTasks || [];
   const stDone = subTasks.filter(s => s.done).length;
-  const overdue = task.dueDate && task.status !== "done" && new Date(task.dueDate) < new Date(new Date().toDateString());
+  const overdue = isOverdue(task.dueDate, task.status === "done");
   const isDone = task.status === "done";
   return (
     <div draggable onDragStart={e => onDragStart(e, task.id)} onDragOver={e => onDragOver(e, task.id)} onClick={onOpen}
@@ -145,6 +168,11 @@ function TaskCard({ task, users, sops, onOpen, onDragStart, onDragOver, isDragOv
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.6 : 1 }}>{task.title}</div>
+          {project && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: project.color || C.moss, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }} title="Project">
+              <Icon name="folder" size={13} />{project.name || "Untitled project"}
+            </div>
+          )}
           {sop && (
             <div onClick={e => { e.stopPropagation(); onOpenSop && onOpenSop(sop.id); }}
               role="link" tabIndex={0}
@@ -184,6 +212,7 @@ function TaskManager({ user, onOpenSop }) {
   const [modal, setModal] = useState(null); // {task, isNew}
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
+  const [filterProject, setFilterProject] = useState("");
   const [query, setQuery] = useState("");
   const [dragItem, setDragItem] = useState(null);
   const [dragOverItem, setDragOverItem] = useState(null);
@@ -191,12 +220,14 @@ function TaskManager({ user, onOpenSop }) {
 
   const users = getUsers();
   const sops = getSOPs();
+  const projects = getProjects();
   const tasks = getTasks();
   const editable = canEdit(user);
 
   const filtered = tasks.filter(t => {
     if (filterAssignee && t.assignedTo !== filterAssignee) return false;
     if (filterPriority && t.priority !== filterPriority) return false;
+    if (filterProject && t.projectId !== filterProject) return false;
     if (query && !t.title.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -257,6 +288,12 @@ function TaskManager({ user, onOpenSop }) {
           <option value="">All assignees</option>
           {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
+        {projects.length > 0 && (
+          <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={inp({ width: "auto", fontSize: 14, padding: "8px 12px" })}>
+            <option value="">All projects</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name || "Untitled project"}</option>)}
+          </select>
+        )}
         <div style={{ display: "flex", gap: 5 }}>
           <button onClick={() => setFilterPriority("")} style={priorityFilterStyle(filterPriority === "", C.moss)}>All</button>
           {TASK_PRIORITIES.map(p => (
@@ -282,7 +319,7 @@ function TaskManager({ user, onOpenSop }) {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {items.map(t => (
-                    <TaskCard key={t.id} task={t} users={users} sops={sops}
+                    <TaskCard key={t.id} task={t} users={users} sops={sops} projects={projects}
                       onOpen={() => openEdit(t)}
                       onDragStart={onDragStart} onDragOver={onDragOverCard} isDragOver={dragOverItem === t.id}
                       onQuickToggle={() => quickToggle(t)} onOpenSop={onOpenSop} />
@@ -296,7 +333,7 @@ function TaskManager({ user, onOpenSop }) {
       )}
 
       {modal && (
-        <TaskModal initial={modal.task} isNew={modal.isNew} users={users} sops={sops}
+        <TaskModal initial={modal.task} isNew={modal.isNew} users={users} sops={sops} projects={projects}
           onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
       )}
     </div>
@@ -313,3 +350,4 @@ function priorityFilterStyle(active, color) {
 }
 
 export default TaskManager;
+export { TaskCard, TaskModal, emptyForm, labelStyle, priorityFilterStyle };

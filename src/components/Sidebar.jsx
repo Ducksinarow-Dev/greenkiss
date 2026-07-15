@@ -6,6 +6,7 @@ import gkLogo from '../assets/gk-logo.svg';
 const NAV_ITEMS = [
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
+  { key: "projects", label: "Projects", icon: "folder_special" },
 ];
 
 // Baked in at build time by vite.config.js's `define` (see scripts/release.sh).
