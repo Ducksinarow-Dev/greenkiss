@@ -101,7 +101,7 @@ function CalendarView({ items, campaigns, monthKey, setMonthKey, onOpenItem, onN
           <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
         {days.map((d, i) => {
           if (d === null) return <div key={"e" + i} style={{ minHeight: 92, borderRight: `1px solid ${C.bdr}`, borderBottom: `1px solid ${C.bdr}`, background: C.bg }} />;
           const ds = dayStr(y, m, d);
