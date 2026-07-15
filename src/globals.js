@@ -75,6 +75,45 @@
  * @property {string} createdAt
  * @property {string} updatedAt
  *
+ * @typedef {Object} Campaign
+ * @property {string} id
+ * @property {string} name
+ * @property {string} description
+ * @property {string} startDate ISO date (yyyy-mm-dd)
+ * @property {string} endDate ISO date (yyyy-mm-dd)
+ * @property {"planning"|"active"|"done"} status
+ * @property {string} color hex
+ * @property {string} createdAt
+ *
+ * @typedef {Object} ContentImage
+ * @property {string} id
+ * @property {string} src
+ * @property {string} caption
+ *
+ * @typedef {Object} ContentItem
+ * @property {string} id
+ * @property {string} [campaignId] Campaign.id, empty for uncampaigned items
+ * @property {"gbp"|"blog"|"email"|"instagram"} channel
+ * @property {string} title
+ * @property {"idea"|"draft"|"scheduled"|"published"} status
+ * @property {string} publishDate ISO date (yyyy-mm-dd)
+ * @property {string} assigneeId user id
+ * @property {string} body
+ * @property {ContentImage[]} images
+ * @property {LinkItem[]} links
+ * @property {string} notes
+ * @property {string} [ctaType] gbp — Book/Order/Buy/Learn more/Sign up/Call
+ * @property {string} [ctaUrl] gbp
+ * @property {"update"|"offer"|"event"} [category] gbp
+ * @property {string} [targetKeyword] blog
+ * @property {string} [url] blog — slug/url
+ * @property {string} [subjectLine] email
+ * @property {string} [previewText] email
+ * @property {string} [caption] instagram — separate from body (used as the IG caption)
+ * @property {string} [hashtags] instagram
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ *
  * @typedef {Object} User
  * @property {string} id
  * @property {string} name
@@ -386,8 +425,11 @@ function seedIfEmpty() {
   if (REMOTE_MODE) return;
   const users = db.getSync("users");
   if (!users) {
+    // Admin Panel is restricted to Hayden + Megan (role: admin) — see schema.sql
+    // for the remote-mode equivalent seed. Other staff default to editor/viewer.
     db.setSync("users", [
       { id: uid(), name: "Hayden", pin: "1234", role: "admin" },
+      { id: uid(), name: "Megan", pin: "1234", role: "admin" },
     ]);
   }
   const categories = db.getSync("categories");
@@ -460,6 +502,74 @@ function seedIfEmpty() {
       { id: uid(), title: "Review new supplier packing slip discrepancy", description: "Two jars short on last week's tincture order — follow up with supplier.", status: "in-progress", priority: "high", assignedTo: hayden?.id || "", dueDate: "", relatedSopId: "", subTasks: [], createdAt: nowISO() },
     ];
     db.setSync("tasks", seededTasks);
+  }
+  const projects = db.getSync("projects");
+  if (!projects) {
+    const seededUsers = db.getSync("users") || [];
+    const hayden = seededUsers[0];
+    const megan = seededUsers[1];
+    const dayMs = 86400000;
+    /** @type {Project} */
+    const proj = {
+      id: uid(), name: "Spring Refresh Display", description: "Refresh the front window and counter display to bring in the new spring restock.",
+      status: "active", startDate: new Date(Date.now() - 5 * dayMs).toISOString().slice(0, 10),
+      dueDate: new Date(Date.now() + 14 * dayMs).toISOString().slice(0, 10),
+      leadId: hayden?.id || "", memberIds: [hayden?.id, megan?.id].filter(Boolean),
+      color: C.moss, createdAt: nowISO(), updatedAt: nowISO(),
+    };
+    db.setSync("projects", [proj]);
+    const existingTasks = db.getSync("tasks") || [];
+    /** @type {Task[]} */
+    const projTasks = [
+      { id: uid(), title: "Source spring display props", description: "Ceramic dishes, dried florals, new signage stand.", status: "in-progress", priority: "high", assignedTo: hayden?.id || "", dueDate: new Date(Date.now() - 3 * dayMs).toISOString().slice(0, 10), relatedSopId: "", projectId: proj.id, subTasks: [], createdAt: nowISO() },
+      { id: uid(), title: "Set up new display and photograph it", description: "Photograph the finished display for social + GBP once it's live.", status: "todo", priority: "medium", assignedTo: megan?.id || hayden?.id || "", dueDate: new Date(Date.now() + 7 * dayMs).toISOString().slice(0, 10), relatedSopId: "", projectId: proj.id, subTasks: [], createdAt: nowISO() },
+    ];
+    db.setSync("tasks", [...existingTasks, ...projTasks]);
+  }
+  const campaigns = db.getSync("campaigns");
+  if (!campaigns) {
+    const seededUsers = db.getSync("users") || [];
+    const hayden = seededUsers[0];
+    const dayMs = 86400000;
+    /** @type {Campaign} */
+    const camp = {
+      id: uid(), name: "Spring Botanicals Launch", description: "Cross-channel push for the new spring botanical line.",
+      startDate: new Date().toISOString().slice(0, 10), endDate: new Date(Date.now() + 21 * dayMs).toISOString().slice(0, 10),
+      status: "active", color: C.clay, createdAt: nowISO(),
+    };
+    db.setSync("campaigns", [camp]);
+    /** @type {ContentItem[]} */
+    const items = [
+      {
+        id: uid(), campaignId: camp.id, channel: "gbp", title: "New spring botanicals have arrived", status: "scheduled",
+        publishDate: new Date(Date.now() + 2 * dayMs).toISOString().slice(0, 10), assigneeId: hayden?.id || "",
+        body: "Our spring botanical restock is here — rosewater, calendula, and fresh-pressed oils now on the shelf.",
+        images: [], links: [], notes: "",
+        ctaType: "learn_more", ctaUrl: "", category: "update",
+        targetKeyword: "", url: "", subjectLine: "", previewText: "", caption: "", hashtags: "",
+        createdAt: nowISO(), updatedAt: nowISO(),
+      },
+      {
+        id: uid(), campaignId: camp.id, channel: "instagram", title: "Spring botanicals unboxing reel", status: "idea",
+        publishDate: new Date(Date.now() + 4 * dayMs).toISOString().slice(0, 10), assigneeId: "",
+        body: "", images: [], links: [], notes: "Short unboxing + shelf styling reel.",
+        ctaType: "", ctaUrl: "", category: "update",
+        targetKeyword: "", url: "", subjectLine: "", previewText: "",
+        caption: "Spring just walked in the door.", hashtags: "#greenkiss #naturalbeauty #springrestock",
+        createdAt: nowISO(), updatedAt: nowISO(),
+      },
+      {
+        id: uid(), campaignId: camp.id, channel: "email", title: "Spring Botanicals — Newsletter Feature", status: "draft",
+        publishDate: new Date(Date.now() + 6 * dayMs).toISOString().slice(0, 10), assigneeId: hayden?.id || "",
+        body: "Feature the new spring botanical line as the lead story in this month's newsletter.",
+        images: [], links: [], notes: "",
+        ctaType: "", ctaUrl: "", category: "update",
+        targetKeyword: "", url: "", subjectLine: "Fresh in: spring botanicals", previewText: "New arrivals to brighten your routine",
+        caption: "", hashtags: "",
+        createdAt: nowISO(), updatedAt: nowISO(),
+      },
+    ];
+    db.setSync("content", items);
   }
 }
 
@@ -784,6 +894,45 @@ const PROJECT_STATUSES = [
 ];
 const projectStatusMeta = Object.fromEntries(PROJECT_STATUSES.map(s => [s.key, s]));
 
+/* ─── CAMPAIGN / CONTENT CONSTANTS ───────────────────────────────── */
+const CAMPAIGN_STATUSES = [
+  { key: "planning", label: "Planning", col: C.faint },
+  { key: "active", label: "Active", col: C.moss },
+  { key: "done", label: "Done", col: C.txt2 },
+];
+const campaignStatusMeta = Object.fromEntries(CAMPAIGN_STATUSES.map(s => [s.key, s]));
+
+const CONTENT_CHANNELS = [
+  { key: "gbp", label: "Google Business", icon: "storefront" },
+  { key: "blog", label: "Blog", icon: "article" },
+  { key: "email", label: "Email", icon: "mail" },
+  { key: "instagram", label: "Instagram", icon: "photo_camera" },
+];
+const contentChannelMeta = Object.fromEntries(CONTENT_CHANNELS.map(c => [c.key, c]));
+
+const CONTENT_STATUSES = [
+  { key: "idea", label: "Idea", col: C.faint },
+  { key: "draft", label: "Draft", col: C.txt2 },
+  { key: "scheduled", label: "Scheduled", col: C.clay },
+  { key: "published", label: "Published", col: C.moss },
+];
+const contentStatusMeta = Object.fromEntries(CONTENT_STATUSES.map(s => [s.key, s]));
+
+const GBP_CTA_TYPES = [
+  { key: "", label: "None" },
+  { key: "book", label: "Book" },
+  { key: "order", label: "Order Online" },
+  { key: "buy", label: "Buy" },
+  { key: "learn_more", label: "Learn More" },
+  { key: "sign_up", label: "Sign Up" },
+  { key: "call", label: "Call Now" },
+];
+const GBP_CATEGORIES = [
+  { key: "update", label: "Update" },
+  { key: "offer", label: "Offer" },
+  { key: "event", label: "Event" },
+];
+
 /** Live progress for a project — counts its linked tasks, not subtasks.
  * @param {string} projectId @param {Task[]} allTasks
  * @returns {{done:number, total:number, pct:number}} */
@@ -792,6 +941,65 @@ const projectProgress = (projectId, allTasks) => {
   const done = tasks.filter(t => t.status === "done").length;
   const total = tasks.length;
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+};
+
+/* ─── CAMPAIGN STORAGE ───────────────────────────────────────────── */
+/** @returns {Campaign[]} */
+const getCampaigns = () => db.getSync("campaigns") || [];
+/** @param {Campaign[]} c */
+const saveCampaigns = (c) => db.setSync("campaigns", c);
+/** @param {string} id @returns {Campaign|null} */
+const getCampaign = (id) => getCampaigns().find(c => c.id === id) || null;
+const addCampaign = (campaign) => {
+  const next = [...getCampaigns(), { id: uid(), createdAt: nowISO(), ...campaign }];
+  saveCampaigns(next);
+  return next;
+};
+const updateCampaign = (id, changes) => {
+  saveCampaigns(getCampaigns().map(c => c.id === id ? { ...c, ...changes } : c));
+};
+const deleteCampaign = (id) => {
+  saveCampaigns(getCampaigns().filter(c => c.id !== id));
+  // Unlink rather than delete — a campaign's content items survive uncampaigned.
+  saveContentItems(getContentItems().map(c => c.campaignId === id ? { ...c, campaignId: "" } : c));
+};
+const defCampaign = () => ({
+  id: uid(), name: "", description: "", startDate: "", endDate: "",
+  status: "planning", color: C.moss, createdAt: nowISO(),
+});
+
+/* ─── CONTENT ITEM STORAGE ───────────────────────────────────────── */
+/** @returns {ContentItem[]} */
+const getContentItems = () => db.getSync("content") || [];
+/** @param {ContentItem[]} c */
+const saveContentItems = (c) => db.setSync("content", c);
+/** @param {string} id @returns {ContentItem|null} */
+const getContentItem = (id) => getContentItems().find(c => c.id === id) || null;
+const addContentItem = (item) => {
+  const next = [...getContentItems(), { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), images: [], links: [], ...item }];
+  saveContentItems(next);
+  return next;
+};
+const updateContentItem = (id, changes) => {
+  saveContentItems(getContentItems().map(c => c.id === id ? { ...c, ...changes, updatedAt: nowISO() } : c));
+};
+const deleteContentItem = (id) => saveContentItems(getContentItems().filter(c => c.id !== id));
+const defContentItem = (channel = "gbp") => ({
+  id: uid(), campaignId: "", channel, title: "", status: "idea", publishDate: "",
+  assigneeId: "", body: "", images: [], links: [], notes: "",
+  ctaType: "", ctaUrl: "", category: "update",
+  targetKeyword: "", url: "",
+  subjectLine: "", previewText: "",
+  caption: "", hashtags: "",
+  createdAt: nowISO(), updatedAt: nowISO(),
+});
+
+/** Item counts per channel for a campaign, e.g. {gbp:2, blog:1} — used on
+ * the Campaigns strip. @param {string} campaignId @param {ContentItem[]} items */
+const campaignChannelCounts = (campaignId, items) => {
+  const counts = {};
+  (items || []).filter(i => i.campaignId === campaignId).forEach(i => { counts[i.channel] = (counts[i.channel] || 0) + 1; });
+  return counts;
 };
 
 /* ─── USER STORAGE ───────────────────────────────────────────────── *
@@ -916,6 +1124,11 @@ export {
   isOverdue, isDueToday, isDueThisWeek,
   getProjects, saveProjects, getProject, addProject, updateProject, deleteProject, defProject,
   PROJECT_STATUSES, projectStatusMeta, projectProgress,
+  getCampaigns, saveCampaigns, getCampaign, addCampaign, updateCampaign, deleteCampaign, defCampaign,
+  CAMPAIGN_STATUSES, campaignStatusMeta,
+  getContentItems, saveContentItems, getContentItem, addContentItem, updateContentItem, deleteContentItem, defContentItem,
+  campaignChannelCounts, CONTENT_CHANNELS, contentChannelMeta, CONTENT_STATUSES, contentStatusMeta,
+  GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
   backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,
 };

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   C, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
+  getContentItems, updateContentItem, getCampaigns, contentChannelMeta,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
 import { Icon } from './shared.jsx';
@@ -84,7 +85,7 @@ function ItemGroup({ group, items, onToggle, onOpen }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject }) {
+function MyDashboard({ user, onOpenProject, onOpenContent }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -93,6 +94,8 @@ function MyDashboard({ user, onOpenProject }) {
   const sops = getSOPs();
   const projects = getProjects();
   const tasks = getTasks();
+  const campaigns = getCampaigns();
+  const contentItems = getContentItems();
 
   // My tasks: assigned to me directly.
   const myTaskItems = tasks
@@ -118,10 +121,23 @@ function MyDashboard({ user, onOpenProject }) {
     });
   });
 
-  // Content items assigned to me feed in here once the content calendar
-  // (Phase 4) exists — same {key, title, dueDate, group} shape via
-  // getContentItems().filter(c => c.assigneeId === user.id).
-  const allItems = [...myTaskItems, ...mySubtaskItems];
+  // Content items assigned to me — shown with their campaign name (if any)
+  // and a channel glyph, same shape as tasks/subtasks so they slot into
+  // the same grouped list. "Done" means published.
+  const myContentItems = contentItems
+    .filter(c => c.assigneeId === user.id)
+    .map(c => {
+      const campaign = campaigns.find(cm => cm.id === c.campaignId);
+      const ch = contentChannelMeta[c.channel];
+      return {
+        key: "content:" + c.id, kind: "content", item: c, title: c.title || "Untitled content",
+        sub: campaign?.name || (ch ? ch.label : ""), subIcon: ch?.icon || "calendar_month",
+        dueDate: c.publishDate, group: classify(c.publishDate, c.status === "published"),
+      };
+    })
+    .filter(i => i.group);
+
+  const allItems = [...myTaskItems, ...mySubtaskItems, ...myContentItems];
 
   const byGroup = (key) => allItems.filter(i => i.group === key)
     .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
@@ -129,14 +145,19 @@ function MyDashboard({ user, onOpenProject }) {
   const toggleItem = (item) => {
     if (item.kind === "task") {
       updateTask(item.task.id, { status: item.task.status === "done" ? "todo" : "done" });
-    } else {
+    } else if (item.kind === "subtask") {
       const nextSubs = (item.task.subTasks || []).map(s => s.id === item.subItem.id ? { ...s, done: !s.done } : s);
       updateTask(item.task.id, { subTasks: nextSubs });
+    } else if (item.kind === "content") {
+      updateContentItem(item.item.id, { status: item.item.status === "published" ? "scheduled" : "published" });
     }
     triggerSaved();
     bump();
   };
-  const openItem = (item) => setModal({ task: { ...item.task }, isNew: false });
+  const openItem = (item) => {
+    if (item.kind === "content") { onOpenContent && onOpenContent(item.item.id); return; }
+    setModal({ task: { ...item.task }, isNew: false });
+  };
 
   const saveModal = (form) => {
     updateTask(form.id, form);

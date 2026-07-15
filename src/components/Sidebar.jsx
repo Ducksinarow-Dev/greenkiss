@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
   { key: "projects", label: "Projects", icon: "folder_special" },
+  { key: "calendar", label: "Content Calendar", icon: "calendar_month" },
 ];
 
 // Baked in at build time by vite.config.js's `define` (see scripts/release.sh).
