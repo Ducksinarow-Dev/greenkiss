@@ -6,7 +6,7 @@ import {
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
   exportAllData, importAllData, fmtDate,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl } from './shared.jsx';
 
 /* ─── USERS ──────────────────────────────────────────────────────── */
 function UserRow({ u, isSelf, onUpdate, onDelete }) {
@@ -39,7 +39,7 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
           {u.pin ? "PIN " + "•".repeat(String(u.pin).length || 4) : "PIN protected"}
         </div>
       </div>
-      <Pill color={u.role === "admin" ? C.moss : u.role === "editor" ? "#5a7a9a" : C.faint}>{ROLE_LABELS[u.role] || u.role}</Pill>
+      <Pill color={u.role === "admin" ? C.moss : u.role === "editor" ? C.txt2 : C.faint}>{ROLE_LABELS[u.role] || u.role}</Pill>
       <IconBtn icon="edit" title="Edit" onClick={() => setEditing(true)} />
       {!isSelf && <IconBtn icon="delete" danger title="Remove user" onClick={onDelete} />}
     </div>
@@ -195,7 +195,7 @@ function RestoreConfirmModal({ file, onCancel, onConfirm }) {
   const [busy, setBusy] = useState(false);
   const ready = typed.trim().toUpperCase() === "RESTORE";
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, padding: 20 }} onClick={onCancel}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, padding: 20 }} onClick={onCancel}>
       <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, padding: "30px 32px", maxWidth: 420, width: "90%",
         boxShadow: C.shadowMd, border: `1.5px solid ${C.red}55`,
@@ -205,7 +205,7 @@ function RestoreConfirmModal({ file, onCancel, onConfirm }) {
         <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.6, marginBottom: 16 }}>
           This replaces <strong>everything</strong> currently in the database — SOPs, categories, tasks, users, and version history — with the contents of <code>{file}</code>. A safety snapshot of the current state is taken first, but this is otherwise irreversible from here. Everyone will be logged out.
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: C.txt2, marginBottom: 8 }}>Type RESTORE to confirm:</div>
+        <div style={lbl({ fontSize: 13 })}>Type RESTORE to confirm:</div>
         <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="RESTORE"
           style={inp({ marginBottom: 20, textAlign: "center", fontWeight: 700, letterSpacing: 1 })} />
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
@@ -334,8 +334,9 @@ function ExportImportPanel() {
       <div style={{ padding: 18, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <OBtn onClick={doExport}><Icon name="download" size={16} />Download full export</OBtn>
         <label style={{
-          fontSize: 15, fontWeight: 700, color: C.moss, cursor: importing ? "default" : "pointer", padding: "9px 18px",
+          fontSize: 14, fontWeight: 600, color: C.moss, cursor: importing ? "default" : "pointer", padding: "9px 18px",
           borderRadius: 9, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "inline-flex",
+          textTransform: "uppercase", letterSpacing: "0.07em",
           alignItems: "center", gap: 7, opacity: importing ? 0.6 : 1,
         }}>
           <Icon name="upload" size={16} />{importing ? "Importing…" : "Import JSON"}

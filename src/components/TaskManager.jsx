@@ -4,7 +4,7 @@ import {
   getUsers, getSOPs, fmtDateShort, canEdit,
   TASK_STATUSES, TASK_PRIORITIES, taskPriorityMeta, inp,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl } from './shared.jsx';
 
 const emptyForm = () => ({
   title: "", description: "", status: "todo", priority: "medium",
@@ -25,7 +25,7 @@ function TaskModal({ initial, users, sops, onSave, onDelete, onClose, isNew }) {
   const removeSub = (id) => set("subTasks", (form.subTasks || []).filter(s => s.id !== id));
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
       onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
@@ -113,7 +113,7 @@ function TaskModal({ initial, users, sops, onSave, onDelete, onClose, isNew }) {
   );
 }
 
-const labelStyle = { fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 };
+const labelStyle = lbl();
 
 function TaskCard({ task, users, sops, onOpen, onDragStart, onDragOver, isDragOver, onQuickToggle, onOpenSop }) {
   const pm = taskPriorityMeta[task.priority] || TASK_PRIORITIES[1];
@@ -305,8 +305,9 @@ function TaskManager({ user, onOpenSop }) {
 
 function priorityFilterStyle(active, color) {
   return {
-    padding: "7px 12px", borderRadius: 8, fontSize: 13, fontWeight: active ? 700 : 500, cursor: "pointer",
+    padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: active ? 600 : 500, cursor: "pointer",
     fontFamily: "inherit", border: `1.5px solid ${active ? color : C.bdr}`,
+    textTransform: "uppercase", letterSpacing: "0.06em",
     background: active ? color + "16" : C.sur, color: active ? color : C.mut,
   };
 }

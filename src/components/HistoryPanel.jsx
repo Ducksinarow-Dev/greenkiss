@@ -56,7 +56,7 @@ function HistoryPanel({ sopId, onClose, onRestored }) {
   const blockCount = preview?.snapshot?.blocks?.length ?? 0;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 550, padding: 20 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 550, padding: 20 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
         width: "100%", maxWidth: 640, maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden",

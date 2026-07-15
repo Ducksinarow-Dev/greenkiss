@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { C, getUsers, setCurrentUser, REMOTE_MODE, remoteLogin, remoteLoginOptions } from '../globals.js';
-import { Btn, Icon } from './shared.jsx';
+import { C, LOGIN_BG, LOGIN_BG_DEEP, getUsers, setCurrentUser, REMOTE_MODE, remoteLogin, remoteLoginOptions } from '../globals.js';
+import { Btn, Icon, lbl } from './shared.jsx';
+import gkLogo from '../assets/gk-logo.svg';
 
 function Login({ onLogin }) {
   const [users, setUsers] = useState(() => REMOTE_MODE ? [] : getUsers());
@@ -53,22 +54,20 @@ function Login({ onLogin }) {
   const selectUser = (u) => { if (REMOTE_MODE) setSelectedName(u.name); else setSelectedId(u.id); setError(""); };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div style={{
+      minHeight: "100vh", background: `linear-gradient(160deg, ${LOGIN_BG} 0%, ${LOGIN_BG_DEEP} 100%)`,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
       <div className="gk-fade-in" style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ textAlign: "center", marginBottom: 34 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 16, background: C.moss, margin: "0 auto 16px",
-            display: "flex", alignItems: "center", justifyContent: "center", boxShadow: C.shadowMd,
-          }}>
-            <Icon name="spa" size={30} style={{ color: "#fff" }} />
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: C.txt, letterSpacing: -0.3 }}>The Green Kiss</div>
-          <div style={{ fontSize: 14, color: C.mut, marginTop: 4 }}>SOPs &amp; task manager</div>
+          <img src={gkLogo} alt="The Green Kiss" style={{ width: 52, height: 52, margin: "0 auto 18px", display: "block", filter: "invert(1)", mixBlendMode: "screen" }} />
+          <div style={{ fontSize: 22, fontWeight: 500, color: "#fff", letterSpacing: "0.06em", textTransform: "uppercase" }}>The Green Kiss</div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.68)", marginTop: 8, letterSpacing: "0.04em" }}>SOPs &amp; task manager</div>
         </div>
 
-        <form onSubmit={submit} style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 16 }}>
+        <form onSubmit={submit} style={{ background: "#ffffff", border: "1.5px solid rgba(16,18,17,0.08)", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 50px rgba(0,0,0,0.22)" }}>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 8 }}>Who's this?</label>
+            <label style={lbl({ fontSize: 13, marginBottom: 9 })}>Who's this?</label>
             {loadingUsers ? (
               <div style={{ fontSize: 13, color: C.mut, padding: "8px 0" }}>Loading…</div>
             ) : (
@@ -81,12 +80,12 @@ function Login({ onLogin }) {
                       background: isSelected(u) ? C.mossSoft : C.sur, cursor: "pointer",
                       fontFamily: "inherit", textAlign: "left", transition: "all .15s",
                     }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 99, background: C.moss, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 99, background: C.moss, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, fontSize: 14, flexShrink: 0 }}>
                       {u.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>{u.name}</div>
-                      {u.role && <div style={{ fontSize: 12, color: C.mut, textTransform: "capitalize" }}>{u.role}</div>}
+                      <div style={{ fontSize: 15, fontWeight: 600, color: C.txt }}>{u.name}</div>
+                      {u.role && <div style={{ fontSize: 11, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em" }}>{u.role}</div>}
                     </div>
                   </button>
                 ))}
@@ -96,7 +95,7 @@ function Login({ onLogin }) {
           </div>
 
           <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 8 }}>PIN</label>
+            <label style={lbl({ fontSize: 13, marginBottom: 9 })}>PIN</label>
             <input
               type="password" inputMode="numeric" autoComplete="off" value={pin}
               onChange={e => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
@@ -111,7 +110,7 @@ function Login({ onLogin }) {
 
           {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600, textAlign: "center" }}>{error}</div>}
 
-          <Btn type="submit" disabled={busy} style={{ justifyContent: "center", padding: "12px 20px", fontSize: 16 }}>
+          <Btn type="submit" disabled={busy} style={{ justifyContent: "center", padding: "12px 20px", fontSize: 15 }}>
             {busy ? "Logging in…" : "Log In"}
           </Btn>
         </form>

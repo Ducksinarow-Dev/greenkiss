@@ -136,7 +136,8 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
           <button onClick={() => setShowArchived(v => !v)} style={{
             display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 9,
             border: `1.5px solid ${showArchived ? C.moss : C.bdr}`, background: showArchived ? C.mossSoft : C.sur,
-            color: showArchived ? C.moss : C.txt2, fontSize: 13, fontWeight: showArchived ? 700 : 500,
+            color: showArchived ? C.moss : C.txt2, fontSize: 12, fontWeight: showArchived ? 600 : 500,
+            textTransform: "uppercase", letterSpacing: "0.06em",
             cursor: "pointer", fontFamily: "inherit",
           }}>
             <Icon name={showArchived ? "visibility" : "visibility_off"} size={16} />
@@ -186,7 +187,8 @@ function pillBtnStyle(active, color) {
   return {
     display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 99,
     border: `1.5px solid ${active ? color : C.bdr}`, background: active ? color + "16" : C.sur,
-    color: active ? color : C.txt2, fontSize: 14, fontWeight: active ? 700 : 500,
+    color: active ? color : C.txt2, fontSize: 12, fontWeight: active ? 600 : 500,
+    textTransform: "uppercase", letterSpacing: "0.06em",
     cursor: "pointer", fontFamily: "inherit", transition: "all .15s",
   };
 }

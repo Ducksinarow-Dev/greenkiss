@@ -96,11 +96,11 @@ function ImageBlockEditor({ block, onChange }) {
         <div style={{ position: "relative", marginBottom: 10 }}>
           <img src={block.src} alt="" style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, border: `1.5px solid ${C.bdr}`, display: "block" }} />
           <button type="button" onClick={() => onChange({ ...block, src: "" })}
-            style={{ position: "absolute", top: 8, right: 8, background: "rgba(27,23,17,0.6)", color: "#fff", border: "none", borderRadius: 7, padding: "4px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
+            style={{ position: "absolute", top: 8, right: 8, background: "rgba(10,12,10,0.6)", color: "#fff", border: "none", borderRadius: 7, padding: "4px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
         </div>
       ) : (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-          <label style={{ fontSize: 13, fontWeight: 700, color: C.moss, cursor: busy ? "default" : "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.7 : 1 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: C.moss, cursor: busy ? "default" : "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.7 : 1, textTransform: "uppercase", letterSpacing: "0.07em" }}>
             {busy ? <Icon name="progress_activity" size={16} style={{ animation: "gkspin 1s linear infinite" }} /> : <Icon name="upload" size={16} />}
             {busy ? "Uploading…" : "Upload image"}
             <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={e => onFile(e.target.files?.[0])} />
@@ -318,7 +318,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
           {["draft", "published"].map(s => (
             <button key={s} onClick={() => setStatus(s)} style={{
               padding: "6px 16px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
-              fontSize: 13, fontWeight: 700, textTransform: "capitalize",
+              fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
               background: status === s ? (s === "published" ? C.moss : C.sur) : "transparent",
               color: status === s ? (s === "published" ? "#fff" : C.txt) : C.mut,
             }}>{s}</button>

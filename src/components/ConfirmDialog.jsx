@@ -8,7 +8,7 @@ function ConfirmDialog() {
   if (!state.open) return null;
   const answer = (v) => { setState({ open: false, msg: "" }); if (_gkRefs.confirmResolve) { _gkRefs.confirmResolve(v); _gkRefs.confirmResolve = null; } };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999 }} onClick={() => answer(false)}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999 }} onClick={() => answer(false)}>
       <div onClick={e => e.stopPropagation()} style={{ background: C.sur, borderRadius: 16, padding: "30px 32px", maxWidth: 400, width: "90%", boxShadow: C.shadowMd, textAlign: "center", border: `1.5px solid ${C.bdr}` }}>
         <div style={{ marginBottom: 14 }}><Icon name="warning" size={34} style={{ color: C.clay }} /></div>
         <div style={{ fontSize: 17, color: C.txt, fontWeight: 700, marginBottom: 8 }}>Are you sure?</div>

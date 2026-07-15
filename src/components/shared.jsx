@@ -4,21 +4,41 @@ import { C } from '../globals.js';
 /* Design intent (interface-design skill):
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
    procedure or updating a task between customers.
-   Feel: warm craft-first workroom — kraft paper, moss green, quiet borders.
-   Depth: borders-only, 1.5px, low-opacity — no drop shadows except modals.
-   Typography: Manrope (UI text), IBM Plex Mono (dates/short data). */
+   Feel: the real Green Kiss retail identity — a minimalist natural-beauty
+   counter. White marble, sage ceramic, black ink ingredient labels, one
+   petal of pink for accent. Thin, airy, uppercase-tracked type, the way
+   their own site treats nav and buttons — not a warm craft workroom.
+   Palette: C.moss (sage — primary/active), C.sur/C.bg (white surfaces),
+   C.txt (near-black ink), C.clay (pink — sparing highlight), C.red (rose —
+   destructive/urgent only).
+   Depth: borders-only, 1.5px, low-opacity — quiet, technical, matches a
+   staff tool rather than a shadow-heavy consumer app.
+   Typography: Jost, uppercase + letterspaced for buttons/nav/labels/
+   headers (the signature carried over from their retail site); IBM Plex
+   Mono stays for dates/short data.
+   Signature: Pill reads as an ingredient-label tag — thin outline, no
+   fill, uppercase letterspaced — rather than a solid filled badge. */
 
 function Icon({ name, size = 18, style }) {
   return <span className="material-symbols-outlined" style={{ fontSize: size, lineHeight: 1, ...style }}>{name}</span>;
 }
 
-/** Primary action button — solid moss green. */
+/** Shared uppercase-letterspaced label style for form fields. */
+function lbl(ex = {}) {
+  return {
+    fontSize: 12, fontWeight: 600, color: C.txt2, display: "block", marginBottom: 7,
+    textTransform: "uppercase", letterSpacing: "0.08em", ...ex,
+  };
+}
+
+/** Primary action button — solid sage green, uppercase letterspaced label. */
 function Btn({ children, onClick, style, disabled, type = "button", title }) {
   return (
     <button type={type} onClick={onClick} disabled={disabled} title={title}
       style={{
         background: disabled ? C.faint : C.moss, color: "#fff", border: "none",
-        borderRadius: 9, padding: "10px 20px", fontSize: 15, fontWeight: 700,
+        borderRadius: 9, padding: "10px 20px", fontSize: 14, fontWeight: 600,
+        textTransform: "uppercase", letterSpacing: "0.07em",
         cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
         display: "inline-flex", alignItems: "center", gap: 7,
         opacity: disabled ? 0.7 : 1, transition: "background .15s",
@@ -39,8 +59,9 @@ function OBtn({ children, onClick, style, active, disabled, title, type = "butto
       style={{
         background: active ? C.mossSoft : (hov ? C.s2 : C.sur), color: active ? C.moss : C.txt,
         border: `1.5px solid ${active ? C.moss : C.bdr}`, borderRadius: 9,
-        padding: "9px 18px", fontSize: 15, cursor: disabled ? "not-allowed" : "pointer",
-        fontFamily: "inherit", fontWeight: active ? 700 : 500,
+        padding: "9px 18px", fontSize: 14, cursor: disabled ? "not-allowed" : "pointer",
+        fontFamily: "inherit", fontWeight: active ? 600 : 500,
+        textTransform: "uppercase", letterSpacing: "0.07em",
         display: "inline-flex", alignItems: "center", gap: 7,
         opacity: disabled ? 0.5 : 1, transition: "all .15s",
         ...(style || {}),
@@ -66,12 +87,17 @@ function IconBtn({ icon, onClick, title, style, danger }) {
   );
 }
 
+/** Signature tag: reads like an ingredient-label chip on skincare
+ * packaging — thin outline, no fill, uppercase letterspaced — rather
+ * than a solid filled badge. Used for categories, status, priority,
+ * and role everywhere in the app. */
 function Pill({ children, color, style }) {
   color = color || C.moss;
   return (
     <span style={{
-      background: color + "18", color, borderRadius: 99, padding: "3px 11px",
-      fontSize: 13, fontWeight: 700, border: `1px solid ${color}38`,
+      background: "transparent", color, borderRadius: 99, padding: "3px 11px",
+      fontSize: 11, fontWeight: 600, border: `1px solid ${color}55`,
+      textTransform: "uppercase", letterSpacing: "0.06em",
       whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
       ...(style || {}),
     }}>{children}</span>
@@ -100,8 +126,8 @@ function SectionHeader({ title, sub, right }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14, marginBottom: 22 }}>
       <div>
-        <div style={{ fontSize: 26, fontWeight: 800, color: C.txt, letterSpacing: -0.4 }}>{title}</div>
-        {sub && <div style={{ fontSize: 14, color: C.mut, marginTop: 4 }}>{sub}</div>}
+        <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</div>
+        {sub && <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{sub}</div>}
       </div>
       {right && <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{right}</div>}
     </div>
@@ -135,4 +161,4 @@ function Avatar({ name, size = 26, color }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar };
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl };

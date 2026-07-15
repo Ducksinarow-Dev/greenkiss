@@ -79,68 +79,70 @@
  */
 
 /* ─── COLOR TOKENS ───────────────────────────────────────────────────
-   Domain: a botanical / apothecary workroom — kraft paper, pressed
-   leaves, moss, clay plant tags, greenhouse glass. The accent is a
-   refined moss green (desaturated, not neon); the neutral scale reads
-   warm (kraft/parchment) rather than clinical blue-gray, since this is
-   a plant-and-product craft business, not a SaaS dashboard.
+   Domain: The Green Kiss's real identity — a minimalist natural beauty
+   counter. Think: a sage-green ceramic dish on a white marble counter,
+   black ink ingredient labels, a single blush petal for accent. Clean,
+   airy, un-warm. White/black carry the structure; brand sage (#799385)
+   does the work moss used to do; pink/rose are reserved for the two
+   places a boutique skincare brand actually uses color — a small badge
+   (pink) and an urgent/destructive flag (rose) — never a wash of color.
    Elevation: base (bg) -> sur -> s2, each a whisper-quiet lightness
    step. Sidebar shares the canvas background (bordered, not boxed). */
 const C_LIGHT = {
-  bg: "#f6f4ee",      // parchment canvas
-  sur: "#fffdf9",     // card surface, barely lighter than bg
-  s2: "#efece2",      // raised-within-surface (dropdown, hover row)
-  inset: "#eeece0",   // input backgrounds (receive content, sit lower)
-  bdr: "rgba(63,52,38,0.14)",   // standard border, quiet
-  bdr2: "rgba(63,52,38,0.28)",  // emphasis border
-  bdrFocus: "#3f6b52",          // focus ring / max emphasis
+  bg: "#fafaf9",      // canvas — barely-there off-white, not stark
+  sur: "#ffffff",     // card surface — true white, raised off canvas
+  s2: "#f1f1ef",      // raised-within-surface (dropdown, hover row)
+  inset: "#f0f0ee",   // input backgrounds (receive content, sit lower)
+  bdr: "rgba(16,18,17,0.10)",   // standard border, quiet
+  bdr2: "rgba(16,18,17,0.22)",  // emphasis border
+  bdrFocus: "#799385",          // focus ring / max emphasis — brand sage
 
-  txt: "#2b271f",     // primary text (warm charcoal ink)
-  txt2: "#5a5346",    // secondary text
-  mut: "#847c6c",     // tertiary / metadata
-  faint: "#a89f8c",   // muted / placeholder / disabled
+  txt: "#151715",     // primary text (near-black ink)
+  txt2: "#494e4b",    // secondary text
+  mut: "#7a827d",     // tertiary / metadata
+  faint: "#a9afab",   // muted / placeholder / disabled
 
-  moss: "#3f6b52",       // brand accent — refined moss green
-  mossDeep: "#2c4d3a",   // pressed/hover state of accent
-  mossSoft: "rgba(63,107,82,0.12)",
-  clay: "#b56a4a",       // secondary/warm accent — terracotta (warnings, sparingly)
-  dew: "#e8efe6",        // pale mint highlight (selected rows, success tint)
+  moss: "#799385",       // brand accent — sage green
+  mossDeep: "#5f7669",   // pressed/hover state of accent
+  mossSoft: "rgba(121,147,133,0.14)",
+  clay: "#EB97A6",       // primary accent — soft pink (small badges/highlights only)
+  dew: "rgba(121,147,133,0.08)",   // pale sage highlight (selected rows)
 
-  red: "#b3412f",
-  orange: "#b5772f",
-  green: "#3f6b52",
-  blue: "#3d6478",
+  red: "#B63E59",     // secondary accent — deep rose (destructive/overdue/urgent)
+  orange: "#EB97A6",  // warning/highlight — mapped to the pink accent, used sparingly
+  green: "#799385",
+  blue: "#494e4b",    // neutral informational tone (kept out of the accent family)
 
-  shadowSm: "0 1px 2px rgba(43,39,31,0.06)",
-  shadowMd: "0 6px 20px rgba(43,39,31,0.10)",
+  shadowSm: "0 1px 2px rgba(16,18,17,0.05)",
+  shadowMd: "0 6px 20px rgba(16,18,17,0.09)",
 };
 const C_DARK = {
-  bg: "#1b1d18",
-  sur: "#222420",
-  s2: "#282a25",
-  inset: "#26281f",
-  bdr: "rgba(230,225,210,0.12)",
-  bdr2: "rgba(230,225,210,0.24)",
-  bdrFocus: "#6ea886",
+  bg: "#101210",
+  sur: "#171917",
+  s2: "#1e211e",
+  inset: "#1c1f1c",
+  bdr: "rgba(240,240,235,0.10)",
+  bdr2: "rgba(240,240,235,0.22)",
+  bdrFocus: "#8fab9d",
 
-  txt: "#ece8dd",
-  txt2: "#c3bda9",
-  mut: "#938c78",
-  faint: "#6d6857",
+  txt: "#f2f1ee",
+  txt2: "#c7cbc7",
+  mut: "#8f958f",
+  faint: "#666b66",
 
-  moss: "#6ea886",
-  mossDeep: "#8fc2a3",
-  mossSoft: "rgba(110,168,134,0.16)",
-  clay: "#d18f6c",
-  dew: "#25352a",
+  moss: "#8fab9d",
+  mossDeep: "#a8c3b7",
+  mossSoft: "rgba(143,171,157,0.18)",
+  clay: "#f0aebb",
+  dew: "rgba(143,171,157,0.10)",
 
-  red: "#d17b68",
-  orange: "#d19a63",
-  green: "#6ea886",
-  blue: "#7ba3b8",
+  red: "#d1728a",
+  orange: "#f0aebb",
+  green: "#8fab9d",
+  blue: "#c7cbc7",
 
-  shadowSm: "0 1px 2px rgba(0,0,0,0.25)",
-  shadowMd: "0 10px 30px rgba(0,0,0,0.4)",
+  shadowSm: "0 1px 2px rgba(0,0,0,0.28)",
+  shadowMd: "0 10px 30px rgba(0,0,0,0.42)",
 };
 const C = Object.assign({}, C_LIGHT);
 const setTheme = (theme) => {
@@ -155,8 +157,14 @@ const setTheme = (theme) => {
 const getTheme = () => { try { return localStorage.getItem("gk_theme") || "light"; } catch { return "light"; } };
 setTheme(getTheme());
 
-/* ─── CATEGORY PALETTE (choices offered when creating a category) ──── */
-const CATEGORY_COLORS = ["#3f6b52", "#b56a4a", "#5a7a9a", "#8a7a4a", "#7a5a8a", "#4a8a7a", "#a34f5c"];
+/* ─── LOGIN SCREEN BRAND (fixed — not theme-swapped; this is a
+   deliberate brand moment, always deep sage bg + white card) ───────── */
+const LOGIN_BG = "#3f4d46";       // deepened #799385
+const LOGIN_BG_DEEP = "#2e3934";  // gradient end, a shade deeper still
+
+/* ─── CATEGORY / CAMPAIGN PALETTE (brand-safe swatches offered when
+   creating a category or content campaign) ──────────────────────────── */
+const CATEGORY_COLORS = ["#799385", "#4f6358", "#a8bdb2", "#B63E59", "#EB97A6", "#2a2a28", "#8f948f"];
 
 /* ─── REMOTE MODE DETECTION ──────────────────────────────────────────
    Remote mode = built + served from the same origin as api.php. In dev
@@ -344,7 +352,7 @@ function remoteLogout() {
 const inp = (ex = {}) => ({
   background: C.inset, border: `1.5px solid ${C.bdr}`, color: C.txt,
   borderRadius: 8, padding: "10px 13px", fontSize: 15, outline: "none",
-  fontFamily: "'Manrope',system-ui,sans-serif", width: "100%",
+  fontFamily: "'Jost',system-ui,sans-serif", width: "100%",
   transition: "border-color .15s", ...ex,
 });
 
@@ -370,9 +378,9 @@ function seedIfEmpty() {
   let cats = categories;
   if (!cats) {
     cats = [
-      { id: uid(), name: "Opening & Closing", color: "#3f6b52", createdAt: nowISO() },
-      { id: uid(), name: "Product Handling", color: "#b56a4a", createdAt: nowISO() },
-      { id: uid(), name: "Customer Service", color: "#5a7a9a", createdAt: nowISO() },
+      { id: uid(), name: "Opening & Closing", color: "#799385", createdAt: nowISO() },
+      { id: uid(), name: "Product Handling", color: "#B63E59", createdAt: nowISO() },
+      { id: uid(), name: "Customer Service", color: "#4f6358", createdAt: nowISO() },
     ];
     db.setSync("categories", cats);
   }
@@ -700,14 +708,14 @@ const deleteTask = (id) => saveTasks(getTasks().filter(t => t.id !== id));
 
 const TASK_STATUSES = [
   { key: "todo", label: "To Do", col: C.faint },
-  { key: "in-progress", label: "In Progress", col: "#5a7a9a" },
+  { key: "in-progress", label: "In Progress", col: C.txt2 },
   { key: "done", label: "Done", col: C.moss },
 ];
 const taskStatusMeta = Object.fromEntries(TASK_STATUSES.map(s => [s.key, s]));
 
 const TASK_PRIORITIES = [
   { key: "low", label: "Low", col: C.faint },
-  { key: "medium", label: "Medium", col: "#5a7a9a" },
+  { key: "medium", label: "Medium", col: C.txt2 },
   { key: "high", label: "High", col: C.clay },
   { key: "urgent", label: "Urgent", col: C.red },
 ];
@@ -820,7 +828,7 @@ async function importAllData(parsed) {
 }
 
 export {
-  C, setTheme, getTheme, CATEGORY_COLORS,
+  C, setTheme, getTheme, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
   REMOTE_MODE, isRemoteMode, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall,
   db, uid, nowISO, fmtDate, fmtDateShort,
   getCurrentUser, setCurrentUser, clearCurrentUser,

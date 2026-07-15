@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { C, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
-import { Icon, Avatar, Btn, OBtn, IconBtn } from './shared.jsx';
+import { C, getTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
+import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
+import gkLogo from '../assets/gk-logo.svg';
 
 const NAV_ITEMS = [
   { key: "library", label: "SOP Library", icon: "menu_book" },
@@ -44,7 +45,7 @@ function ChangePinModal({ onClose }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 20 }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 20 }} onClick={onClose}>
       <form onSubmit={submit} onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
         width: "100%", maxWidth: 360, padding: 26, display: "flex", flexDirection: "column", gap: 14,
@@ -54,17 +55,17 @@ function ChangePinModal({ onClose }) {
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
         <div>
-          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>Current PIN</label>
+          <label style={lbl()}>Current PIN</label>
           <input type="password" inputMode="numeric" autoComplete="off" value={current}
             onChange={e => setCurrent(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
         <div>
-          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>New PIN</label>
+          <label style={lbl()}>New PIN</label>
           <input type="password" inputMode="numeric" autoComplete="off" value={next}
             onChange={e => setNext(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
         <div>
-          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>Confirm new PIN</label>
+          <label style={lbl()}>Confirm new PIN</label>
           <input type="password" inputMode="numeric" autoComplete="off" value={confirm}
             onChange={e => setConfirm(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
@@ -88,17 +89,17 @@ function Sidebar({ section, setSection, user, onLogout }) {
       width: 232, flexShrink: 0, background: C.bg, borderRight: `1.5px solid ${C.bdr}`,
       display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0,
     }}>
-      {/* Wordmark */}
-      <div style={{ padding: "24px 20px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10, background: C.moss, flexShrink: 0,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <Icon name="spa" size={20} style={{ color: "#fff" }} />
-        </div>
+      {/* Wordmark — real GK mark, recolored pure black via CSS filter (it
+          can't be recolored by fill, the asset is a flattened raster). */}
+      <div style={{ padding: "26px 20px 22px", display: "flex", alignItems: "center", gap: 11 }}>
+        <img src={gkLogo} alt="" aria-hidden="true" style={
+          getTheme() === "dark"
+            ? { width: 32, height: 32, flexShrink: 0, filter: "invert(1)", mixBlendMode: "screen" }
+            : { width: 32, height: 32, flexShrink: 0, mixBlendMode: "multiply" }
+        } />
         <div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: C.txt, letterSpacing: -0.2, lineHeight: 1.15 }}>The Green Kiss</div>
-          <div style={{ fontSize: 11, color: C.mut, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>Ops</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: C.txt, letterSpacing: "0.04em", lineHeight: 1.2, textTransform: "uppercase" }}>The Green Kiss</div>
+          <div style={{ fontSize: 11, color: C.mut, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 2 }}>Ops</div>
         </div>
       </div>
 
@@ -112,7 +113,8 @@ function Sidebar({ section, setSection, user, onLogout }) {
                 display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9,
                 border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
                 background: active ? C.mossSoft : "transparent",
-                color: active ? C.moss : C.txt2, fontWeight: active ? 700 : 500, fontSize: 15,
+                color: active ? C.moss : C.txt2, fontWeight: active ? 600 : 500, fontSize: 13,
+                textTransform: "uppercase", letterSpacing: "0.08em",
                 transition: "all .15s",
               }}
               onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.s2; }}
