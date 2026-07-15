@@ -3,3 +3,9 @@ dist/
 .DS_Store
 *.log
 .vite/
+
+# Backend — server-side secrets and runtime data, never committed.
+config.php
+uploads/
+backups/
+VERSION

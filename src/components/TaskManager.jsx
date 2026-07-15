@@ -125,23 +125,30 @@ function TaskCard({ task, users, sops, onOpen, onDragStart, onDragOver, isDragOv
   const isDone = task.status === "done";
   return (
     <div draggable onDragStart={e => onDragStart(e, task.id)} onDragOver={e => onDragOver(e, task.id)} onClick={onOpen}
+      role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
       style={{
         background: C.sur, border: `1.5px solid ${isDragOver ? C.moss : C.bdr}`, borderRadius: 11,
         padding: "12px 14px", cursor: "pointer", boxShadow: isDragOver ? `0 0 0 2px ${C.mossSoft}` : C.shadowSm,
         transition: "border-color .1s",
       }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-        <div onClick={e => { e.stopPropagation(); onQuickToggle(); }} style={{
-          width: 19, height: 19, borderRadius: 6, flexShrink: 0, marginTop: 1, cursor: "pointer",
-          border: `1.5px solid ${isDone ? C.moss : C.bdr2}`, background: isDone ? C.moss : C.sur,
-          display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
-        }}>
+        <div onClick={e => { e.stopPropagation(); onQuickToggle(); }}
+          role="checkbox" aria-checked={isDone} tabIndex={0}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onQuickToggle(); } }}
+          style={{
+            width: 19, height: 19, borderRadius: 6, flexShrink: 0, marginTop: 1, cursor: "pointer",
+            border: `1.5px solid ${isDone ? C.moss : C.bdr2}`, background: isDone ? C.moss : C.sur,
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
+          }}>
           {isDone && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.6 : 1 }}>{task.title}</div>
           {sop && (
             <div onClick={e => { e.stopPropagation(); onOpenSop && onOpenSop(sop.id); }}
+              role="link" tabIndex={0}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenSop && onOpenSop(sop.id); } }}
               style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: C.moss, marginTop: 3, cursor: "pointer", width: "fit-content" }}
               title="Open related SOP">
               <Icon name="menu_book" size={13} />{sop.title || "Untitled SOP"}
@@ -152,7 +159,16 @@ function TaskCard({ task, users, sops, onOpen, onDragStart, onDragOver, isDragOv
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
         {assignee && <div style={{ display: "flex", alignItems: "center", gap: 5 }}><Avatar name={assignee.name} size={18} /><span style={{ fontSize: 12, color: C.mut }}>{assignee.name}</span></div>}
-        {task.dueDate && <span style={{ fontSize: 12, fontWeight: 600, color: overdue ? C.red : C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>{fmtDateShort(task.dueDate)}</span>}
+        {task.dueDate && (
+          overdue ? (
+            <span style={{
+              fontSize: 11, fontWeight: 700, color: C.red, background: C.red + "18", border: `1px solid ${C.red}38`,
+              borderRadius: 99, padding: "2px 9px", fontFamily: "'IBM Plex Mono',monospace", display: "flex", alignItems: "center", gap: 4,
+            }}><Icon name="event_busy" size={12} />{fmtDateShort(task.dueDate)}</span>
+          ) : (
+            <span style={{ fontSize: 12, fontWeight: 600, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>{fmtDateShort(task.dueDate)}</span>
+          )
+        )}
         {subTasks.length > 0 && (
           <span style={{ fontSize: 11, fontWeight: 700, color: stDone === subTasks.length ? C.moss : C.mut, background: C.s2, borderRadius: 99, padding: "1px 7px", display: "flex", alignItems: "center", gap: 3 }}>
             <Icon name="check_box" size={12} />{stDone}/{subTasks.length}

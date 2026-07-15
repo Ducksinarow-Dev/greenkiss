@@ -1,20 +1,44 @@
-import React, { useState } from 'react';
-import { C, getCurrentUser, isAdmin } from './globals.js';
+import React, { useState, useEffect } from 'react';
+import { C, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
-import { ConfirmDialog, SavedToast } from './components/ConfirmDialog.jsx';
+import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
+
+function BootScreen() {
+  return (
+    <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
+      <div style={{ width: 34, height: 34, border: `3px solid ${C.bdr}`, borderTopColor: C.moss, borderRadius: "50%", animation: "gkspin .7s linear infinite" }} />
+      <div style={{ fontSize: 13, color: C.mut }}>Loading The Green Kiss…</div>
+    </div>
+  );
+}
 
 function App() {
   const [user, setUser] = useState(() => getCurrentUser());
+  const [booting, setBooting] = useState(() => REMOTE_MODE && !!getCurrentUser() && !isRemoteWarm());
   const [section, setSection] = useState("library");
   const [sopFocus, setSopFocus] = useState(null); // {id, mode}
 
+  // Page reload with an existing remote session: the token/user survive in
+  // sessionStorage but the in-memory kv cache doesn't, so warm it before
+  // rendering anything that reads db.getSync().
+  useEffect(() => {
+    if (!booting) return;
+    let alive = true;
+    remoteBootstrap().catch(() => {
+      clearCurrentUser();
+      if (alive) setUser(null);
+    }).finally(() => { if (alive) setBooting(false); });
+    return () => { alive = false; };
+  }, [booting]);
+
   if (!user) {
-    return <Login onLogin={() => setUser(getCurrentUser())} />;
+    return <Login onLogin={() => { setUser(getCurrentUser()); setBooting(false); }} />;
   }
+  if (booting) return <BootScreen />;
 
   const goToSop = (id) => { setSopFocus({ id, mode: "view" }); setSection("library"); };
 
@@ -30,6 +54,7 @@ function App() {
       </div>
       <ConfirmDialog />
       <SavedToast />
+      <OfflineIndicator />
     </div>
   );
 }

@@ -81,11 +81,13 @@ function Pill({ children, color, style }) {
 function Chk({ checked, onChange, label, size = 18 }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", userSelect: "none" }}>
-      <div onClick={onChange} style={{
-        width: size, height: size, borderRadius: 5, flexShrink: 0,
-        border: `1.5px solid ${checked ? C.moss : C.bdr2}`, background: checked ? C.moss : C.sur,
-        display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
-      }}>
+      <div onClick={onChange} role="checkbox" aria-checked={checked} tabIndex={0}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onChange && onChange(); } }}
+        style={{
+          width: size, height: size, borderRadius: 5, flexShrink: 0,
+          border: `1.5px solid ${checked ? C.moss : C.bdr2}`, background: checked ? C.moss : C.sur,
+          display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
+        }}>
         {checked && <svg width={size - 6} height={size - 6} viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
       </div>
       {label && <span style={{ fontSize: 15, color: checked ? C.txt : C.txt2 }}>{label}</span>}

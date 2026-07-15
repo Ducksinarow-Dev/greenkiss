@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  C, getUsers, addUser, updateUser, deleteUser, getCategories, addCategory, updateCategory,
-  deleteCategory, confirmDelete, triggerSaved, getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
+  C, getCategories, addCategory, updateCategory, deleteCategory, confirmDelete, triggerSaved,
+  getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
+  fetchUsersFull, addUser, updateUser, deleteUser,
+  REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
+  exportAllData, importAllData, fmtDate,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar } from './shared.jsx';
 
@@ -9,19 +12,19 @@ import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar } from './shared.
 function UserRow({ u, isSelf, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(u.name);
-  const [pin, setPin] = useState(u.pin);
-  const [role, setRole] = useState(u.role);
+  const [pin, setPin] = useState("");
+  const [role, setRole] = useState(u.role || "viewer");
 
   if (editing) {
     return (
       <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", background: C.s2, borderRadius: 10, flexWrap: "wrap" }}>
         <input value={name} onChange={e => setName(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px" })} />
-        <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="PIN" style={inp({ fontSize: 14, padding: "7px 10px", width: 90, flex: "0 0 auto", fontFamily: "'IBM Plex Mono',monospace" })} />
+        <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="New PIN (optional)" style={inp({ fontSize: 14, padding: "7px 10px", width: 150, flex: "0 0 auto", fontFamily: "'IBM Plex Mono',monospace" })} />
         <select value={role} onChange={e => setRole(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", width: "auto", flex: "0 0 auto" })}>
           {Object.keys(ROLE_LABELS).map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
         </select>
-        <IconBtn icon="check" title="Save" onClick={() => { onUpdate({ name: name.trim() || u.name, pin: pin || u.pin, role }); setEditing(false); }} style={{ color: C.moss }} />
-        <IconBtn icon="close" title="Cancel" onClick={() => { setName(u.name); setPin(u.pin); setRole(u.role); setEditing(false); }} />
+        <IconBtn icon="check" title="Save" onClick={() => { onUpdate({ name: name.trim() || u.name, pin, role }); setEditing(false); }} style={{ color: C.moss }} />
+        <IconBtn icon="close" title="Cancel" onClick={() => { setName(u.name); setPin(""); setRole(u.role || "viewer"); setEditing(false); }} />
       </div>
     );
   }
@@ -32,7 +35,9 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
       <Avatar name={u.name} size={28} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>{u.name}{isSelf && <span style={{ fontSize: 12, color: C.mut, fontWeight: 500 }}> (you)</span>}</div>
-        <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>PIN {"•".repeat(u.pin?.length || 4)}</div>
+        <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
+          {u.pin ? "PIN " + "•".repeat(String(u.pin).length || 4) : "PIN protected"}
+        </div>
       </div>
       <Pill color={u.role === "admin" ? C.moss : u.role === "editor" ? "#5a7a9a" : C.faint}>{ROLE_LABELS[u.role] || u.role}</Pill>
       <IconBtn icon="edit" title="Edit" onClick={() => setEditing(true)} />
@@ -41,25 +46,42 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
   );
 }
 
-function UsersPanel({ bump }) {
-  const users = getUsers();
+function UsersPanel() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const me = getCurrentUser();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [role, setRole] = useState("editor");
 
-  const create = () => {
+  const load = () => {
+    setLoading(true); setError("");
+    fetchUsersFull().then(setUsers).catch(e => setError(e.message || "Could not load users.")).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
     if (!name.trim() || !pin.trim()) return;
-    addUser({ name: name.trim(), pin: pin.trim(), role });
-    triggerSaved();
-    setName(""); setPin(""); setRole("editor"); setAdding(false); bump();
+    try {
+      await addUser({ name: name.trim(), pin: pin.trim(), role });
+      triggerSaved();
+      setName(""); setPin(""); setRole("editor"); setAdding(false);
+      load();
+    } catch (e) { setError(e.message || "Could not create user."); }
   };
 
   const removeUser = async (u) => {
     const ok = await confirmDelete(`Remove ${u.name}? They won't be able to log in anymore.`);
     if (!ok) return;
-    deleteUser(u.id); triggerSaved(); bump();
+    try { await deleteUser(u.id); triggerSaved(); load(); }
+    catch (e) { setError(e.message || "Could not remove user."); }
+  };
+
+  const doUpdate = async (u, changes) => {
+    try { await updateUser(u.id, changes); triggerSaved(); load(); }
+    catch (e) { setError(e.message || "Could not update user."); }
   };
 
   return (
@@ -78,11 +100,13 @@ function UsersPanel({ bump }) {
           <Btn onClick={create} disabled={!name.trim() || !pin.trim()} style={{ padding: "8px 16px" }}>Create</Btn>
         </div>
       )}
+      {error && <div style={{ padding: "10px 18px", fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
       <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-        {users.map(u => <UserRow key={u.id} u={u} isSelf={me?.id === u.id}
-          onUpdate={c => { updateUser(u.id, c); triggerSaved(); bump(); }}
+        {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
+        {!loading && users.map(u => <UserRow key={u.id} u={u} isSelf={me?.id === u.id}
+          onUpdate={c => doUpdate(u, c)}
           onDelete={() => removeUser(u)} />)}
-        {users.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No users.</div>}
+        {!loading && users.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No users.</div>}
       </div>
     </div>
   );
@@ -165,15 +189,177 @@ function CategoriesPanel({ bump }) {
   );
 }
 
+/* ─── BACKUPS (remote mode only — dev mode has no server to back up) ─ */
+function RestoreConfirmModal({ file, onCancel, onConfirm }) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ready = typed.trim().toUpperCase() === "RESTORE";
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, padding: 20 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+        background: C.sur, borderRadius: 16, padding: "30px 32px", maxWidth: 420, width: "90%",
+        boxShadow: C.shadowMd, border: `1.5px solid ${C.red}55`,
+      }}>
+        <div style={{ marginBottom: 12 }}><Icon name="dangerous" size={34} style={{ color: C.red }} /></div>
+        <div style={{ fontSize: 18, color: C.txt, fontWeight: 800, marginBottom: 8 }}>Restore this backup?</div>
+        <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.6, marginBottom: 16 }}>
+          This replaces <strong>everything</strong> currently in the database — SOPs, categories, tasks, users, and version history — with the contents of <code>{file}</code>. A safety snapshot of the current state is taken first, but this is otherwise irreversible from here. Everyone will be logged out.
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.txt2, marginBottom: 8 }}>Type RESTORE to confirm:</div>
+        <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="RESTORE"
+          style={inp({ marginBottom: 20, textAlign: "center", fontWeight: 700, letterSpacing: 1 })} />
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <OBtn onClick={onCancel}>Cancel</OBtn>
+          <Btn disabled={!ready || busy} onClick={async () => { setBusy(true); await onConfirm(); setBusy(false); }}
+            style={{ background: C.red }}>
+            {busy ? "Restoring…" : "Restore & log everyone out"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BackupsPanel() {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const [restoreTarget, setRestoreTarget] = useState(null);
+
+  const load = () => {
+    setLoading(true); setError("");
+    backupList().then(setBackups).catch(e => setError(e.message || "Could not load backups.")).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const runNow = async () => {
+    setRunning(true); setError("");
+    try { await backupRun(); triggerSaved(); load(); }
+    catch (e) { setError(e.message || "Backup failed."); }
+    finally { setRunning(false); }
+  };
+
+  const doRestore = async () => {
+    try {
+      await backupRestore(restoreTarget);
+      setRestoreTarget(null);
+      // The server clears all tokens on restore — bounce to login cleanly.
+      window.location.reload();
+    } catch (e) {
+      setError(e.message || "Restore failed.");
+    }
+  };
+
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Backups</div>
+        <div style={{ fontSize: 12, color: C.faint, marginRight: 12 }}>Auto-backs up daily on write; kept 60 deep</div>
+        <Btn onClick={runNow} disabled={running}><Icon name="backup" size={16} />{running ? "Backing up…" : "Back up now"}</Btn>
+      </div>
+      {error && <div style={{ padding: "10px 18px", fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+        {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
+        {!loading && backups.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No backups yet.</div>}
+        {!loading && backups.map(b => (
+          <div key={b.file} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10 }}
+            onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <Icon name="folder_zip" size={18} style={{ color: C.faint }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{fmtDate(b.createdAt)}</div>
+              <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>{b.file} · {b.sizeMB} MB</div>
+            </div>
+            <a href={backupDownloadUrl(b.file)} target="_blank" rel="noreferrer" title="Download" style={{ display: "flex" }}>
+              <IconBtn icon="download" title="Download" />
+            </a>
+            <IconBtn icon="settings_backup_restore" danger title="Restore this backup" onClick={() => setRestoreTarget(b.file)} />
+          </div>
+        ))}
+      </div>
+      {restoreTarget && (
+        <RestoreConfirmModal file={restoreTarget} onCancel={() => setRestoreTarget(null)} onConfirm={doRestore} />
+      )}
+    </div>
+  );
+}
+
+/* ─── EXPORT / IMPORT (works in both modes) ──────────────────────── */
+function ExportImportPanel() {
+  const fileRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
+
+  const doExport = () => {
+    const data = exportAllData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `greenkiss-export-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const onFile = async (file) => {
+    if (!file) return;
+    setError("");
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      setError("That doesn't look like a valid export file.");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    const ok = await confirmDelete("Import this file? This replaces ALL current SOPs, categories, tasks, and read receipts. This can't be undone.");
+    if (!ok) { if (fileRef.current) fileRef.current.value = ""; return; }
+    setImporting(true);
+    try {
+      await importAllData(parsed);
+      triggerSaved();
+      window.location.reload();
+    } catch (e) {
+      setError(e.message || "Could not import this file.");
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Export / Import</div>
+      </div>
+      <div style={{ padding: 18, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <OBtn onClick={doExport}><Icon name="download" size={16} />Download full export</OBtn>
+        <label style={{
+          fontSize: 15, fontWeight: 700, color: C.moss, cursor: importing ? "default" : "pointer", padding: "9px 18px",
+          borderRadius: 9, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "inline-flex",
+          alignItems: "center", gap: 7, opacity: importing ? 0.6 : 1,
+        }}>
+          <Icon name="upload" size={16} />{importing ? "Importing…" : "Import JSON"}
+          <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} disabled={importing}
+            onChange={e => onFile(e.target.files?.[0])} />
+        </label>
+        <div style={{ fontSize: 13, color: C.faint }}>Belt-and-suspenders manual backup — works offline too.</div>
+      </div>
+      {error && <div style={{ padding: "0 18px 16px", fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+    </div>
+  );
+}
+
 function AdminPanel() {
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
   return (
     <div className="gk-fade-in">
-      <SectionHeader title="Admin Panel" sub="Manage users and SOP categories" />
+      <SectionHeader title="Admin Panel" sub="Manage users, categories, and backups" />
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        <UsersPanel bump={bump} />
+        <UsersPanel />
         <CategoriesPanel bump={bump} />
+        {REMOTE_MODE && <BackupsPanel />}
+        <ExportImportPanel />
       </div>
     </div>
   );

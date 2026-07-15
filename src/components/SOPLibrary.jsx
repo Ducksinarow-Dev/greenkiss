@@ -6,6 +6,12 @@ import { Btn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import SOPViewer from './SOPViewer.jsx';
 import SOPEditor from './SOPEditor.jsx';
 
+const SORTS = [
+  { key: "updated", label: "Recently updated" },
+  { key: "title", label: "Title A-Z" },
+  { key: "category", label: "Category" },
+];
+
 /* Signature element: SOP cards read like filed index / plant-tag cards —
    a colored left-edge tab in the category's color (like a library card
    drawer divider), rather than a generic icon-top-title-bottom tile. */
@@ -14,16 +20,21 @@ function SOPCard({ sop, category, onOpen }) {
   const color = category?.color || C.faint;
   return (
     <div onClick={onOpen} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
       style={{
         display: "flex", cursor: "pointer", background: C.sur, borderRadius: 12,
         border: `1.5px solid ${hov ? color + "70" : C.bdr}`, overflow: "hidden",
         boxShadow: hov ? C.shadowSm : "none", transition: "border-color .15s, box-shadow .15s",
+        opacity: sop.status === "archived" ? 0.62 : 1,
       }}>
       <div style={{ width: 6, flexShrink: 0, background: color }} />
       <div style={{ padding: "16px 18px", flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
           {category && <Pill color={color}>{category.name}</Pill>}
-          <Pill color={sop.status === "published" ? C.moss : C.faint}>{sop.status === "published" ? "Published" : "Draft"}</Pill>
+          <Pill color={sop.status === "published" ? C.moss : C.faint}>
+            {sop.status === "published" ? "Published" : sop.status === "archived" ? "Archived" : "Draft"}
+          </Pill>
         </div>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {sop.title || "Untitled SOP"}
@@ -44,9 +55,11 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
   const [openId, setOpenId] = useState(null);
   const [mode, setMode] = useState("view"); // "view" | "edit"
   const [creating, setCreating] = useState(null);
+  const [sort, setSort] = useState("updated");
+  const [showArchived, setShowArchived] = useState(false);
 
   const categories = getCategories();
-  const sops = getSOPs();
+  const allSops = getSOPs();
   const bump = () => setRefresh(r => r + 1);
 
   // Deep-link: a Task Manager "Related SOP" link can request a specific SOP open.
@@ -54,13 +67,22 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
     if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); onClearFocus && onClearFocus(); }
   }, [focusId, focusMode, onClearFocus]);
 
+  const sops = showArchived ? allSops : allSops.filter(s => s.status !== "archived");
+  const archivedCount = allSops.length - allSops.filter(s => s.status !== "archived").length;
+
   const counts = {};
   sops.forEach(s => { counts[s.categoryId || "none"] = (counts[s.categoryId || "none"] || 0) + 1; });
+
+  const catName = (id) => categories.find(c => c.id === id)?.name || "￿"; // uncategorized sorts last
 
   const filtered = sops
     .filter(s => activeCat === "all" || (activeCat === "none" ? !s.categoryId : s.categoryId === activeCat))
     .filter(s => sopMatchesSearch(s, query))
-    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    .sort((a, b) => {
+      if (sort === "title") return (a.title || "").localeCompare(b.title || "");
+      if (sort === "category") return catName(a.categoryId).localeCompare(catName(b.categoryId)) || (a.title || "").localeCompare(b.title || "");
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
 
   const openSop = openId ? getSOP(openId) : null;
 
@@ -79,7 +101,7 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
   }
 
   if (openSop && mode === "view") {
-    return <SOPViewer sop={openSop} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} />;
+    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} />;
   }
 
   return (
@@ -103,6 +125,24 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
               padding: "10px 14px 10px 38px", fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit",
             }} />
         </div>
+        <select value={sort} onChange={e => setSort(e.target.value)} title="Sort"
+          style={{
+            background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9, padding: "10px 14px",
+            fontSize: 14, color: C.txt, outline: "none", fontFamily: "inherit", cursor: "pointer",
+          }}>
+          {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        {archivedCount > 0 && (
+          <button onClick={() => setShowArchived(v => !v)} style={{
+            display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 9,
+            border: `1.5px solid ${showArchived ? C.moss : C.bdr}`, background: showArchived ? C.mossSoft : C.sur,
+            color: showArchived ? C.moss : C.txt2, fontSize: 13, fontWeight: showArchived ? 700 : 500,
+            cursor: "pointer", fontFamily: "inherit",
+          }}>
+            <Icon name={showArchived ? "visibility" : "visibility_off"} size={16} />
+            {showArchived ? "Showing archived" : `Show archived (${archivedCount})`}
+          </button>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>

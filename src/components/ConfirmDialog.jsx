@@ -42,4 +42,22 @@ function SavedToast() {
   );
 }
 
-export { ConfirmDialog, SavedToast };
+/** Small persistent red banner shown when a write fails after one retry
+ * (remote mode only). Wired via _gkRefs.setOffline, same pattern as the
+ * confirm dialog / saved toast above. */
+function OfflineIndicator() {
+  const [offline, setOffline] = useState(false);
+  useEffect(() => { _gkRefs.setOffline = setOffline; return () => { _gkRefs.setOffline = null; }; }, []);
+  if (!offline) return null;
+  return (
+    <div style={{
+      position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)",
+      background: C.red, color: "#fff", borderRadius: 10, padding: "9px 18px", fontSize: 13, fontWeight: 700,
+      boxShadow: C.shadowMd, display: "flex", alignItems: "center", gap: 7, zIndex: 99998,
+    }}>
+      <Icon name="cloud_off" size={16} /> Offline — changes not saved
+    </div>
+  );
+}
+
+export { ConfirmDialog, SavedToast, OfflineIndicator };

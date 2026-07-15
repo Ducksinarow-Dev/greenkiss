@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  C, uid, getCategories, updateSOP, addSOP, deleteSOP, confirmDelete, triggerSaved,
-  getCurrentUser, fileToCompressedDataURL, inp,
+  C, uid, getCategories, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
+  getCurrentUser, processAndStoreImage, inp,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon } from './shared.jsx';
+import HistoryPanel from './HistoryPanel.jsx';
 
 const BLOCK_DEFS = [
   { type: "heading", label: "Heading", icon: "title" },
   { type: "text", label: "Text", icon: "notes" },
+  { type: "checklist", label: "Checklist", icon: "checklist" },
   { type: "links", label: "Link Group", icon: "link" },
   { type: "image", label: "Image", icon: "image" },
 ];
@@ -15,6 +17,7 @@ const BLOCK_DEFS = [
 function newBlock(type) {
   if (type === "heading") return { id: uid(), type: "heading", text: "" };
   if (type === "text") return { id: uid(), type: "text", text: "" };
+  if (type === "checklist") return { id: uid(), type: "checklist", title: "Checklist", items: [] };
   if (type === "links") return { id: uid(), type: "links", title: "Links", links: [] };
   if (type === "image") return { id: uid(), type: "image", src: "", caption: "" };
   return null;
@@ -81,8 +84,8 @@ function ImageBlockEditor({ block, onChange }) {
     if (!file) return;
     setBusy(true); setErr("");
     try {
-      const dataUrl = await fileToCompressedDataURL(file);
-      onChange({ ...block, src: dataUrl });
+      const src = await processAndStoreImage(file);
+      onChange({ ...block, src });
     } catch (e) {
       setErr(e.message || "Upload failed.");
     } finally { setBusy(false); }
@@ -97,8 +100,9 @@ function ImageBlockEditor({ block, onChange }) {
         </div>
       ) : (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-          <label style={{ fontSize: 13, fontWeight: 700, color: C.moss, cursor: "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon name="upload" size={16} />{busy ? "Processing…" : "Upload image"}
+          <label style={{ fontSize: 13, fontWeight: 700, color: C.moss, cursor: busy ? "default" : "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.7 : 1 }}>
+            {busy ? <Icon name="progress_activity" size={16} style={{ animation: "gkspin 1s linear infinite" }} /> : <Icon name="upload" size={16} />}
+            {busy ? "Uploading…" : "Upload image"}
             <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={e => onFile(e.target.files?.[0])} />
           </label>
           <span style={{ fontSize: 13, color: C.mut }}>or</span>
@@ -108,10 +112,47 @@ function ImageBlockEditor({ block, onChange }) {
             onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) onChange({ ...block, src: e.target.value.trim() }); }} />
         </div>
       )}
-      {err && <div style={{ fontSize: 12, color: C.red, marginBottom: 8 }}>{err}</div>}
-      <div style={{ fontSize: 11, color: C.faint, marginBottom: 8 }}>Uploaded images are downscaled to 1400px on the long edge before saving, to keep local storage lean.</div>
+      {err && <div style={{ fontSize: 12, color: C.red, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><Icon name="error" size={14} />{err}</div>}
+      <div style={{ fontSize: 11, color: C.faint, marginBottom: 8 }}>Images are downscaled to 1400px on the long edge before saving.</div>
       <input value={block.caption} onChange={e => onChange({ ...block, caption: e.target.value })}
         placeholder="Caption (optional)" style={{ ...inp({ fontSize: 13, padding: "8px 10px" }) }} />
+    </div>
+  );
+}
+
+function ChecklistBlockEditor({ block, onChange }) {
+  const items = block.items || [];
+  const setItems = (i) => onChange({ ...block, items: i });
+  const [draft, setDraft] = useState("");
+  const addItem = () => {
+    if (!draft.trim()) return;
+    setItems([...items, { id: uid(), text: draft.trim() }]);
+    setDraft("");
+  };
+  return (
+    <div>
+      <input value={block.title ?? "Checklist"} onChange={e => onChange({ ...block, title: e.target.value })}
+        placeholder="Checklist title"
+        style={{ ...inp({ fontSize: 14, fontWeight: 700, padding: "7px 10px", marginBottom: 10, maxWidth: 260 }) }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((it, idx) => (
+          <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Icon name="drag_indicator" size={16} style={{ color: C.faint, cursor: "grab" }} />
+            <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${C.bdr2}`, flexShrink: 0 }} />
+            <input value={it.text} onChange={e => setItems(items.map(x => x.id === it.id ? { ...x, text: e.target.value } : x))}
+              placeholder="Checklist item…" style={{ ...inp({ fontSize: 14, padding: "7px 10px", flex: 1 }) }} />
+            <IconBtn icon="arrow_upward" title="Move up" onClick={() => { if (idx === 0) return; const n = [...items]; [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]]; setItems(n); }} />
+            <IconBtn icon="arrow_downward" title="Move down" onClick={() => { if (idx === items.length - 1) return; const n = [...items]; [n[idx + 1], n[idx]] = [n[idx], n[idx + 1]]; setItems(n); }} />
+            <IconBtn icon="close" danger title="Remove item" onClick={() => setItems(items.filter(x => x.id !== it.id))} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Add a checklist item…"
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }}
+          style={{ ...inp({ fontSize: 14, padding: "8px 10px" }) }} />
+        <OBtn onClick={addItem} style={{ padding: "8px 14px", flexShrink: 0 }}><Icon name="add" size={15} />Add</OBtn>
+      </div>
     </div>
   );
 }
@@ -138,6 +179,7 @@ function BlockRow({ block, index, onChange, onDelete, onDragStart, onDragOver, o
       <div style={{ flex: 1, minWidth: 0 }}>
         {block.type === "heading" && <HeadingBlockEditor block={block} onChange={onChange} />}
         {block.type === "text" && <TextBlockEditor block={block} onChange={onChange} />}
+        {block.type === "checklist" && <ChecklistBlockEditor block={block} onChange={onChange} />}
         {block.type === "links" && <LinksBlockEditor block={block} onChange={onChange} />}
         {block.type === "image" && <ImageBlockEditor block={block} onChange={onChange} />}
       </div>
@@ -181,6 +223,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
   const [blocks, setBlocks] = useState(sop.blocks || []);
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
   const saveTimer = useRef(null);
 
   const persist = (nextBlocks, nextTitle, nextCat, nextStatus) => {
@@ -234,6 +277,21 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
     triggerSaved();
     onDeleted && onDeleted();
   };
+  const handleDuplicate = () => {
+    persist();
+    duplicateSOP({ ...sop, title, categoryId, status, blocks });
+    triggerSaved();
+    handleClose();
+  };
+  const handleRestored = (restored) => {
+    if (restored) {
+      setTitle(restored.title || "");
+      setCategoryId(restored.categoryId || "");
+      setStatus(restored.status || "draft");
+      setBlocks(restored.blocks || []);
+    }
+    setShowHistory(false);
+  };
 
   return (
     <div className="gk-fade-in" style={{ maxWidth: 820, margin: "0 auto" }}>
@@ -241,6 +299,8 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         <IconBtn icon="arrow_back" title="Back" onClick={handleClose} />
         <div style={{ fontSize: 14, color: C.mut, fontWeight: 600 }}>{isNew ? "New SOP" : "Editing SOP"}</div>
         <div style={{ flex: 1 }} />
+        {!isNew && <IconBtn icon="history" title="Version history" onClick={() => setShowHistory(true)} />}
+        {!isNew && <IconBtn icon="content_copy" title="Duplicate SOP" onClick={handleDuplicate} />}
         {!isNew && <IconBtn icon="delete" danger title="Delete SOP" onClick={handleDelete} />}
       </div>
 
@@ -264,6 +324,11 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
             }}>{s}</button>
           ))}
         </div>
+        {status === "archived" ? (
+          <OBtn onClick={() => setStatus("draft")}><Icon name="unarchive" size={15} />Archived — restore to Draft</OBtn>
+        ) : (
+          <OBtn onClick={() => setStatus("archived")}><Icon name="archive" size={15} />Archive</OBtn>
+        )}
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
@@ -286,6 +351,8 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         <AddBlockMenu onAdd={addBlockType} />
         <Btn onClick={handleClose}>Done</Btn>
       </div>
+
+      {showHistory && <HistoryPanel sopId={sop.id} onClose={() => setShowHistory(false)} onRestored={handleRestored} />}
     </div>
   );
 }

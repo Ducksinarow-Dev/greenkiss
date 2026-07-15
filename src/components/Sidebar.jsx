@@ -1,13 +1,85 @@
-import React from 'react';
-import { C, clearCurrentUser, isAdmin } from '../globals.js';
-import { Icon, Avatar } from './shared.jsx';
+import React, { useState } from 'react';
+import { C, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
+import { Icon, Avatar, Btn, OBtn, IconBtn } from './shared.jsx';
 
 const NAV_ITEMS = [
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
 ];
 
+// Baked in at build time by vite.config.js's `define` (see scripts/release.sh).
+// Dev server never defines these, hence the typeof guards.
+const GK_VERSION = typeof __GK_VERSION__ !== "undefined" ? __GK_VERSION__ : "dev";
+const GK_COMMIT = typeof __GK_COMMIT__ !== "undefined" ? __GK_COMMIT__ : "local";
+const GK_BUILD_DATE = typeof __GK_BUILD_DATE__ !== "undefined" ? __GK_BUILD_DATE__ : "";
+
+function ChangePinModal({ onClose }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!next.trim()) { setError("Enter a new PIN."); return; }
+    if (next !== confirm) { setError("New PIN doesn't match the confirmation."); return; }
+    setBusy(true);
+    try {
+      await changeOwnPin(current, next);
+      triggerSaved();
+      onClose();
+    } catch (err) {
+      setError(err.message || "Could not change PIN.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fieldStyle = {
+    width: "100%", background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9,
+    padding: "10px 12px", fontSize: 16, letterSpacing: 3, textAlign: "center",
+    color: C.txt, outline: "none", fontFamily: "'IBM Plex Mono',monospace",
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(27,23,17,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 20 }} onClick={onClose}>
+      <form onSubmit={submit} onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
+        width: "100%", maxWidth: 360, padding: 26, display: "flex", flexDirection: "column", gap: 14,
+      }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>Change my PIN</div>
+          <IconBtn icon="close" title="Close" onClick={onClose} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>Current PIN</label>
+          <input type="password" inputMode="numeric" autoComplete="off" value={current}
+            onChange={e => setCurrent(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>New PIN</label>
+          <input type="password" inputMode="numeric" autoComplete="off" value={next}
+            onChange={e => setNext(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, fontWeight: 700, color: C.txt2, display: "block", marginBottom: 6 }}>Confirm new PIN</label>
+          <input type="password" inputMode="numeric" autoComplete="off" value={confirm}
+            onChange={e => setConfirm(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
+        </div>
+        {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 4 }}>
+          <OBtn type="button" onClick={onClose}>Cancel</OBtn>
+          <Btn type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</Btn>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Sidebar({ section, setSection, user, onLogout }) {
+  const [showPinModal, setShowPinModal] = useState(false);
   const items = [...NAV_ITEMS];
   if (isAdmin(user)) items.push({ key: "admin", label: "Admin Panel", icon: "tune" });
 
@@ -58,10 +130,11 @@ function Sidebar({ section, setSection, user, onLogout }) {
       {/* Current user + logout */}
       <div style={{ padding: 14, borderTop: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 10 }}>
         <Avatar name={user?.name} size={32} />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <button onClick={() => setShowPinModal(true)} title="Change my PIN"
+          style={{ flex: 1, minWidth: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontFamily: "inherit" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</div>
           <div style={{ fontSize: 11, color: C.mut, textTransform: "capitalize" }}>{user?.role}</div>
-        </div>
+        </button>
         <button onClick={() => { clearCurrentUser(); onLogout(); }} title="Log out"
           style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}
           onMouseEnter={e => e.currentTarget.style.background = C.s2}
@@ -70,6 +143,13 @@ function Sidebar({ section, setSection, user, onLogout }) {
           <Icon name="logout" size={19} />
         </button>
       </div>
+
+      {/* Build info — see scripts/release.sh */}
+      <div style={{ padding: "6px 14px 12px", fontSize: 10, color: C.faint, textAlign: "center", fontFamily: "'IBM Plex Mono',monospace" }}>
+        Build v{GK_VERSION} · {GK_COMMIT}{GK_BUILD_DATE ? ` · ${GK_BUILD_DATE}` : ""}
+      </div>
+
+      {showPinModal && <ChangePinModal onClose={() => setShowPinModal(false)} />}
     </div>
   );
 }

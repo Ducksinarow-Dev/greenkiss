@@ -19,6 +19,9 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
+        __GK_VERSION__: 'readonly',
+        __GK_COMMIT__: 'readonly',
+        __GK_BUILD_DATE__: 'readonly',
       },
     },
     plugins: {
