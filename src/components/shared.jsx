@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C } from '../globals.js';
+import { C, FONT_CAPS } from '../globals.js';
 
 /* Design intent (interface-design skill):
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -27,7 +27,7 @@ function Icon({ name, size = 18, style }) {
 function lbl(ex = {}) {
   return {
     fontSize: 12, fontWeight: 600, color: C.txt2, display: "block", marginBottom: 7,
-    textTransform: "uppercase", letterSpacing: "0.08em", ...ex,
+    textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: FONT_CAPS, ...ex,
   };
 }
 
@@ -39,7 +39,7 @@ function Btn({ children, onClick, style, disabled, type = "button", title }) {
         background: disabled ? C.faint : C.moss, color: "#fff", border: "none",
         borderRadius: 9, padding: "10px 20px", fontSize: 14, fontWeight: 600,
         textTransform: "uppercase", letterSpacing: "0.07em",
-        cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
+        cursor: disabled ? "not-allowed" : "pointer", fontFamily: FONT_CAPS,
         display: "inline-flex", alignItems: "center", gap: 7,
         opacity: disabled ? 0.7 : 1, transition: "background .15s",
         ...(style || {}),
@@ -60,7 +60,7 @@ function OBtn({ children, onClick, style, active, disabled, title, type = "butto
         background: active ? C.mossSoft : (hov ? C.s2 : C.sur), color: active ? C.moss : C.txt,
         border: `1.5px solid ${active ? C.moss : C.bdr}`, borderRadius: 9,
         padding: "9px 18px", fontSize: 14, cursor: disabled ? "not-allowed" : "pointer",
-        fontFamily: "inherit", fontWeight: active ? 600 : 500,
+        fontFamily: FONT_CAPS, fontWeight: active ? 600 : 500,
         textTransform: "uppercase", letterSpacing: "0.07em",
         display: "inline-flex", alignItems: "center", gap: 7,
         opacity: disabled ? 0.5 : 1, transition: "all .15s",
@@ -97,7 +97,7 @@ function Pill({ children, color, style }) {
     <span style={{
       background: "transparent", color, borderRadius: 99, padding: "3px 11px",
       fontSize: 11, fontWeight: 600, border: `1px solid ${color}55`,
-      textTransform: "uppercase", letterSpacing: "0.06em",
+      textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS,
       whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4,
       ...(style || {}),
     }}>{children}</span>
@@ -126,7 +126,7 @@ function SectionHeader({ title, sub, right }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14, marginBottom: 22 }}>
       <div>
-        <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</div>
+        <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: FONT_CAPS }}>{title}</div>
         {sub && <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{sub}</div>}
       </div>
       {right && <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{right}</div>}
@@ -181,7 +181,7 @@ function SlideOver({ title, icon, onClose, children, width = 420 }) {
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 20px", borderBottom: `1.5px solid ${C.bdr}`, flexShrink: 0 }}>
           {icon && <Icon name={icon} size={19} style={{ color: C.moss }} />}
-          <div style={{ fontSize: 15, fontWeight: 800, color: C.txt, flex: 1, textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.txt, flex: 1, textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: FONT_CAPS }}>{title}</div>
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>{children}</div>

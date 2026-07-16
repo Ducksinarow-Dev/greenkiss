@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
+  C, FONT_CAPS, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
   getUsers, getSOPs, getProjects, fmtDateShort, canEdit, isOverdue,
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskType, inp,
@@ -62,7 +62,7 @@ function TaskModal({ initial, users, sops, projects, onSave, onDelete, onClose, 
               {TASK_TYPES.map(t => (
                 <button key={t.key} type="button" onClick={() => set("type", t.key)} style={{
                   display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-                  fontFamily: "inherit", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
                   background: (form.type || "task") === t.key ? C.sur : "transparent",
                   color: (form.type || "task") === t.key ? C.moss : C.mut,
                   boxShadow: (form.type || "task") === t.key ? C.shadowSm : "none",
@@ -196,7 +196,7 @@ function TaskCard({ task, users, sops, projects, onOpen, onDragStart, onDragOver
             }}>{task.title}</div>
           </div>
           {project && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: project.color || C.moss, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }} title="Project">
+            <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: project.color || C.moss, marginTop: 3, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.04em", fontWeight: 600 }} title="Project">
               <Icon name="folder" size={13} />{project.name || "Untitled project"}
             </div>
           )}
@@ -402,8 +402,8 @@ function TaskManager({ user, onOpenSop }) {
 function priorityFilterStyle(active, color) {
   return {
     padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: active ? 600 : 500, cursor: "pointer",
-    fontFamily: "inherit", border: `1.5px solid ${active ? color : C.bdr}`,
-    textTransform: "uppercase", letterSpacing: "0.06em",
+    border: `1.5px solid ${active ? color : C.bdr}`,
+    textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
     background: active ? color + "16" : C.sur, color: active ? color : C.mut,
   };
 }

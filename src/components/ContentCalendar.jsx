@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, uid, nowISO, CATEGORY_COLORS, inp,
+  C, FONT_CAPS, uid, nowISO, CATEGORY_COLORS, inp,
   getCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   getContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
   getUsers, confirmDelete, triggerSaved, canEdit, fmtDateShort, isOverdue,
@@ -51,8 +51,8 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 function tabStyle(active) {
   return {
     padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: active ? 600 : 500, cursor: "pointer",
-    fontFamily: "inherit", border: `1.5px solid ${active ? C.moss : C.bdr}`,
-    textTransform: "uppercase", letterSpacing: "0.07em",
+    border: `1.5px solid ${active ? C.moss : C.bdr}`,
+    textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.07em",
     background: active ? C.mossSoft : C.sur, color: active ? C.moss : C.mut,
   };
 }
@@ -93,12 +93,12 @@ function CalendarView({ items, campaigns, monthKey, setMonthKey, onOpenItem, onN
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}` }}>
         <IconBtn icon="chevron_left" title="Previous month" onClick={() => setMonthKey(shiftMonth(monthKey, -1))} />
-        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, textTransform: "uppercase", letterSpacing: "0.06em" }}>{fmtMonthLabel(monthKey)}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{fmtMonthLabel(monthKey)}</div>
         <IconBtn icon="chevron_right" title="Next month" onClick={() => setMonthKey(shiftMonth(monthKey, 1))} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1.5px solid ${C.bdr}` }}>
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
-          <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>{d}</div>
+          <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{d}</div>
         ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
@@ -173,7 +173,7 @@ function ListView({ items, users, campaigns, onOpenItem }) {
                 style={{
                   padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.mut,
                   borderBottom: `1.5px solid ${C.bdr}`, cursor: "pointer", whiteSpace: "nowrap",
-                  textTransform: "uppercase", letterSpacing: "0.06em", userSelect: "none",
+                  textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", userSelect: "none",
                 }}>
                 {c.label}{sortKey === c.key && <Icon name={sortDir === "asc" ? "arrow_upward" : "arrow_downward"} size={12} style={{ marginLeft: 4, verticalAlign: "middle" }} />}
               </th>
@@ -279,7 +279,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
                 <button key={ch.key} type="button" onClick={() => set("channel", ch.key)}
                   style={{
                     display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, cursor: "pointer",
-                    fontFamily: "inherit", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
+                    fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
                     border: `1.5px solid ${form.channel === ch.key ? C.moss : C.bdr}`,
                     background: form.channel === ch.key ? C.mossSoft : C.sur,
                     color: form.channel === ch.key ? C.moss : C.txt2,
@@ -346,7 +346,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
           {/* Channel-specific fields */}
           {form.channel === "gbp" && (
             <div style={{ background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 11, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", letterSpacing: "0.06em" }}>Google Business Details</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Google Business Details</div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 140px" }}>
                   <label style={lbl()}>CTA type</label>
@@ -369,7 +369,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
           )}
           {form.channel === "blog" && (
             <div style={{ background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 11, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", letterSpacing: "0.06em" }}>Blog Details</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Blog Details</div>
               <div>
                 <label style={lbl()}>Target keyword</label>
                 <input value={form.targetKeyword || ""} onChange={e => set("targetKeyword", e.target.value)} placeholder="e.g. natural face oil" style={inp()} />
@@ -382,7 +382,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
           )}
           {form.channel === "email" && (
             <div style={{ background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 11, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", letterSpacing: "0.06em" }}>Email Details</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Email Details</div>
               <div>
                 <label style={lbl()}>Subject line</label>
                 <input value={form.subjectLine || ""} onChange={e => set("subjectLine", e.target.value)} placeholder="Subject…" style={inp()} />
@@ -395,7 +395,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
           )}
           {form.channel === "instagram" && (
             <div style={{ background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 11, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", letterSpacing: "0.06em" }}>Instagram Details</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Instagram Details</div>
               <div>
                 <label style={lbl()}>Caption</label>
                 <textarea rows={3} value={form.caption || ""} onChange={e => set("caption", e.target.value)} placeholder="What actually posts…" style={inp({ lineHeight: 1.55 })} />
@@ -422,7 +422,7 @@ function ContentItemModal({ initial, users, campaigns, onSave, onDelete, onClose
                 display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: C.moss,
                 cursor: uploading ? "default" : "pointer", padding: "8px 14px", borderRadius: 9,
                 border: `1.5px solid ${C.moss}55`, background: C.mossSoft, width: "fit-content",
-                textTransform: "uppercase", letterSpacing: "0.06em", opacity: uploading ? 0.6 : 1,
+                textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", opacity: uploading ? 0.6 : 1,
               }}>
                 <Icon name="add_photo_alternate" size={16} />{uploading ? "Uploading…" : "Add image"}
                 <input type="file" accept="image/*" style={{ display: "none" }} disabled={uploading}

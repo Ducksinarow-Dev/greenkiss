@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { C, getTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
+import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
 import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
@@ -101,8 +101,8 @@ function Sidebar({ section, setSection, user, onLogout }) {
             : { width: 32, height: 32, flexShrink: 0, mixBlendMode: "multiply" }
         } />
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: C.txt, letterSpacing: "0.04em", lineHeight: 1.2, textTransform: "uppercase" }}>The Green Kiss</div>
-          <div style={{ fontSize: 11, color: C.mut, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 2 }}>Ops</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: C.txt, letterSpacing: "0.04em", lineHeight: 1.2, textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
+          <div style={{ fontSize: 11, color: C.mut, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: FONT_CAPS, marginTop: 2 }}>Ops</div>
         </div>
       </div>
 
@@ -114,10 +114,10 @@ function Sidebar({ section, setSection, user, onLogout }) {
             <button key={it.key} onClick={() => setSection(it.key)}
               style={{
                 display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9,
-                border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                border: "none", cursor: "pointer", textAlign: "left",
                 background: active ? C.mossSoft : "transparent",
                 color: active ? C.moss : C.txt2, fontWeight: active ? 600 : 500, fontSize: 13,
-                textTransform: "uppercase", letterSpacing: "0.08em",
+                textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
                 transition: "all .15s",
               }}
               onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.s2; }}

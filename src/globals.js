@@ -201,6 +201,17 @@ const C_DARK = {
   shadowMd: "0 10px 30px rgba(0,0,0,0.42)",
 };
 const C = Object.assign({}, C_LIGHT);
+
+/* ─── TYPOGRAPHY (#3) ─────────────────────────────────────────────────
+   Jost stays ONLY for the uppercase letterspaced treatment (nav, section
+   headers, buttons, pills/labels) — the signature carried over from the
+   Green Kiss retail site. Everything else (body copy, card titles, form
+   fields, table cells) runs on Manrope, loaded alongside it in index.html.
+   IBM Plex Mono is untouched — dates, PINs, build stamp keep using it
+   directly at their own call sites. */
+const FONT_CAPS = "'Jost',system-ui,sans-serif";
+const FONT_BODY = "'Manrope',system-ui,sans-serif";
+
 const setTheme = (theme) => {
   Object.assign(C, theme === "dark" ? C_DARK : C_LIGHT);
   if (typeof document !== "undefined") {
@@ -408,7 +419,7 @@ function remoteLogout() {
 const inp = (ex = {}) => ({
   background: C.inset, border: `1.5px solid ${C.bdr}`, color: C.txt,
   borderRadius: 8, padding: "10px 13px", fontSize: 15, outline: "none",
-  fontFamily: "'Jost',system-ui,sans-serif", width: "100%",
+  fontFamily: FONT_BODY, width: "100%",
   transition: "border-color .15s", ...ex,
 });
 
@@ -1222,7 +1233,7 @@ async function importAllData(parsed) {
 }
 
 export {
-  C, setTheme, getTheme, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
+  C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
   REMOTE_MODE, isRemoteMode, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall,
   db, uid, nowISO, fmtDate, fmtDateShort,
   getCurrentUser, setCurrentUser, clearCurrentUser,

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, getCategories, getUsers, fmtDate, nowISO,
+  C, FONT_CAPS, getCategories, getUsers, fmtDate, nowISO,
   getAcks, ackSop, isAckStale, triggerSaved,
 } from '../globals.js';
 import { IconBtn, Btn, OBtn, Pill, Icon } from './shared.jsx';
@@ -20,7 +20,7 @@ function ChecklistViewerBlock({ block }) {
   });
   return (
     <div style={{ margin: "0 0 20px" }}>
-      {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
+      {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
 
       {/* Interactive, screen-only */}
       <div className="gk-no-print" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -79,7 +79,7 @@ function ViewerBlock({ block }) {
     if (!links.length) return null;
     return (
       <div style={{ margin: "0 0 20px" }}>
-        {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
+        {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {links.map(l => (
             <a key={l.id} href={l.url} target="_blank" rel="noreferrer"
@@ -149,7 +149,7 @@ function ReadByList({ sop }) {
   if (entries.length === 0) return null;
   return (
     <div className="gk-no-print" style={{ marginTop: 16 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>Read by ({entries.length})</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 8 }}>Read by ({entries.length})</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {entries.map((e, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.txt2 }}>
@@ -184,7 +184,7 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit }) {
       <div className="gk-print-area" style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "36px 40px" }}>
         {/* Phase 6 QoL (d): print-only header — wordmark + title + printed-on date */}
         <div className="gk-print-only" style={{ marginBottom: 22, paddingBottom: 14, borderBottom: "1.5px solid #ccc" }}>
-          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase" }}>The Green Kiss</div>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{sop.title || "Untitled SOP"}</div>
           <div style={{ fontSize: 11, marginTop: 4 }}>Printed on {printedOn}</div>
         </div>

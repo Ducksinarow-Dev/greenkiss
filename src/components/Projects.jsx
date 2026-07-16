@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, getProjects, addProject, updateProject, deleteProject, defProject,
+  C, FONT_CAPS, getProjects, addProject, updateProject, deleteProject, defProject,
   getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, confirmDelete, triggerSaved,
   canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
   TASK_BOARD_STATUSES, inp,
@@ -205,7 +205,7 @@ function TimelineStrip({ project, tasks }) {
     <div style={{ padding: "18px 4px 28px" }}>
       <div style={{ position: "relative", height: 4, borderRadius: 99, background: C.s2 }}>
         <div style={{ position: "absolute", left: `${todayPct}%`, top: -10, transform: "translateX(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: C.txt2, textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Today</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", whiteSpace: "nowrap" }}>Today</span>
           <div style={{ width: 2, height: 20, background: C.txt2 }} />
         </div>
         {dated.map(t => {
@@ -410,7 +410,7 @@ function ProjectListView({ projects, users, tasks, onOpen }) {
           <div key={s.key}>
             <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
               <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
-              <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>{s.label}</div>
               <span style={{ fontSize: 12, color: C.mut }}>({items.length})</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -425,7 +425,7 @@ function ProjectListView({ projects, users, tasks, onOpen }) {
           fontFamily: "inherit", padding: 0, marginBottom: doneOpen ? 10 : 0,
         }}>
           <Icon name={doneOpen ? "expand_less" : "expand_more"} size={18} style={{ color: C.mut }} />
-          <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>Done</div>
           <span style={{ fontSize: 12, color: C.mut }}>({doneItems.length})</span>
         </button>
         {doneOpen && (
@@ -545,7 +545,7 @@ function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
               <button key={v.key} type="button" onClick={() => changeView(v.key)} title={v.key === "board" ? "Board view" : "List view"}
                 style={{
                   display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
-                  fontFamily: "inherit", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
                   background: view === v.key ? C.sur : "transparent", color: view === v.key ? C.moss : C.mut,
                   boxShadow: view === v.key ? C.shadowSm : "none",
                 }}>

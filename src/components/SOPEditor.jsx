@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  C, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
+  C, FONT_CAPS, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
   getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon } from './shared.jsx';
@@ -18,7 +18,7 @@ function NewCategoryPopover({ onCreate, onClose }) {
       position: "absolute", top: "calc(100% + 6px)", left: 0, background: C.sur, border: `1.5px solid ${C.bdr}`,
       borderRadius: 10, boxShadow: C.shadowMd, padding: 14, zIndex: 30, minWidth: 230,
     }} onClick={e => e.stopPropagation()}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.txt2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 9 }}>New Category</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", marginBottom: 9 }}>New Category</div>
       <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Category name"
         onKeyDown={e => {
           if (e.key === "Enter" && name.trim()) { e.preventDefault(); onCreate(name.trim(), color); }
@@ -133,7 +133,7 @@ function ImageBlockEditor({ block, onChange }) {
         </div>
       ) : (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: C.moss, cursor: busy ? "default" : "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.7 : 1, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: C.moss, cursor: busy ? "default" : "pointer", padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.7 : 1, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.07em" }}>
             {busy ? <Icon name="progress_activity" size={16} style={{ animation: "gkspin 1s linear infinite" }} /> : <Icon name="upload" size={16} />}
             {busy ? "Uploading…" : "Upload image"}
             <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={e => onFile(e.target.files?.[0])} />
@@ -367,8 +367,8 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
           {["draft", "published"].map(s => (
             <button key={s} onClick={() => setStatus(s)} style={{
-              padding: "6px 16px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
-              fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+              padding: "6px 16px", borderRadius: 7, border: "none", cursor: "pointer",
+              fontSize: 12, fontWeight: 600, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
               background: status === s ? (s === "published" ? C.moss : C.sur) : "transparent",
               color: status === s ? (s === "published" ? "#fff" : C.txt) : C.mut,
             }}>{s}</button>

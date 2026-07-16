@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, LOGIN_BG, LOGIN_BG_DEEP, getUsers, setCurrentUser, REMOTE_MODE, remoteLogin, remoteLoginOptions } from '../globals.js';
+import { C, FONT_CAPS, LOGIN_BG, LOGIN_BG_DEEP, getUsers, setCurrentUser, REMOTE_MODE, remoteLogin, remoteLoginOptions } from '../globals.js';
 import { Btn, Icon, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
@@ -61,7 +61,7 @@ function Login({ onLogin }) {
       <div className="gk-fade-in" style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ textAlign: "center", marginBottom: 34 }}>
           <img src={gkLogo} alt="The Green Kiss" style={{ width: 52, height: 52, margin: "0 auto 18px", display: "block", filter: "invert(1)", mixBlendMode: "screen" }} />
-          <div style={{ fontSize: 22, fontWeight: 500, color: "#fff", letterSpacing: "0.06em", textTransform: "uppercase" }}>The Green Kiss</div>
+          <div style={{ fontSize: 22, fontWeight: 500, color: "#fff", letterSpacing: "0.06em", textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.68)", marginTop: 8, letterSpacing: "0.04em" }}>SOPs &amp; task manager</div>
         </div>
 
@@ -85,7 +85,7 @@ function Login({ onLogin }) {
                     </div>
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 600, color: C.txt }}>{u.name}</div>
-                      {u.role && <div style={{ fontSize: 11, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em" }}>{u.role}</div>}
+                      {u.role && <div style={{ fontSize: 11, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{u.role}</div>}
                     </div>
                   </button>
                 ))}

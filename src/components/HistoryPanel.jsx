@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, fmtDate, getRevisions, getRevision, restoreRevision, confirmDelete, triggerSaved } from '../globals.js';
+import { C, FONT_CAPS, fmtDate, getRevisions, getRevision, restoreRevision, confirmDelete, triggerSaved } from '../globals.js';
 import { Btn, IconBtn, Icon } from './shared.jsx';
 
 /* Version history — editor-only panel over an SOP's revisions.
@@ -85,7 +85,7 @@ function HistoryPanel({ sopId, onClose, onRestored }) {
             {previewId && !preview && !error && <div style={{ fontSize: 14, color: C.mut }}>Loading preview…</div>}
             {preview && (
               <div>
-                <div style={{ fontSize: 12, color: C.faint, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>{fmtDate(preview.savedAt)} · {preview.savedBy || "Unknown"}</div>
+                <div style={{ fontSize: 12, color: C.faint, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 6 }}>{fmtDate(preview.savedAt)} · {preview.savedBy || "Unknown"}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: C.txt, marginBottom: 6 }}>{preview.snapshot?.title || "Untitled SOP"}</div>
                 <div style={{ fontSize: 13, color: C.mut, marginBottom: 20, textTransform: "capitalize" }}>{blockCount} block{blockCount === 1 ? "" : "s"} · {preview.snapshot?.status || "draft"}</div>
                 <Btn disabled={restoring} onClick={doRestore}>

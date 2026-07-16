@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  C, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
+  C, FONT_CAPS, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
 } from '../globals.js';
 import { Btn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import SOPViewer from './SOPViewer.jsx';
@@ -137,8 +137,8 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
             display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 9,
             border: `1.5px solid ${showArchived ? C.moss : C.bdr}`, background: showArchived ? C.mossSoft : C.sur,
             color: showArchived ? C.moss : C.txt2, fontSize: 12, fontWeight: showArchived ? 600 : 500,
-            textTransform: "uppercase", letterSpacing: "0.06em",
-            cursor: "pointer", fontFamily: "inherit",
+            textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
+            cursor: "pointer",
           }}>
             <Icon name={showArchived ? "visibility" : "visibility_off"} size={16} />
             {showArchived ? "Showing archived" : `Show archived (${archivedCount})`}
@@ -188,8 +188,8 @@ function pillBtnStyle(active, color) {
     display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 99,
     border: `1.5px solid ${active ? color : C.bdr}`, background: active ? color + "16" : C.sur,
     color: active ? color : C.txt2, fontSize: 12, fontWeight: active ? 600 : 500,
-    textTransform: "uppercase", letterSpacing: "0.06em",
-    cursor: "pointer", fontFamily: "inherit", transition: "all .15s",
+    textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
+    cursor: "pointer", transition: "all .15s",
   };
 }
 function countStyle(active, color) {

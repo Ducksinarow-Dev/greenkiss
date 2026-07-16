@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
+  C, FONT_CAPS, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
   getContentItems, updateContentItem, getCampaigns, contentChannelMeta,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
@@ -72,7 +72,7 @@ function ItemGroup({ group, items, onToggle, onOpen }) {
   return (
     <div>
       <div style={{
-        fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em",
+        fontSize: 12, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
         color: accent ? C.red : C.txt2, marginBottom: 9, display: "flex", alignItems: "center", gap: 6,
       }}>
         {accent && <Icon name="error" size={14} />}
@@ -183,7 +183,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
   return (
     <div className="gk-fade-in">
       <div style={{ marginBottom: 28 }}>
-        <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>{greeting}, {user.name}</div>
+        <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>{greeting}, {user.name}</div>
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
 

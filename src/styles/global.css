@@ -5,7 +5,7 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; padding: 0; }
 body {
-  font-family: 'Jost', system-ui, -apple-system, sans-serif;
+  font-family: 'Manrope', system-ui, -apple-system, sans-serif;
   background: #fafaf9;
   -webkit-font-smoothing: antialiased;
 }

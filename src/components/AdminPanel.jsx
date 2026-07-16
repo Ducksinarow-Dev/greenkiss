@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  C, getCategories, addCategory, updateCategory, deleteCategory, confirmDelete, triggerSaved,
+  C, FONT_CAPS, getCategories, addCategory, updateCategory, deleteCategory, confirmDelete, triggerSaved,
   getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
   fetchUsersFull, addUser, updateUser, deleteUser,
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
@@ -336,7 +336,7 @@ function ExportImportPanel() {
         <label style={{
           fontSize: 14, fontWeight: 600, color: C.moss, cursor: importing ? "default" : "pointer", padding: "9px 18px",
           borderRadius: 9, border: `1.5px solid ${C.moss}55`, background: C.mossSoft, display: "inline-flex",
-          textTransform: "uppercase", letterSpacing: "0.07em",
+          textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.07em",
           alignItems: "center", gap: 7, opacity: importing ? 0.6 : 1,
         }}>
           <Icon name="upload" size={16} />{importing ? "Importing…" : "Import JSON"}
