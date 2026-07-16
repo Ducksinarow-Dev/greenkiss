@@ -5,6 +5,7 @@ import {
   fetchUsersFull, addUser, updateUser, deleteUser,
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
   exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
+  releaseList, releaseRollback,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl } from './shared.jsx';
 
@@ -380,6 +381,93 @@ function DeployConfirmModal({ onCancel, onConfirm }) {
   );
 }
 
+/* ─── PREVIOUS BUILDS / ROLLBACK (#13) ────────────────────────────────
+   No git surgery — cPanel's deploy can only redeploy the checked-out
+   branch HEAD, so this restores files from a local snapshot api.php takes
+   before every deploy (see admin_deploy/snapshotCurrentBuild in api.php).
+   Collapsed by default; loads lazily on first expand. */
+function RollbackConfirmModal({ release, onCancel, onConfirm }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, padding: 20 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+        background: C.sur, borderRadius: 16, padding: "30px 32px", maxWidth: 420, width: "90%",
+        boxShadow: C.shadowMd, border: `1.5px solid ${C.red}55`,
+      }}>
+        <div style={{ marginBottom: 12 }}><Icon name="settings_backup_restore" size={34} style={{ color: C.red }} /></div>
+        <div style={{ fontSize: 18, color: C.txt, fontWeight: 800, marginBottom: 8 }}>Roll back to v{release.version}?</div>
+        <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.6, marginBottom: 20 }}>
+          This replaces the live build with v{release.version}{release.commit ? ` (${release.commit})` : ""}. Data is not affected — only the app's code reverts. The current build is snapshotted first, so this can be undone too.
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <OBtn onClick={onCancel} disabled={busy}>Cancel</OBtn>
+          <Btn disabled={busy} onClick={async () => { setBusy(true); await onConfirm(); setBusy(false); }} style={{ background: C.red }}>
+            {busy ? "Rolling back…" : "Roll back now"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviousBuildsSection({ onRolledBack }) {
+  const [open, setOpen] = useState(false);
+  const [releases, setReleases] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [target, setTarget] = useState(null);
+
+  const load = () => {
+    setLoading(true); setError("");
+    releaseList().then(setReleases).catch(e => setError(e.message || "Could not load snapshots.")).finally(() => setLoading(false));
+  };
+  useEffect(() => { if (open) load(); }, [open]);
+
+  const doRollback = async () => {
+    try {
+      await releaseRollback(target.name);
+      triggerSaved();
+      setTarget(null);
+      load();
+      onRolledBack && onRolledBack();
+    } catch (e) {
+      setError(e.message || "Rollback failed.");
+      setTarget(null);
+    }
+  };
+
+  return (
+    <div style={{ borderTop: `1.5px solid ${C.bdr}` }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "12px 18px",
+        background: "none", border: "none", cursor: "pointer", fontFamily: FONT_CAPS, fontSize: 13,
+        fontWeight: 700, color: C.txt2, textTransform: "uppercase", letterSpacing: "0.06em",
+      }}>
+        <Icon name={open ? "expand_less" : "expand_more"} size={17} />
+        Previous builds
+      </button>
+      {open && (
+        <div style={{ padding: "0 18px 16px" }}>
+          {loading && <div style={{ fontSize: 13, color: C.mut }}>Loading…</div>}
+          {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600, marginBottom: 8 }}>{error}</div>}
+          {!loading && releases.length === 0 && (
+            <div style={{ fontSize: 13, color: C.faint }}>Snapshots appear after your next deploy.</div>
+          )}
+          {!loading && releases.map(r => (
+            <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderTop: `1.5px solid ${C.bdr}` }}>
+              <div style={{ flex: 1, fontSize: 13, color: C.txt }}>
+                v{r.version}{r.commit ? ` · ${r.commit}` : ""} · {fmtDate(r.snapshotAt)}
+              </div>
+              <OBtn onClick={() => setTarget(r)} style={{ padding: "5px 12px", fontSize: 12 }}>Roll back</OBtn>
+            </div>
+          ))}
+        </div>
+      )}
+      {target && <RollbackConfirmModal release={target} onCancel={() => setTarget(null)} onConfirm={doRollback} />}
+    </div>
+  );
+}
+
 function DeployPanel() {
   const [versionInfo, setVersionInfo] = useState(null);
   const [lastDeploy, setLastDeploy] = useState(null);
@@ -463,7 +551,9 @@ function DeployPanel() {
             )}
             {lastDeploy && (
               <div style={{ fontSize: 13, color: C.mut }}>
-                Last deployed: {lastDeploy.version ? `v${lastDeploy.version} ` : ""}by {lastDeploy.deployedBy || "unknown"}, {fmtDate(lastDeploy.deployedAt)}
+                {lastDeploy.rollback
+                  ? `Rolled back to v${lastDeploy.version || "?"} by ${lastDeploy.deployedBy || "unknown"}, ${fmtDate(lastDeploy.deployedAt)}`
+                  : `Last deployed: ${lastDeploy.version ? "v" + lastDeploy.version + " " : ""}by ${lastDeploy.deployedBy || "unknown"}, ${fmtDate(lastDeploy.deployedAt)}`}
               </div>
             )}
           </>
@@ -479,6 +569,7 @@ function DeployPanel() {
           </div>
         )}
       </div>
+      <PreviousBuildsSection onRolledBack={load} />
       {confirming && <DeployConfirmModal onCancel={() => setConfirming(false)} onConfirm={doDeploy} />}
     </div>
   );

@@ -1460,6 +1460,14 @@ async function fetchLastDeploy() {
   return res.value || null;
 }
 
+/* ─── RELEASE ROLLBACK (#13, remote-only) ─────────────────────────────
+   Server keeps local snapshots of deployed builds (see api.php
+   snapshotCurrentBuild) — this just lists/triggers them. No git involved:
+   cPanel can only deploy the checked-out branch HEAD, so rollback restores
+   files from a prior snapshot instead. */
+async function releaseList() { const res = await apiCall("release_list", { method: "GET" }); return res.releases || []; }
+async function releaseRollback(name) { return apiCall("release_rollback", { method: "POST", body: { name } }); }
+
 const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content"];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
@@ -1508,5 +1516,5 @@ export {
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
   backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,
-  adminDeploy, fetchLastDeploy,
+  adminDeploy, fetchLastDeploy, releaseList, releaseRollback,
 };

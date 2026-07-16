@@ -51,7 +51,11 @@
  *   GET   backup_download  ?file=       - admin; streams the .json.gz
  *   POST  backup_restore   {file}       - admin; snapshots current state first
  *   GET   version_info                  - contents of VERSION file next to this script
- *   POST  admin_deploy                  - admin; triggers a cPanel Git Version Control deploy
+ *   POST  admin_deploy                  - admin; triggers a cPanel Git Version Control deploy;
+ *                                          snapshots the currently-deployed build first (see #13)
+ *   GET   release_list                  - admin; local build snapshots (version, commit, date)
+ *   POST  release_rollback {name}       - admin; restores a snapshot's files over the live build,
+ *                                          snapshotting the current build first so it's itself undoable
  */
 
 header('Content-Type: application/json');
@@ -70,6 +74,7 @@ require_once $configPath;
 
 define('GK_UPLOADS_DIR', defined('UPLOADS_DIR') ? UPLOADS_DIR : __DIR__ . '/uploads');
 define('GK_BACKUPS_DIR', defined('BACKUPS_DIR') ? BACKUPS_DIR : __DIR__ . '/backups');
+define('GK_RELEASES_DIR', defined('RELEASES_DIR') ? RELEASES_DIR : __DIR__ . '/gk_releases');
 
 try {
     $pdo = new PDO(
@@ -554,8 +559,12 @@ switch ($action) {
             respond(400, ['error' => 'Deploy is not configured yet. Add CPANEL_HOST, CPANEL_USERNAME, CPANEL_API_TOKEN, and CPANEL_REPO_PATH to config.php — see DEPLOY.md.']);
         }
         // This is a "we're about to change what code is live" moment — take a
-        // fresh snapshot regardless of the normal 24h-lazy threshold.
+        // fresh data backup regardless of the normal 24h-lazy threshold...
         runBackup($pdo);
+        // ...and a code snapshot of what's CURRENTLY deployed, before we
+        // overwrite it (see #13 rollback). Best-effort: if index.html isn't
+        // there yet (first-ever deploy), this is a silent no-op.
+        snapshotCurrentBuild();
 
         $authHeader = 'Authorization: cpanel ' . CPANEL_USERNAME . ':' . CPANEL_API_TOKEN;
         $host = 'https://' . CPANEL_HOST . ':2083';
@@ -601,6 +610,36 @@ switch ($action) {
             'pull' => $pullResult,
             'deploy' => $deployResult,
         ]);
+        break;
+
+    case 'release_list':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        respond(200, ['releases' => listReleases()]);
+        break;
+
+    case 'release_rollback':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        $name = basename($body['name'] ?? '');
+        if ($name === '') respond(400, ['error' => 'Missing name']);
+        maybeAutoBackup($pdo);
+        // Snapshot the current (about-to-be-replaced) build first, so this
+        // rollback is itself rollback-able — same courtesy a normal deploy gets.
+        snapshotCurrentBuild();
+        try {
+            rollbackToRelease($name);
+        } catch (Exception $e) {
+            respond(400, ['error' => $e->getMessage()]);
+        }
+        $target = null;
+        foreach (listReleases() as $r) { if ($r['name'] === $name) { $target = $r; break; } }
+        $lastDeploy = [
+            'deployedAt' => gmdate('c'), 'deployedBy' => $user['name'],
+            'rollback' => true, 'version' => $target['version'] ?? null,
+        ];
+        kvSet($pdo, 'lastDeploy', $lastDeploy);
+        respond(200, ['ok' => true, 'lastDeploy' => $lastDeploy]);
         break;
 
     default:
@@ -816,6 +855,120 @@ function maybeAutoBackup($pdo) {
     if (!$files) { runBackup($pdo); return; }
     usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
     if (time() - filemtime($files[0]) > 86400) runBackup($pdo);
+}
+
+// ── #13 RELEASE ROLLBACK ──────────────────────────────────────────────────
+// No git involved: cPanel's deploy only ever redeploys the checked-out
+// branch HEAD, so rollback restores files from a local snapshot instead.
+// api.php itself is NOT snapshotted (see snapshotCurrentBuild) — builds
+// rarely change it, and copying a running script over itself invites
+// confusion for no real benefit at this scale.
+// ponytail: if a rollback ever needs to revert an api.php change too, add
+// it to the snapshot/restore file list below; until then a bad api.php
+// change is fixed by deploying forward, not by rolling back.
+
+function ensureReleasesDir() {
+    $dir = GK_RELEASES_DIR;
+    if (!is_dir($dir)) mkdir($dir, 0755, true);
+    $htaccess = $dir . '/.htaccess';
+    if (!file_exists($htaccess)) {
+        file_put_contents($htaccess, "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n");
+    }
+    return $dir;
+}
+
+function recurseCopy($src, $dst) {
+    if (!is_dir($src)) return;
+    if (!is_dir($dst)) mkdir($dst, 0755, true);
+    $dir = opendir($src);
+    while (($file = readdir($dir)) !== false) {
+        if ($file === '.' || $file === '..') continue;
+        $srcPath = $src . '/' . $file;
+        $dstPath = $dst . '/' . $file;
+        if (is_dir($srcPath)) recurseCopy($srcPath, $dstPath);
+        else copy($srcPath, $dstPath);
+    }
+    closedir($dir);
+}
+
+function recurseDelete($dir) {
+    if (!is_dir($dir)) return;
+    foreach (scandir($dir) as $item) {
+        if ($item === '.' || $item === '..') continue;
+        $path = $dir . '/' . $item;
+        if (is_dir($path)) recurseDelete($path); else @unlink($path);
+    }
+    @rmdir($dir);
+}
+
+function currentVersionInfo() {
+    $path = __DIR__ . '/VERSION';
+    if (is_file($path)) {
+        $v = json_decode(file_get_contents($path), true);
+        if (is_array($v)) return $v;
+    }
+    return ['version' => 'dev', 'commit' => '', 'date' => ''];
+}
+
+// Snapshots the CURRENTLY deployed build (index.html, assets/, VERSION —
+// not config.php/uploads/backups/api.php) into gk_releases/<version>-<commit>/,
+// then prunes to the newest 5. No-ops if nothing's deployed yet (pre-#13
+// installs, or the very first deploy) or if this exact build was already
+// snapshotted (e.g. two admin_deploy clicks with no new release between).
+function snapshotCurrentBuild() {
+    $srcRoot = __DIR__;
+    if (!is_file($srcRoot . '/index.html')) return null;
+    $info = currentVersionInfo();
+    $version = $info['version'] ?? 'dev';
+    $commit = substr((string)($info['commit'] ?? ''), 0, 12) ?: 'unknown';
+    $name = preg_replace('/[^a-zA-Z0-9._-]/', '_', $version . '-' . $commit);
+    $releasesDir = ensureReleasesDir();
+    $dest = $releasesDir . '/' . $name;
+    if (is_dir($dest)) return $name;
+    mkdir($dest, 0755, true);
+    if (is_file($srcRoot . '/index.html')) copy($srcRoot . '/index.html', $dest . '/index.html');
+    if (is_file($srcRoot . '/VERSION')) copy($srcRoot . '/VERSION', $dest . '/VERSION');
+    if (is_dir($srcRoot . '/assets')) recurseCopy($srcRoot . '/assets', $dest . '/assets');
+    $entries = glob($releasesDir . '/*', GLOB_ONLYDIR);
+    usort($entries, fn($a, $b) => filemtime($b) - filemtime($a));
+    foreach (array_slice($entries, 5) as $old) recurseDelete($old);
+    return $name;
+}
+
+function listReleases() {
+    $dir = ensureReleasesDir();
+    $out = [];
+    foreach (glob($dir . '/*', GLOB_ONLYDIR) as $d) {
+        $info = ['version' => 'dev', 'commit' => '', 'date' => ''];
+        if (is_file($d . '/VERSION')) {
+            $v = json_decode(file_get_contents($d . '/VERSION'), true);
+            if (is_array($v)) $info = array_merge($info, $v);
+        }
+        $out[] = [
+            'name' => basename($d), 'version' => $info['version'], 'commit' => $info['commit'],
+            'date' => $info['date'], 'snapshotAt' => date('c', filemtime($d)),
+        ];
+    }
+    usort($out, fn($a, $b) => strcmp($b['snapshotAt'], $a['snapshotAt']));
+    return $out;
+}
+
+// Copies a snapshot's files back over the live build. $name is validated
+// against the actual snapshot-directory listing (not user-controlled path
+// concatenation), so path traversal isn't possible even before basename()
+// upstream in the request handler.
+function rollbackToRelease($name) {
+    $dir = ensureReleasesDir();
+    $valid = array_map('basename', glob($dir . '/*', GLOB_ONLYDIR));
+    if (!in_array($name, $valid, true)) throw new Exception('Unknown release snapshot.');
+    $src = $dir . '/' . $name;
+    $destRoot = __DIR__;
+    if (is_file($src . '/index.html')) copy($src . '/index.html', $destRoot . '/index.html');
+    if (is_file($src . '/VERSION')) copy($src . '/VERSION', $destRoot . '/VERSION');
+    if (is_dir($src . '/assets')) {
+        recurseDelete($destRoot . '/assets');
+        recurseCopy($src . '/assets', $destRoot . '/assets');
+    }
 }
 
 function restoreFromBackupData($pdo, $data) {
