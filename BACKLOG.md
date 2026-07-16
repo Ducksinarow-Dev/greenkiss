@@ -4,6 +4,8 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 
 ## In progress / just fixed
 
+- ~~#2: Light/dark mode toggle~~ — **shipped 2026-07-16**. The C_LIGHT/C_DARK palettes, `setTheme()`/`getTheme()`, and the dark CSS overrides already existed in globals.js/global.css from earlier work — what was missing was the actual toggle. Added an icon button (light_mode/dark_mode) in the Sidebar next to Log out, available to every role. App.jsx holds a `themeVersion` counter bumped on toggle; since no component here is memoized, that one state change cascades a full re-render through the tree and every inline style re-reads the freshly-mutated `C` object — no remount needed. Persists via the existing `localStorage["gk_theme"]` key. Fixed two light-only spots found during the sweep: the MyDashboard empty-state logo (added the same invert+screen dark variant Sidebar already used) and the SOPLibrary category count chip (`rgba(255,255,255,0.6)` → `C.sur`). Verified in both themes across Dashboard, SOP Library/Viewer/Editor, Task Manager (board + Done slide-over + task modal), Projects (board + list), Content Calendar (calendar + item editor), Admin Panel, and the PIN modal — plus persistence across reload. Print stylesheet was already forced to black-on-white regardless of theme; left untouched.
+- ~~#3: Typography pass~~ — **shipped 2026-07-16**. Body/UI now runs on Manrope (loaded in index.html alongside Jost, weights trimmed to what's actually used: Jost 400/500/600, Manrope 400-800). Jost is kept only for the uppercase letterspaced treatment via a new `FONT_CAPS` constant in globals.js, centralized in shared.jsx (`Btn`, `OBtn`, `Pill`, `lbl()`, `SectionHeader`, `SlideOver`) and swept onto every remaining `textTransform:"uppercase"` call site across every component (nav, tabs, pills, section headers, category chips). `inp()` switched from Jost to Manrope since form field text isn't part of the caps treatment. IBM Plex Mono untouched.
 - ~~#1: 1Password/LastPass/Dashlane repeatedly prompting to save the PIN as a password~~ — **fixed 2026-07-15**, shipped as v0.1.2. Root cause: browsers deliberately ignore `autocomplete="off"` for password-manager save-prompts; added the vendor-specific `data-1p-ignore`/`data-lpignore`/`data-form-type="other"` opt-outs to every PIN field.
 - ~~#6: Task Manager board columns~~ — **shipped 2026-07-16**. Done removed from the main board; new `reassigned`/`review` statuses (labeled Reassigned / Review Before Closing) added between In Progress and Done. Done lives behind a "Done (n)" button that opens a right-hand slide-over (shared `SlideOver` component in shared.jsx, reused by Projects too) — unchecking a card there sends it back to To Do. Project detail's task grouping mirrors the same columns + Done slide-over.
 - ~~#7: Task types~~ — **shipped 2026-07-16**. `TASK_TYPES` (task/note/milestone) in globals.js, segmented type picker in the task modal, distinct icon per type on cards (milestones get the icon in brand green + bolder title), notes skip the overdue-red treatment. Untyped legacy tasks normalize to "task" on read via `taskType()` — no migration write.
@@ -14,8 +16,8 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 ## Priority queue
 
 ### Design / theming
-- **#2: Light mode switch.** Currently dark-login/light-app only — no user-facing theme toggle at all despite `getTheme()` existing in globals.js. Add a light/dark toggle (Sidebar, near user info) with persisted preference.
-- **#3: Typography pass** — switch nav/headers/buttons off Jost, keep the ALL-CAPS letterspaced treatment, but move body/UI text to **Manrope**.
+- ~~#2: Light mode switch.~~ — shipped 2026-07-16, see top of file.
+- ~~#3: Typography pass~~ — shipped 2026-07-16, see top of file.
 
 ### SOP Library
 - ~~#4: Add new categories inline from the SOP editor~~ — shipped 2026-07-16, see top of file.
