@@ -25,6 +25,9 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 - **#9: Task tile hover actions.** On hover, show a compact 4-icon row: Mark Complete, Add Subtask, Rename, and a "⋮" overflow menu with: Favourite, Alert staff member, Duplicate, Merge, Add to…, Templates (Apply / Save as / Create), Archive, Delete, Convert to… (List / Project / Subtask). Large item — several of these (Favourite, Alert, Merge, Templates, Convert-to) are net-new subsystems, not just UI; should probably be split into smaller sub-tickets once we scope it.
 - **#10: Task ↔ Project attach/detach**, including tasks that already have subtasks — confirm moving a task in/out of a project preserves its subtasks and reassigns cleanly. (Likely already works since `projectId` is just a field on task — needs a verification pass more than new code.)
 
+### Projects
+- **#14: Project board columns.** Projects list becomes a status board: **Upcoming** (assigned, not started), **In Progress** (currently working), **Approval** (ready for review), and **Done** hidden behind a slide-over panel (same treatment as Task Manager's Done column in #6). Needs the Project status values remapped: current `active`/`on_hold`/`done`/`archived` → `upcoming`/`in_progress`/`approval`/`done` (+ keep `archived`), with a migration for existing projects and updated status pills everywhere projects render (list, detail header, My Dashboard cards).
+
 ### Admin / Ops
 - **#13: Rollback to previous release.** One-click button next to Software Update's "Update Now" (Admin Panel) that redeploys a prior commit from the `release` branch's history, for when a freshly deployed release turns out to be broken. Explicitly scoped OUT of the initial deploy-button batch — needs its own design pass (how far back to allow, how to list candidate commits, whether it reuses `admin_deploy`'s pull/deploy mechanism against a specific SHA instead of just `HEAD` of `release`).
 
