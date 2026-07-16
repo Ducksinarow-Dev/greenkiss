@@ -49,7 +49,7 @@ function ChangePinModal({ onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 20 }} onClick={onClose}>
-      <form onSubmit={submit} onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+      <form onSubmit={submit} onClick={e => e.stopPropagation()} data-1p-ignore data-lpignore="true" data-form-type="other" className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
         width: "100%", maxWidth: 360, padding: 26, display: "flex", flexDirection: "column", gap: 14,
       }}>
@@ -59,17 +59,17 @@ function ChangePinModal({ onClose }) {
         </div>
         <div>
           <label style={lbl()}>Current PIN</label>
-          <input type="password" inputMode="numeric" autoComplete="off" value={current}
+          <input type="password" inputMode="numeric" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" value={current}
             onChange={e => setCurrent(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
         <div>
           <label style={lbl()}>New PIN</label>
-          <input type="password" inputMode="numeric" autoComplete="off" value={next}
+          <input type="password" inputMode="numeric" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" value={next}
             onChange={e => setNext(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
         <div>
           <label style={lbl()}>Confirm new PIN</label>
-          <input type="password" inputMode="numeric" autoComplete="off" value={confirm}
+          <input type="password" inputMode="numeric" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" value={confirm}
             onChange={e => setConfirm(e.target.value.replace(/\D/g, "").slice(0, 8))} style={fieldStyle} />
         </div>
         {error && <div style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}

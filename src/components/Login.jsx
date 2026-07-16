@@ -65,7 +65,7 @@ function Login({ onLogin }) {
           <div style={{ fontSize: 13, color: "rgba(255,255,255,0.68)", marginTop: 8, letterSpacing: "0.04em" }}>SOPs &amp; task manager</div>
         </div>
 
-        <form onSubmit={submit} style={{ background: "#ffffff", border: "1.5px solid rgba(16,18,17,0.08)", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 50px rgba(0,0,0,0.22)" }}>
+        <form onSubmit={submit} data-1p-ignore data-lpignore="true" data-form-type="other" style={{ background: "#ffffff", border: "1.5px solid rgba(16,18,17,0.08)", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 50px rgba(0,0,0,0.22)" }}>
           <div>
             <label style={lbl({ fontSize: 13, marginBottom: 9 })}>Who's this?</label>
             {loadingUsers ? (
@@ -97,7 +97,7 @@ function Login({ onLogin }) {
           <div>
             <label style={lbl({ fontSize: 13, marginBottom: 9 })}>PIN</label>
             <input
-              type="password" inputMode="numeric" autoComplete="off" value={pin}
+              type="password" inputMode="numeric" autoComplete="off" data-1p-ignore data-lpignore="true" data-form-type="other" value={pin}
               onChange={e => { setPin(e.target.value.replace(/\D/g, "").slice(0, 8)); setError(""); }}
               placeholder="••••"
               style={{
