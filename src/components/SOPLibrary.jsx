@@ -5,6 +5,7 @@ import {
 import { Btn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import SOPViewer from './SOPViewer.jsx';
 import SOPEditor from './SOPEditor.jsx';
+import ImportSopButton from './SOPImporter.jsx';
 
 const SORTS = [
   { key: "updated", label: "Recently updated" },
@@ -110,9 +111,14 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
         title="SOP Library"
         sub={`${sops.length} procedure${sops.length === 1 ? "" : "s"}`}
         right={canEdit(user) && (
-          <Btn onClick={() => setCreating(defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""))}>
-            <Icon name="add" size={17} />New SOP
-          </Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <ImportSopButton onImported={({ title, blocks }) => setCreating({
+              ...defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""), title, blocks,
+            })} />
+            <Btn onClick={() => setCreating(defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""))}>
+              <Icon name="add" size={17} />New SOP
+            </Btn>
+          </div>
         )}
       />
 
