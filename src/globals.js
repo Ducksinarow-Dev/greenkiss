@@ -573,25 +573,53 @@ function seedIfEmpty() {
   }
 }
 
+/* ─── REMOTE COLLECTION HELPERS (Phase — concurrency fix) ────────────
+   Mirrors _remoteSopSave: fires the dedicated per-record action, and on
+   success replaces the in-memory cache with the server's authoritative
+   merged list, so the UI reflects the real merged truth (not just this
+   client's optimistic local guess) once the request lands. Fire-and-forget
+   from the caller's point of view, matching every other setSync call site. */
+function _remoteCollectionSave(action, bodyKey, item, cacheKey) {
+  apiCall(action, { method: "POST", body: { [bodyKey]: item } }).then(res => {
+    if (res && res[cacheKey]) _cache.set(cacheKey, res[cacheKey]);
+    _setOffline(false);
+  }).catch(() => _setOffline(true));
+}
+function _remoteCollectionDelete(action, id, cacheKey) {
+  apiCall(action, { method: "POST", body: { id } }).then(res => {
+    if (res && res[cacheKey]) _cache.set(cacheKey, res[cacheKey]);
+    _setOffline(false);
+  }).catch(() => _setOffline(true));
+}
+
 /* ─── CATEGORY STORAGE ───────────────────────────────────────────── */
 /** @returns {Category[]} */
 const getCategories = () => db.getSync("categories") || [];
 /** @param {Category[]} c */
 const saveCategories = (c) => db.setSync("categories", c);
 const addCategory = (name, color) => {
-  const cats = getCategories();
-  const next = [...cats, { id: uid(), name, color, createdAt: nowISO() }];
+  const newCat = { id: uid(), name, color, createdAt: nowISO() };
+  const next = [...getCategories(), newCat];
+  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionSave("category_save", "category", newCat, "categories"); return next; }
   saveCategories(next);
   return next;
 };
 const updateCategory = (id, changes) => {
   const next = getCategories().map(c => c.id === id ? { ...c, ...changes } : c);
+  if (REMOTE_MODE) {
+    _cache.set("categories", next);
+    _remoteCollectionSave("category_save", "category", next.find(c => c.id === id), "categories");
+    return next;
+  }
   saveCategories(next);
   return next;
 };
 const deleteCategory = (id) => {
-  saveCategories(getCategories().filter(c => c.id !== id));
-  // Leave SOPs uncategorized rather than deleting them.
+  const next = getCategories().filter(c => c.id !== id);
+  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionDelete("category_delete", id, "categories"); }
+  else saveCategories(next);
+  // Leave SOPs uncategorized rather than deleting them — bulk cascade stays
+  // on the plain saveSOPs path either way (not "an edit" worth per-record merging).
   const sops = getSOPs().map(s => s.categoryId === id ? { ...s, categoryId: "" } : s);
   saveSOPs(sops);
 };
@@ -734,10 +762,23 @@ async function restoreRevision(sopId, revisionId) {
 const getAcks = () => db.getSync("acks") || {};
 const saveAcks = (a) => db.setSync("acks", a);
 function ackSop(sopId, userId, sopUpdatedAt) {
+  const at = nowISO();
   const acks = getAcks();
   const forSop = { ...(acks[sopId] || {}) };
-  forSop[userId] = { at: nowISO(), version: sopUpdatedAt };
-  saveAcks({ ...acks, [sopId]: forSop });
+  forSop[userId] = { at, version: sopUpdatedAt };
+  const next = { ...acks, [sopId]: forSop };
+  if (REMOTE_MODE) {
+    // acks is a nested map, not an array — the server merges just this one
+    // {sopId: {userId: entry}} write into whatever the DB currently has,
+    // rather than ever sending the whole acks blob.
+    _cache.set("acks", next);
+    apiCall("ack_save", { method: "POST", body: { sopId, userId, at, version: sopUpdatedAt } }).then(res => {
+      if (res && res.acks) _cache.set("acks", res.acks);
+      _setOffline(false);
+    }).catch(() => _setOffline(true));
+    return;
+  }
+  saveAcks(next);
 }
 /** @returns {AckEntry|null} */
 function getAckFor(sopId, userId) {
@@ -822,15 +863,22 @@ const getTasks = () => db.getSync("tasks") || [];
 /** @param {Task[]} t */
 const saveTasks = (t) => db.setSync("tasks", t);
 const addTask = (task) => {
-  const next = [...getTasks(), { id: uid(), createdAt: nowISO(), subTasks: [], ...task }];
+  const full = { id: uid(), createdAt: nowISO(), subTasks: [], ...task };
+  const next = [...getTasks(), full];
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", full, "tasks"); return next; }
   saveTasks(next);
   return next;
 };
 const updateTask = (id, changes) => {
   const next = getTasks().map(t => t.id === id ? { ...t, ...changes } : t);
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", next.find(t => t.id === id), "tasks"); return; }
   saveTasks(next);
 };
-const deleteTask = (id) => saveTasks(getTasks().filter(t => t.id !== id));
+const deleteTask = (id) => {
+  const next = getTasks().filter(t => t.id !== id);
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionDelete("task_delete", id, "tasks"); return; }
+  saveTasks(next);
+};
 
 const TASK_STATUSES = [
   { key: "todo", label: "To Do", col: C.faint },
@@ -868,17 +916,23 @@ const saveProjects = (p) => db.setSync("projects", p);
 /** @param {string} id @returns {Project|null} */
 const getProject = (id) => getProjects().find(p => p.id === id) || null;
 const addProject = (project) => {
-  const next = [...getProjects(), { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], ...project }];
+  const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], ...project };
+  const next = [...getProjects(), full];
+  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", full, "projects"); return next; }
   saveProjects(next);
   return next;
 };
 const updateProject = (id, changes) => {
   const next = getProjects().map(p => p.id === id ? { ...p, ...changes, updatedAt: nowISO() } : p);
+  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", next.find(p => p.id === id), "projects"); return; }
   saveProjects(next);
 };
 const deleteProject = (id) => {
-  saveProjects(getProjects().filter(p => p.id !== id));
-  // Unlink rather than delete — a project's tasks survive as standalone tasks.
+  const next = getProjects().filter(p => p.id !== id);
+  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionDelete("project_delete", id, "projects"); }
+  else saveProjects(next);
+  // Unlink rather than delete — a project's tasks survive as standalone tasks
+  // (bulk cascade write, stays on the plain saveTasks path either way).
   saveTasks(getTasks().map(t => t.projectId === id ? { ...t, projectId: "" } : t));
 };
 const defProject = () => ({
@@ -951,16 +1005,23 @@ const saveCampaigns = (c) => db.setSync("campaigns", c);
 /** @param {string} id @returns {Campaign|null} */
 const getCampaign = (id) => getCampaigns().find(c => c.id === id) || null;
 const addCampaign = (campaign) => {
-  const next = [...getCampaigns(), { id: uid(), createdAt: nowISO(), ...campaign }];
+  const full = { id: uid(), createdAt: nowISO(), ...campaign };
+  const next = [...getCampaigns(), full];
+  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", full, "campaigns"); return next; }
   saveCampaigns(next);
   return next;
 };
 const updateCampaign = (id, changes) => {
-  saveCampaigns(getCampaigns().map(c => c.id === id ? { ...c, ...changes } : c));
+  const next = getCampaigns().map(c => c.id === id ? { ...c, ...changes } : c);
+  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", next.find(c => c.id === id), "campaigns"); return; }
+  saveCampaigns(next);
 };
 const deleteCampaign = (id) => {
-  saveCampaigns(getCampaigns().filter(c => c.id !== id));
-  // Unlink rather than delete — a campaign's content items survive uncampaigned.
+  const next = getCampaigns().filter(c => c.id !== id);
+  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionDelete("campaign_delete", id, "campaigns"); }
+  else saveCampaigns(next);
+  // Unlink rather than delete — a campaign's content items survive uncampaigned
+  // (bulk cascade write, stays on the plain saveContentItems path either way).
   saveContentItems(getContentItems().map(c => c.campaignId === id ? { ...c, campaignId: "" } : c));
 };
 const defCampaign = () => ({
@@ -976,14 +1037,22 @@ const saveContentItems = (c) => db.setSync("content", c);
 /** @param {string} id @returns {ContentItem|null} */
 const getContentItem = (id) => getContentItems().find(c => c.id === id) || null;
 const addContentItem = (item) => {
-  const next = [...getContentItems(), { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), images: [], links: [], ...item }];
+  const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), images: [], links: [], ...item };
+  const next = [...getContentItems(), full];
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", full, "content"); return next; }
   saveContentItems(next);
   return next;
 };
 const updateContentItem = (id, changes) => {
-  saveContentItems(getContentItems().map(c => c.id === id ? { ...c, ...changes, updatedAt: nowISO() } : c));
+  const next = getContentItems().map(c => c.id === id ? { ...c, ...changes, updatedAt: nowISO() } : c);
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", next.find(c => c.id === id), "content"); return; }
+  saveContentItems(next);
 };
-const deleteContentItem = (id) => saveContentItems(getContentItems().filter(c => c.id !== id));
+const deleteContentItem = (id) => {
+  const next = getContentItems().filter(c => c.id !== id);
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id, "content"); return; }
+  saveContentItems(next);
+};
 const defContentItem = (channel = "gbp") => ({
   id: uid(), campaignId: "", channel, title: "", status: "idea", publishDate: "",
   assigneeId: "", body: "", images: [], links: [], notes: "",
@@ -1090,6 +1159,18 @@ function backupDownloadUrl(file) {
 }
 async function backupRestore(file) { return apiCall("backup_restore", { method: "POST", body: { file } }); }
 
+/* ─── DEPLOY (Admin Panel "Software Update" button) ──────────────────
+   Remote-only — dev mode has no cPanel to deploy. Triggers admin_deploy
+   (a fresh backup, then a best-effort remote-update pull, then the actual
+   cPanel Git Version Control deploy). lastDeploy is read straight from
+   kv_get rather than the warm cache, since a session logged in before the
+   first deploy of this feature won't have it in its bootstrap snapshot. */
+async function adminDeploy() { return apiCall("admin_deploy", { method: "POST" }); }
+async function fetchLastDeploy() {
+  const res = await apiCall("kv_get", { method: "GET", query: { key: "lastDeploy" } });
+  return res.value || null;
+}
+
 const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content"];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
@@ -1131,4 +1212,5 @@ export {
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
   backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,
+  adminDeploy, fetchLastDeploy,
 };
