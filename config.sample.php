@@ -33,7 +33,7 @@ define('CRON_KEY', 'PASTE_A_LONG_RANDOM_STRING_HERE');
 // token and confirm the access hostname. Leave CPANEL_API_TOKEN as the
 // placeholder below and the Update Now button will return a clear
 // "not configured yet" error instead of a PHP fatal.
-define('CPANEL_HOST', 'hub.thegreenkiss.com'); // cPanel access hostname for :2083 — confirm this is right, some hosts use a different hostname than the site's public domain
+define('CPANEL_HOST', 'mi3-tr2.supercp.com'); // cPanel access hostname for :2083 — taken from the cPanel login URL (NOT the site's public domain)
 define('CPANEL_USERNAME', 'hubthegreenkiss');
 define('CPANEL_API_TOKEN', 'PASTE_A_REAL_TOKEN_HERE'); // cPanel → Security → Manage API Tokens
 define('CPANEL_REPO_PATH', '/home/hubthegreenkiss/repositories/greenkiss');

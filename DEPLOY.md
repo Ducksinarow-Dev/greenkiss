@@ -31,7 +31,7 @@ The app can trigger its own cPanel deploy instead of relying on deploy-on-push. 
 1. cPanel → **Security** → **Manage API Tokens** → **Create** → give it a name (e.g. `greenkiss-deploy`) → copy the token immediately (shown once).
 2. In `config.php` on the server, fill in:
    ```php
-   define('CPANEL_HOST', 'hub.thegreenkiss.com'); // the host used for :2083 access — confirm this against your actual cPanel login URL, it can differ from the site's public domain
+   define('CPANEL_HOST', 'mi3-tr2.supercp.com'); // the host used for :2083 access — taken from the cPanel login URL (differs from the site's public domain on this host)
    define('CPANEL_USERNAME', 'hubthegreenkiss');
    define('CPANEL_API_TOKEN', 'the token you just copied');
    define('CPANEL_REPO_PATH', '/home/hubthegreenkiss/repositories/greenkiss'); // the repository path from step 3 above
