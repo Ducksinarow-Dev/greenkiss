@@ -4,7 +4,7 @@ import {
   getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
   fetchUsersFull, addUser, updateUser, deleteUser,
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
-  exportAllData, importAllData, fmtDate,
+  exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl } from './shared.jsx';
 
@@ -350,6 +350,122 @@ function ExportImportPanel() {
   );
 }
 
+/* ─── SOFTWARE UPDATE (deploy button, remote mode only) ─────────────
+   Deploy is otherwise entirely manual now (npm run release just publishes
+   the release branch — see DEPLOY.md) precisely so an unreviewed deploy
+   never lands mid-shift. This button is the only trigger. */
+const GITHUB_RELEASE_COMMIT_URL = "https://api.github.com/repos/Ducksinarow-Dev/greenkiss/commits/release";
+
+function DeployConfirmModal({ onCancel, onConfirm }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 700, padding: 20 }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+        background: C.sur, borderRadius: 16, padding: "30px 32px", maxWidth: 420, width: "90%",
+        boxShadow: C.shadowMd, border: `1.5px solid ${C.bdr}`,
+      }}>
+        <div style={{ marginBottom: 12 }}><Icon name="rocket_launch" size={34} style={{ color: C.moss }} /></div>
+        <div style={{ fontSize: 18, color: C.txt, fontWeight: 800, marginBottom: 8 }}>Deploy the latest release?</div>
+        <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.6, marginBottom: 20 }}>
+          This will deploy the latest release to the live site. Continue?
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <OBtn onClick={onCancel} disabled={busy}>Cancel</OBtn>
+          <Btn disabled={busy} onClick={async () => { setBusy(true); await onConfirm(); setBusy(false); }}>
+            {busy ? "Deploying…" : "Deploy now"}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeployPanel() {
+  const [versionInfo, setVersionInfo] = useState(null);
+  const [lastDeploy, setLastDeploy] = useState(null);
+  const [ghSha, setGhSha] = useState(null);
+  const [ghError, setGhError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([
+      apiCall("version_info", { method: "GET" }).catch(() => null),
+      fetchLastDeploy().catch(() => null),
+    ]).then(([vi, ld]) => { setVersionInfo(vi); setLastDeploy(ld); }).finally(() => setLoading(false));
+    // Public repo, no auth needed — plain fetch straight from the browser.
+    fetch(GITHUB_RELEASE_COMMIT_URL)
+      .then(r => { if (!r.ok) throw new Error("GitHub check failed (" + r.status + ")"); return r.json(); })
+      .then(data => setGhSha(data.sha || null))
+      .catch(e => setGhError(e.message || "Could not check GitHub for the latest release."));
+  };
+  useEffect(() => { load(); }, []);
+
+  const deployedCommit = versionInfo?.commit || "";
+  const upToDate = !!(ghSha && deployedCommit && ghSha.startsWith(deployedCommit));
+
+  const doDeploy = async () => {
+    setResult(null);
+    try {
+      await adminDeploy();
+      setResult({ ok: true, message: "Deployed — reload to see it." });
+      triggerSaved();
+      load();
+    } catch (e) {
+      setResult({ ok: false, message: e.message || "Deploy failed." });
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Software Update</div>
+        <Btn onClick={() => setConfirming(true)} disabled={loading}><Icon name="rocket_launch" size={16} />Update Now</Btn>
+      </div>
+      <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+        {loading && <div style={{ fontSize: 14, color: C.mut }}>Checking…</div>}
+        {!loading && (
+          <>
+            <div style={{ fontSize: 14, color: C.txt }}>
+              Currently deployed: <strong>v{versionInfo?.version || "?"}</strong>
+              {deployedCommit ? ` · ${deployedCommit}` : ""}
+              {versionInfo?.date ? ` · ${versionInfo.date}` : ""}
+            </div>
+            {ghError && <div style={{ fontSize: 13, color: C.faint }}>{ghError}</div>}
+            {!ghError && ghSha && (
+              <div>
+                <Pill color={upToDate ? C.moss : C.clay}>
+                  {upToDate ? "Up to date" : `Update available (${ghSha.slice(0, 7)} pending)`}
+                </Pill>
+              </div>
+            )}
+            {lastDeploy && (
+              <div style={{ fontSize: 13, color: C.mut }}>
+                Last deployed: {lastDeploy.version ? `v${lastDeploy.version} ` : ""}by {lastDeploy.deployedBy || "unknown"}, {fmtDate(lastDeploy.deployedAt)}
+              </div>
+            )}
+          </>
+        )}
+        {result && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: result.ok ? C.moss : C.red }}>
+            {result.message}
+            {!result.ok && (
+              <div style={{ fontWeight: 400, color: C.mut, marginTop: 4 }}>
+                cPanel's own Git Version Control page remains available as a manual fallback if this keeps failing.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {confirming && <DeployConfirmModal onCancel={() => setConfirming(false)} onConfirm={doDeploy} />}
+    </div>
+  );
+}
+
 function AdminPanel() {
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
@@ -359,6 +475,7 @@ function AdminPanel() {
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
         <UsersPanel />
         <CategoriesPanel bump={bump} />
+        {REMOTE_MODE && <DeployPanel />}
         {REMOTE_MODE && <BackupsPanel />}
         <ExportImportPanel />
       </div>

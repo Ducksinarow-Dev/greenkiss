@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Publish a build to the `release` branch for cPanel Git Version Control's
-# deploy-on-push. There is no file-upload deploy path — see DEPLOY.md.
+# Publish a build to the `release` branch on GitHub. This does NOT deploy to
+# the live site by itself — deploy-on-push is deliberately kept OFF in
+# cPanel. Live deploys happen only via Admin Panel -> Software Update ->
+# Update Now (an admin's explicit click), or cPanel's own manual Pull or
+# Deploy as a fallback. See DEPLOY.md.
 #
 # Flow: clean-tree guard -> npm version patch (its own commit) -> npm run
 # check (eslint + vite build) -> vite build -> stage api.php + VERSION +
@@ -79,4 +82,4 @@ git push origin "$SRC_BRANCH" 2>/dev/null \
   || echo "⚠ Could not push ${SRC_BRANCH} (diverged?) — release IS published; pull --rebase and push ${SRC_BRANCH} manually."
 
 echo ""
-echo "Done. cPanel Git Version Control will deploy the new release branch commit automatically if deploy-on-push is enabled, or click Pull & Deploy manually. See DEPLOY.md."
+echo "Done. Published to origin/${BRANCH} — the live site is unchanged until an admin clicks Admin Panel -> Software Update -> Update Now (or uses cPanel's Manage -> Pull or Deploy manually). See DEPLOY.md."
