@@ -30,6 +30,11 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
   - Tags need their own lightweight create-on-the-fly flow inside that popover (new concept — no tag system exists yet, needs a `tags` KV store + task.tagIds).
   - Due Date popover needs a real date picker plus a "set recurring" option (recurrence is a new concept for tasks — needs a recurrence rule + generation logic).
 - **#9: Task tile hover actions.** On hover, show a compact 4-icon row: Mark Complete, Add Subtask, Rename, and a "⋮" overflow menu with: Favourite, Alert staff member, Duplicate, Merge, Add to…, Templates (Apply / Save as / Create), Archive, Delete, Convert to… (List / Project / Subtask). Large item — several of these (Favourite, Alert, Merge, Templates, Convert-to) are net-new subsystems, not just UI; should probably be split into smaller sub-tickets once we scope it.
+
+  **Reference design notes for #8/#9 (from Hayden's ClickUp screenshots, Jul 16 2026):**
+  1. **Standard tile**: title on top; optional description indicator (small lines icon) under it; then a row of four small OUTLINED icon buttons — assignee (person), due date (calendar), priority (flag), tags (tag) — shown as placeholder outlines even when the field is unset (click = the #8 popover for that field); subtask count at the bottom with a small subtask glyph ("1 subtask").
+  2. **Hover overlay**: compact floating pill anchored to the tile's top-right with four icons — ✓ mark complete, ⊕ add subtask, ✎ rename, ⋯ overflow menu (the #9 action list).
+  3. **Subtask dropdown**: the subtask count line becomes a disclosure toggle ("▾ 4 subtasks"); expanding renders each subtask as its own nested mini-card, indented under the parent, each with its OWN four-icon metadata row (assignee/date/priority/tags) — subtasks are first-class, individually assignable/dateable from the board without opening the parent.
 - ~~#10: Task ↔ Project attach/detach~~ — verified 2026-07-16, see top of file.
 
 ### Projects
