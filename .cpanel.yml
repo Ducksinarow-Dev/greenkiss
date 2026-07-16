@@ -1,0 +1,18 @@
+---
+# The Green Kiss — cPanel Git Version Control deployment task.
+#
+# ONE edit needed: set DEPLOYPATH below to your cPanel username + the path
+# to this app's folder under public_html (e.g. /home/greenkiss/public_html/
+# or /home/greenkiss/public_html/app/ for a subfolder install). Everything
+# else can stay as-is.
+#
+# This uses `cp -R`, never `rsync --delete` — a deploy only adds/overwrites
+# files that exist in this release build; it never deletes anything already
+# on the server. That's what keeps config.php, uploads/, and backups/ safe
+# across every deploy: they simply aren't part of the release branch, so
+# cp -R never touches them.
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/hubthegreenkiss/public_html/
+    - /bin/mkdir -p $DEPLOYPATH
+    - /bin/cp -R * $DEPLOYPATH
