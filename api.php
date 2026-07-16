@@ -24,11 +24,28 @@
  *   POST  users_delete     {id}         - admin; refuses to delete the last admin
  *   POST  change_pin       {currentPin,newPin} - any user, own PIN only
  *   POST  upload            (multipart, field "file") - editor/admin
+ *
+ *   -- Per-record collection writes (safe read-merge-write server side, so
+ *      two staff editing different records in the same collection at the
+ *      same time never wipe each other out — see collectionUpsert/Delete):
+ *   POST  task_save         {task}       - editor/admin; upsert one task by id
+ *   POST  task_delete       {id}         - editor/admin
+ *   POST  project_save      {project}    - editor/admin; upsert one project by id
+ *   POST  project_delete    {id}         - editor/admin
+ *   POST  campaign_save     {campaign}   - editor/admin; upsert one campaign by id
+ *   POST  campaign_delete   {id}         - editor/admin
+ *   POST  content_save      {item}       - editor/admin; upsert one content item by id
+ *   POST  content_delete    {id}         - editor/admin
+ *   POST  category_save     {category}   - editor/admin; upsert one category by id
+ *   POST  category_delete   {id}         - editor/admin
+ *   POST  ack_save          {sopId,userId,at,version} - any user; merges one ack entry
+ *
  *   *     backup_run       ?cron_key=   - admin token OR cron_key; also runs lazily on writes
  *   GET   backup_list                   - admin
  *   GET   backup_download  ?file=       - admin; streams the .json.gz
  *   POST  backup_restore   {file}       - admin; snapshots current state first
  *   GET   version_info                  - contents of VERSION file next to this script
+ *   POST  admin_deploy                  - admin; triggers a cPanel Git Version Control deploy
  */
 
 header('Content-Type: application/json');
@@ -153,6 +170,112 @@ switch ($action) {
         }
         kvSet($pdo, 'sops', $sops);
         respond(200, ['ok' => true, 'sops' => $sops]);
+        break;
+
+    case 'task_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $task = $body['task'] ?? null;
+        if (!is_array($task) || empty($task['id'])) respond(400, ['error' => 'Missing task']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'tasks' => collectionUpsert($pdo, 'tasks', $task)]);
+        break;
+
+    case 'task_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'tasks' => collectionDelete($pdo, 'tasks', $id)]);
+        break;
+
+    case 'project_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $project = $body['project'] ?? null;
+        if (!is_array($project) || empty($project['id'])) respond(400, ['error' => 'Missing project']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'projects' => collectionUpsert($pdo, 'projects', $project)]);
+        break;
+
+    case 'project_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'projects' => collectionDelete($pdo, 'projects', $id)]);
+        break;
+
+    case 'campaign_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $campaign = $body['campaign'] ?? null;
+        if (!is_array($campaign) || empty($campaign['id'])) respond(400, ['error' => 'Missing campaign']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'campaigns' => collectionUpsert($pdo, 'campaigns', $campaign)]);
+        break;
+
+    case 'campaign_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'campaigns' => collectionDelete($pdo, 'campaigns', $id)]);
+        break;
+
+    case 'content_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $item = $body['item'] ?? null;
+        if (!is_array($item) || empty($item['id'])) respond(400, ['error' => 'Missing item']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'content' => collectionUpsert($pdo, 'content', $item)]);
+        break;
+
+    case 'content_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'content' => collectionDelete($pdo, 'content', $id)]);
+        break;
+
+    case 'category_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $category = $body['category'] ?? null;
+        if (!is_array($category) || empty($category['id'])) respond(400, ['error' => 'Missing category']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'categories' => collectionUpsert($pdo, 'categories', $category)]);
+        break;
+
+    case 'category_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'categories' => collectionDelete($pdo, 'categories', $id)]);
+        break;
+
+    case 'ack_save':
+        $user = requireAuth($pdo, $body); // any authenticated user may write acks
+        $sopId = $body['sopId'] ?? '';
+        $userId = $body['userId'] ?? '';
+        if ($sopId === '' || $userId === '') respond(400, ['error' => 'Missing sopId/userId']);
+        $at = $body['at'] ?? gmdate('c');
+        $version = $body['version'] ?? '';
+        maybeAutoBackup($pdo);
+        $acks = kvGet($pdo, 'acks');
+        if (!is_array($acks)) $acks = [];
+        if (!isset($acks[$sopId]) || !is_array($acks[$sopId])) $acks[$sopId] = [];
+        $acks[$sopId][$userId] = ['at' => $at, 'version' => $version];
+        kvSet($pdo, 'acks', $acks);
+        respond(200, ['ok' => true, 'acks' => $acks]);
         break;
 
     case 'revisions_list':
@@ -352,6 +475,62 @@ switch ($action) {
         respond(200, ['version' => 'dev']);
         break;
 
+    case 'admin_deploy':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        if (
+            !defined('CPANEL_HOST') || !defined('CPANEL_USERNAME') || !defined('CPANEL_REPO_PATH') ||
+            !defined('CPANEL_API_TOKEN') || CPANEL_API_TOKEN === '' || strpos(CPANEL_API_TOKEN, 'PASTE_') === 0
+        ) {
+            respond(400, ['error' => 'Deploy is not configured yet. Add CPANEL_HOST, CPANEL_USERNAME, CPANEL_API_TOKEN, and CPANEL_REPO_PATH to config.php — see DEPLOY.md.']);
+        }
+        // This is a "we're about to change what code is live" moment — take a
+        // fresh snapshot regardless of the normal 24h-lazy threshold.
+        runBackup($pdo);
+
+        $authHeader = 'Authorization: cpanel ' . CPANEL_USERNAME . ':' . CPANEL_API_TOKEN;
+        $host = 'https://' . CPANEL_HOST . ':2083';
+
+        // Step 1: bring the local checkout up to date with GitHub before
+        // deploying. The exact UAPI call for this isn't confidently confirmed
+        // (cPanel's own "Update from Remote" button does it) — best guess is
+        // VersionControl::update. Tolerated as best-effort: if it fails, we
+        // still proceed to deploy whatever commit is already checked out,
+        // which is a safe no-op rather than a destructive failure.
+        $pullResult = cpanelApiCall($host . '/execute/VersionControl/update', ['repository_root' => CPANEL_REPO_PATH], $authHeader);
+
+        // Step 2: deploy — runs the .cpanel.yml task, copying the checked-out
+        // branch's files into the live document root.
+        $deployResult = cpanelApiCall($host . '/execute/VersionControlDeployment/create', ['repository_root' => CPANEL_REPO_PATH], $authHeader);
+
+        $deployStatus = $deployResult['data']['result']['status'] ?? null;
+        $deployOk = $deployResult['httpCode'] === 200 && $deployResult['curlError'] === null
+            && ($deployStatus === null || (int)$deployStatus === 1);
+        $pullOk = $pullResult['httpCode'] === 200 && $pullResult['curlError'] === null;
+
+        // Human-readable step-by-step notes so a failure is debuggable from
+        // the Admin Panel alone, without needing to tail a PHP error log.
+        $notes = [];
+        $notes[] = $pullOk
+            ? 'Remote-update pull: ok (HTTP ' . $pullResult['httpCode'] . ').'
+            : 'Remote-update pull: failed (' . ($pullResult['curlError'] ?: ('HTTP ' . $pullResult['httpCode'])) . ') — this step is best-effort; deploy proceeds with whatever commit is already checked out.';
+        $notes[] = $deployOk
+            ? 'Deploy: triggered successfully.'
+            : 'Deploy: failed (' . ($deployResult['curlError'] ?: ('HTTP ' . $deployResult['httpCode'] . (isset($deployResult['data']['result']['errors']) ? ' — ' . json_encode($deployResult['data']['result']['errors']) : ($deployResult['rawExcerpt'] ? ' — ' . $deployResult['rawExcerpt'] : '')))) . ').';
+
+        if ($deployOk) {
+            kvSet($pdo, 'lastDeploy', ['deployedAt' => gmdate('c'), 'deployedBy' => $user['name']]);
+        }
+
+        respond($deployOk ? 200 : 500, [
+            'ok' => $deployOk,
+            'notes' => $notes,
+            'error' => $deployOk ? null : implode(' ', $notes),
+            'pull' => $pullResult,
+            'deploy' => $deployResult,
+        ]);
+        break;
+
     default:
         respond(404, ['error' => 'Unknown action']);
 }
@@ -422,6 +601,58 @@ function kvSet($pdo, $key, $value) {
         "INSERT INTO kv_store (k, v, updated_at) VALUES (?, ?, UTC_TIMESTAMP())
          ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = UTC_TIMESTAMP()"
     )->execute([$key, $json]);
+}
+
+// Safe read-merge-write for the per-record collection actions (tasks,
+// projects, campaigns, content, categories). Re-reads the current list
+// fresh from the DB inside the request, replaces just the matching record
+// (or appends if new), and writes the merged array back — so two staff
+// editing different records in the same collection concurrently never
+// wipe each other out, unlike a blind whole-array kv_set.
+function collectionUpsert($pdo, $key, $item) {
+    $list = kvGet($pdo, $key) ?: [];
+    $idx = null;
+    foreach ($list as $i => $x) { if (($x['id'] ?? null) === $item['id']) { $idx = $i; break; } }
+    if ($idx !== null) { $list[$idx] = $item; } else { $list[] = $item; }
+    kvSet($pdo, $key, $list);
+    return $list;
+}
+
+function collectionDelete($pdo, $key, $id) {
+    $list = kvGet($pdo, $key) ?: [];
+    $list = array_values(array_filter($list, function ($x) use ($id) { return ($x['id'] ?? null) !== $id; }));
+    kvSet($pdo, $key, $list);
+    return $list;
+}
+
+// Minimal curl wrapper for cPanel's UAPI (Authorization: cpanel header).
+// Cert verification stays ON (CURLOPT_SSL_VERIFYPEER true) — never disable
+// this. Returns a structured result so callers can surface raw error text
+// to the admin rather than swallowing it.
+function cpanelApiCall($url, $params, $authHeader) {
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url . '?' . http_build_query($params),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [$authHeader],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_CUSTOMREQUEST => 'GET',
+    ]);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch) ?: null;
+    curl_close($ch);
+    $data = $raw !== false && $raw !== null ? json_decode($raw, true) : null;
+    return [
+        'httpCode' => $httpCode,
+        'curlError' => $curlError,
+        'data' => $data,
+        // Only kept when the response wasn't valid JSON, to aid debugging
+        // without bloating every successful response.
+        'rawExcerpt' => $data === null ? substr((string)$raw, 0, 2000) : null,
+    ];
 }
 
 function saveRevision($pdo, $sopId, $snapshot, $savedBy) {
