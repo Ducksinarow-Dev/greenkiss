@@ -52,13 +52,14 @@
  * @property {string} id
  * @property {string} title
  * @property {string} description
- * @property {"todo"|"in-progress"|"done"} status
+ * @property {"todo"|"in-progress"|"reassigned"|"review"|"done"} status
  * @property {"low"|"medium"|"high"|"urgent"} priority
  * @property {string} assignedTo user id
  * @property {string} dueDate ISO date (yyyy-mm-dd)
  * @property {string} relatedSopId
  * @property {string} [projectId] linked Project.id, empty for standalone tasks
  * @property {SubTask[]} subTasks
+ * @property {"task"|"note"|"milestone"} [type] defaults to "task" when absent
  * @property {string} createdAt
  * @property {number} [order]
  *
@@ -66,7 +67,7 @@
  * @property {string} id
  * @property {string} name
  * @property {string} description
- * @property {"active"|"on_hold"|"done"|"archived"} status
+ * @property {"upcoming"|"in_progress"|"approval"|"done"|"archived"} status
  * @property {string} startDate ISO date (yyyy-mm-dd)
  * @property {string} dueDate ISO date (yyyy-mm-dd)
  * @property {string} leadId user id
@@ -600,9 +601,9 @@ const saveCategories = (c) => db.setSync("categories", c);
 const addCategory = (name, color) => {
   const newCat = { id: uid(), name, color, createdAt: nowISO() };
   const next = [...getCategories(), newCat];
-  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionSave("category_save", "category", newCat, "categories"); return next; }
+  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionSave("category_save", "category", newCat, "categories"); return newCat; }
   saveCategories(next);
-  return next;
+  return newCat;
 };
 const updateCategory = (id, changes) => {
   const next = getCategories().map(c => c.id === id ? { ...c, ...changes } : c);
@@ -883,9 +884,25 @@ const deleteTask = (id) => {
 const TASK_STATUSES = [
   { key: "todo", label: "To Do", col: C.faint },
   { key: "in-progress", label: "In Progress", col: C.txt2 },
+  { key: "reassigned", label: "Reassigned", col: "#a8bdb2" },
+  { key: "review", label: "Review Before Closing", col: C.clay },
   { key: "done", label: "Done", col: C.moss },
 ];
 const taskStatusMeta = Object.fromEntries(TASK_STATUSES.map(s => [s.key, s]));
+/** Columns shown on the main Task Manager / project-detail board — Done
+ * lives behind the slide-over panel instead (see TaskDoneSlideOver). */
+const TASK_BOARD_STATUSES = TASK_STATUSES.filter(s => s.key !== "done");
+
+/* ─── TASK TYPES (#7) ─────────────────────────────────────────────
+   New types slot in as one more line here — no other code needs to change. */
+const TASK_TYPES = [
+  { key: "task", label: "Task", icon: "check_circle" },
+  { key: "note", label: "Note", icon: "sticky_note_2" },
+  { key: "milestone", label: "Milestone", icon: "flag" },
+];
+const taskTypeMeta = Object.fromEntries(TASK_TYPES.map(t => [t.key, t]));
+/** Tasks saved before #7 have no `type` — normalize to "task" on read. */
+const taskType = (task) => taskTypeMeta[task && task.type] || taskTypeMeta.task;
 
 const TASK_PRIORITIES = [
   { key: "low", label: "Low", col: C.faint },
@@ -909,14 +926,25 @@ const isDueThisWeek = (dateStr) => {
 };
 
 /* ─── PROJECT STORAGE ────────────────────────────────────────────── */
+/** Old status values map to the new #14 scheme. Applied on every read so
+ * the UI never sees a stale value — no bulk migration write (collision
+ * risk with concurrent live users); a project only persists its remapped
+ * status once it next goes through addProject/updateProject. */
+const PROJECT_STATUS_KEYS = ["upcoming", "in_progress", "approval", "done", "archived"];
+function normalizeProjectStatus(status) {
+  if (status === "active") return "in_progress";
+  if (status === "on_hold") return "upcoming";
+  if (PROJECT_STATUS_KEYS.includes(status)) return status;
+  return "upcoming";
+}
 /** @returns {Project[]} */
-const getProjects = () => db.getSync("projects") || [];
+const getProjects = () => (db.getSync("projects") || []).map(p => ({ ...p, status: normalizeProjectStatus(p.status) }));
 /** @param {Project[]} p */
 const saveProjects = (p) => db.setSync("projects", p);
 /** @param {string} id @returns {Project|null} */
 const getProject = (id) => getProjects().find(p => p.id === id) || null;
 const addProject = (project) => {
-  const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], ...project };
+  const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], status: "upcoming", ...project };
   const next = [...getProjects(), full];
   if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", full, "projects"); return next; }
   saveProjects(next);
@@ -936,17 +964,21 @@ const deleteProject = (id) => {
   saveTasks(getTasks().map(t => t.projectId === id ? { ...t, projectId: "" } : t));
 };
 const defProject = () => ({
-  id: uid(), name: "", description: "", status: "active", startDate: "", dueDate: "",
+  id: uid(), name: "", description: "", status: "upcoming", startDate: "", dueDate: "",
   leadId: "", memberIds: [], color: C.moss, createdAt: nowISO(), updatedAt: nowISO(),
 });
 
 const PROJECT_STATUSES = [
-  { key: "active", label: "Active", col: C.moss },
-  { key: "on_hold", label: "On Hold", col: C.clay },
-  { key: "done", label: "Done", col: C.txt2 },
+  { key: "upcoming", label: "Upcoming", col: C.faint },
+  { key: "in_progress", label: "In Progress", col: C.txt2 },
+  { key: "approval", label: "Approval", col: C.clay },
+  { key: "done", label: "Done", col: C.moss },
   { key: "archived", label: "Archived", col: C.faint },
 ];
 const projectStatusMeta = Object.fromEntries(PROJECT_STATUSES.map(s => [s.key, s]));
+/** Columns on the Projects board — Done + Archived both live in the
+ * slide-over instead (see ProjectDoneSlideOver). */
+const PROJECT_BOARD_STATUSES = PROJECT_STATUSES.filter(s => s.key !== "done" && s.key !== "archived");
 
 /* ─── CAMPAIGN / CONTENT CONSTANTS ───────────────────────────────── */
 const CAMPAIGN_STATUSES = [
@@ -1201,10 +1233,11 @@ export {
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,
-  getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, taskStatusMeta, TASK_PRIORITIES, taskPriorityMeta,
+  getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, taskStatusMeta, TASK_PRIORITIES, taskPriorityMeta,
+  TASK_TYPES, taskTypeMeta, taskType,
   isOverdue, isDueToday, isDueThisWeek,
   getProjects, saveProjects, getProject, addProject, updateProject, deleteProject, defProject,
-  PROJECT_STATUSES, projectStatusMeta, projectProgress,
+  PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress, normalizeProjectStatus,
   getCampaigns, saveCampaigns, getCampaign, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   CAMPAIGN_STATUSES, campaignStatusMeta,
   getContentItems, saveContentItems, getContentItem, addContentItem, updateContentItem, deleteContentItem, defContentItem,

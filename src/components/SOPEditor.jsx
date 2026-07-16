@@ -1,10 +1,43 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  C, uid, getCategories, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
-  getCurrentUser, processAndStoreImage, inp,
+  C, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
+  getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon } from './shared.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
+
+/* ─── Inline "+ New category" popover (#4) — editors no longer need to
+   leave the SOP editor to add a category. Reuses the same swatch set and
+   collision-safe addCategory() path Admin Panel's category manager uses;
+   Admin Panel stays the place for rename/recolor/delete. */
+function NewCategoryPopover({ onCreate, onClose }) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+  return (
+    <div style={{
+      position: "absolute", top: "calc(100% + 6px)", left: 0, background: C.sur, border: `1.5px solid ${C.bdr}`,
+      borderRadius: 10, boxShadow: C.shadowMd, padding: 14, zIndex: 30, minWidth: 230,
+    }} onClick={e => e.stopPropagation()}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.txt2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 9 }}>New Category</div>
+      <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Category name"
+        onKeyDown={e => {
+          if (e.key === "Enter" && name.trim()) { e.preventDefault(); onCreate(name.trim(), color); }
+          if (e.key === "Escape") onClose();
+        }}
+        style={{ ...inp({ fontSize: 14, padding: "7px 10px", marginBottom: 10 }) }} />
+      <div style={{ display: "flex", gap: 5, marginBottom: 12 }}>
+        {CATEGORY_COLORS.map(c => (
+          <button key={c} type="button" onClick={() => setColor(c)}
+            style={{ width: 22, height: 22, borderRadius: 99, background: c, cursor: "pointer", border: color === c ? `2px solid ${C.txt}` : "2px solid transparent" }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <OBtn onClick={onClose} style={{ padding: "6px 12px", fontSize: 12 }}>Cancel</OBtn>
+        <Btn onClick={() => name.trim() && onCreate(name.trim(), color)} disabled={!name.trim()} style={{ padding: "6px 14px", fontSize: 12 }}>Create</Btn>
+      </div>
+    </div>
+  );
+}
 
 const BLOCK_DEFS = [
   { type: "heading", label: "Heading", icon: "title" },
@@ -224,6 +257,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showNewCat, setShowNewCat] = useState(false);
   const saveTimer = useRef(null);
 
   const persist = (nextBlocks, nextTitle, nextCat, nextStatus) => {
@@ -310,10 +344,26 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         onBlur={e => e.target.style.border = "1.5px solid transparent"} />
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 26 }}>
-        <select value={categoryId} onChange={e => setCategoryId(e.target.value)} style={{ ...inp({ width: "auto", fontSize: 14, padding: "8px 12px" }) }}>
-          <option value="">Uncategorized</option>
-          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <div style={{ position: "relative" }}>
+          <select value={categoryId}
+            onChange={e => { if (e.target.value === "__new__") setShowNewCat(true); else setCategoryId(e.target.value); }}
+            style={{ ...inp({ width: "auto", fontSize: 14, padding: "8px 12px" }) }}>
+            <option value="">Uncategorized</option>
+            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="__new__">+ New category…</option>
+          </select>
+          {showNewCat && (
+            <NewCategoryPopover
+              onClose={() => setShowNewCat(false)}
+              onCreate={(name, color) => {
+                const cat = addCategory(name, color);
+                triggerSaved();
+                setCategoryId(cat.id);
+                setShowNewCat(false);
+              }}
+            />
+          )}
+        </div>
         <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
           {["draft", "published"].map(s => (
             <button key={s} onClick={() => setStatus(s)} style={{

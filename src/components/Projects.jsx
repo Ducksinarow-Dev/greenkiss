@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import {
   C, getProjects, addProject, updateProject, deleteProject, defProject,
   getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, confirmDelete, triggerSaved,
-  canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, projectStatusMeta, projectProgress,
-  TASK_STATUSES, inp,
+  canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
+  TASK_BOARD_STATUSES, inp,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver } from './shared.jsx';
 import { TaskCard, TaskModal, emptyForm as emptyTaskForm } from './TaskManager.jsx';
 
 /* Design intent: a project is a shelf, not a spreadsheet row — cards read
@@ -143,20 +143,24 @@ function ProjectModal({ initial, users, onSave, onDelete, onClose, isNew }) {
   );
 }
 
-function ProjectCard({ project, users, tasks, onOpen }) {
+function ProjectCard({ project, users, tasks, onOpen, draggable, onDragStart, onDragOver, isDragOver }) {
   const sm = projectStatusMeta[project.status] || PROJECT_STATUSES[0];
   const { done, total, pct } = projectProgress(project.id, tasks);
   const overdue = isOverdue(project.dueDate, project.status === "done" || project.status === "archived");
   return (
     <div onClick={onOpen} role="button" tabIndex={0}
+      draggable={!!draggable}
+      onDragStart={draggable ? (e => onDragStart(e, project.id)) : undefined}
+      onDragOver={draggable ? (e => onDragOver(e, project.id)) : undefined}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
       style={{
         display: "flex", cursor: "pointer", background: C.sur, borderRadius: 12,
-        border: `1.5px solid ${C.bdr}`, overflow: "hidden", transition: "box-shadow .15s",
+        border: `1.5px solid ${isDragOver ? C.moss : C.bdr}`, overflow: "hidden", transition: "box-shadow .15s, border-color .1s",
+        boxShadow: isDragOver ? `0 0 0 2px ${C.mossSoft}` : "none",
         opacity: project.status === "archived" ? 0.6 : 1,
       }}
-      onMouseEnter={e => e.currentTarget.style.boxShadow = C.shadowSm}
-      onMouseLeave={e => e.currentTarget.style.boxShadow = "none"}
+      onMouseEnter={e => { if (!isDragOver) e.currentTarget.style.boxShadow = C.shadowSm; }}
+      onMouseLeave={e => { if (!isDragOver) e.currentTarget.style.boxShadow = "none"; }}
     >
       <div style={{ width: 6, flexShrink: 0, background: project.color || C.moss }} />
       <div style={{ padding: "16px 18px", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -227,6 +231,7 @@ function TimelineStrip({ project, tasks }) {
 function ProjectDetail({ project, users, sops, allProjects, editable, onBack, onBump, onOpenSop }) {
   const [editing, setEditing] = useState(false);
   const [taskModal, setTaskModal] = useState(null); // {task, isNew}
+  const [showDone, setShowDone] = useState(false);
   const tasks = getTasks().filter(t => t.projectId === project.id);
   const sm = projectStatusMeta[project.status] || PROJECT_STATUSES[0];
   const lead = users.find(u => u.id === project.leadId);
@@ -288,6 +293,9 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
 
       <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, flex: 1 }}>Tasks</div>
+        <OBtn onClick={() => setShowDone(true)} style={{ marginRight: 10 }}>
+          <Icon name="task_alt" size={16} />Done ({tasks.filter(t => t.status === "done").length})
+        </OBtn>
         {editable && <Btn onClick={openNewTask}><Icon name="add" size={17} />New Task</Btn>}
       </div>
 
@@ -296,7 +304,7 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
           action={editable && <Btn onClick={openNewTask}><Icon name="add" size={17} />New Task</Btn>} />
       ) : (
         <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
-          {TASK_STATUSES.map(s => {
+          {TASK_BOARD_STATUSES.map(s => {
             const items = tasks.filter(t => t.status === s.key);
             return (
               <div key={s.key} style={{ flex: "1 1 260px", minWidth: 240, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12 }}>
@@ -327,15 +335,181 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
         <TaskModal initial={taskModal.task} isNew={taskModal.isNew} users={users} sops={sops} projects={allProjects}
           onSave={saveTask} onDelete={deleteTaskModal} onClose={() => setTaskModal(null)} />
       )}
+
+      {showDone && (
+        <SlideOver title={`Done (${tasks.filter(t => t.status === "done").length})`} icon="task_alt" onClose={() => setShowDone(false)}>
+          {tasks.filter(t => t.status === "done").length === 0 ? (
+            <div style={{ textAlign: "center", padding: "30px 10px", fontSize: 13, color: C.faint }}>No completed tasks yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {tasks.filter(t => t.status === "done").map(t => (
+                <TaskCard key={t.id} task={t} users={users} sops={sops} projects={allProjects}
+                  onOpen={() => openEditTask(t)} onDragStart={() => {}} onDragOver={() => {}} isDragOver={false}
+                  onQuickToggle={() => quickToggle(t)} onOpenSop={onOpenSop} />
+              ))}
+            </div>
+          )}
+        </SlideOver>
+      )}
     </div>
   );
 }
+
+/** List-view row: same data as ProjectCard, laid out horizontally so a
+ * whole status group scans like a spreadsheet-lite roster rather than a
+ * shelf of cards — the two views intentionally read differently. */
+function ProjectRow({ project, users, tasks, onOpen }) {
+  const sm = projectStatusMeta[project.status] || PROJECT_STATUSES[0];
+  const lead = users.find(u => u.id === project.leadId);
+  const { done, total, pct } = projectProgress(project.id, tasks);
+  const overdue = isOverdue(project.dueDate, project.status === "done" || project.status === "archived");
+  return (
+    <div onClick={onOpen} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      style={{
+        display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", cursor: "pointer",
+        background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 11, transition: "border-color .15s",
+        opacity: project.status === "archived" ? 0.6 : 1,
+      }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+      onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}
+    >
+      <div style={{ width: 5, alignSelf: "stretch", borderRadius: 99, background: project.color || C.moss, flexShrink: 0 }} />
+      <div style={{ flex: "2 1 220px", minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name || "Untitled project"}</div>
+        {lead && <div style={{ fontSize: 12, color: C.mut, marginTop: 2 }}>Led by {lead.name}</div>}
+      </div>
+      <Pill color={sm.col}>{sm.label}</Pill>
+      <div style={{ flex: "0 0 auto" }}><MemberStack users={users} ids={[project.leadId, ...(project.memberIds || [])].filter(Boolean)} /></div>
+      <div style={{ flex: "0 0 92px", textAlign: "right" }}>
+        {project.dueDate && (
+          <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace", color: overdue ? C.red : C.mut }}>{fmtDateShort(project.dueDate)}</span>
+        )}
+      </div>
+      <div style={{ flex: "0 0 130px" }}>
+        <ProgressBar pct={pct} color={project.color || C.moss} />
+        <div style={{ fontSize: 11, color: C.mut, marginTop: 3, textAlign: "right", fontFamily: "'IBM Plex Mono',monospace" }}>{done}/{total}</div>
+      </div>
+    </div>
+  );
+}
+
+/** List view (#14): the same projects as vertical sections grouped by
+ * status instead of columns. Done + Archived collapse into one section
+ * at the bottom (archived projects keep their own "Archived" pill rather
+ * than reading as done). */
+function ProjectListView({ projects, users, tasks, onOpen }) {
+  const [doneOpen, setDoneOpen] = useState(false);
+  const doneItems = projects.filter(p => p.status === "done" || p.status === "archived");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      {PROJECT_BOARD_STATUSES.map(s => {
+        const items = projects.filter(p => p.status === s.key);
+        if (items.length === 0) return null;
+        return (
+          <div key={s.key}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+              <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
+              <span style={{ fontSize: 12, color: C.mut }}>({items.length})</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {items.map(p => <ProjectRow key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpen(p.id)} />)}
+            </div>
+          </div>
+        );
+      })}
+      <div>
+        <button type="button" onClick={() => setDoneOpen(o => !o)} style={{
+          display: "flex", alignItems: "center", gap: 7, background: "none", border: "none", cursor: "pointer",
+          fontFamily: "inherit", padding: 0, marginBottom: doneOpen ? 10 : 0,
+        }}>
+          <Icon name={doneOpen ? "expand_less" : "expand_more"} size={18} style={{ color: C.mut }} />
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.txt, textTransform: "uppercase", letterSpacing: "0.05em" }}>Done</div>
+          <span style={{ fontSize: 12, color: C.mut }}>({doneItems.length})</span>
+        </button>
+        {doneOpen && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {doneItems.length === 0 && <div style={{ fontSize: 13, color: C.faint, padding: "6px 2px" }}>Nothing done yet.</div>}
+            {doneItems.map(p => <ProjectRow key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpen(p.id)} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Board view (default): Upcoming / In Progress / Approval columns, drag
+ * a card to change status. Done + Archived hide behind the same
+ * slide-over treatment as Task Manager's Done column (#6). */
+function ProjectBoardView({ projects, users, tasks, onOpen, onBump }) {
+  const [dragItem, setDragItem] = useState(null);
+  const [dragOverItem, setDragOverItem] = useState(null);
+  const [showDone, setShowDone] = useState(false);
+  const doneItems = projects.filter(p => p.status === "done" || p.status === "archived");
+
+  const onDragStart = (e, id) => { setDragItem(id); e.dataTransfer.effectAllowed = "move"; };
+  const onDragOverCard = (e, id) => { e.preventDefault(); e.stopPropagation(); setDragOverItem(id); };
+  const onDropColumn = (e, status) => {
+    e.preventDefault();
+    if (dragItem) { updateProject(dragItem, { status }); triggerSaved(); }
+    setDragItem(null); setDragOverItem(null); onBump();
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <OBtn onClick={() => setShowDone(true)}><Icon name="task_alt" size={16} />Done ({doneItems.length})</OBtn>
+      </div>
+      <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
+        {PROJECT_BOARD_STATUSES.map(s => {
+          const items = projects.filter(p => p.status === s.key);
+          return (
+            <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
+              style={{ flex: "1 1 300px", minWidth: 280, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+                <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
+                <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
+                <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{items.length}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {items.map(p => (
+                  <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpen(p.id)}
+                    draggable onDragStart={onDragStart} onDragOver={onDragOverCard} isDragOver={dragOverItem === p.id} />
+                ))}
+                {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>No projects</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {showDone && (
+        <SlideOver title={`Done (${doneItems.length})`} icon="task_alt" onClose={() => setShowDone(false)}>
+          {doneItems.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "30px 10px", fontSize: 13, color: C.faint }}>No completed or archived projects yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {doneItems.map(p => <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpen(p.id)} />)}
+            </div>
+          )}
+        </SlideOver>
+      )}
+    </>
+  );
+}
+
+const PROJECTS_VIEW_KEY = "gkProjectsView";
+const getProjectsView = () => { try { return localStorage.getItem(PROJECTS_VIEW_KEY) || "board"; } catch { return "board"; } };
+const setProjectsView = (v) => { try { localStorage.setItem(PROJECTS_VIEW_KEY, v); } catch {} };
 
 function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
   const [refresh, setRefresh] = useState(0);
   const [selectedId, setSelectedId] = useState(focusProjectId || null);
   const [creating, setCreating] = useState(false);
+  const [view, setView] = useState(getProjectsView);
   const bump = () => setRefresh(r => r + 1);
+  const changeView = (v) => { setView(v); setProjectsView(v); };
 
   const users = getUsers();
   const sops = getSOPs();
@@ -365,17 +539,30 @@ function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
   return (
     <div className="gk-fade-in">
       <SectionHeader title="Projects" sub={`${projects.length} project${projects.length === 1 ? "" : "s"}`}
-        right={editable && <Btn onClick={() => setCreating(true)}><Icon name="add" size={17} />New Project</Btn>} />
+        right={<>
+          <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
+            {[{ key: "board", icon: "view_kanban" }, { key: "list", icon: "view_list" }].map(v => (
+              <button key={v.key} type="button" onClick={() => changeView(v.key)} title={v.key === "board" ? "Board view" : "List view"}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                  background: view === v.key ? C.sur : "transparent", color: view === v.key ? C.moss : C.mut,
+                  boxShadow: view === v.key ? C.shadowSm : "none",
+                }}>
+                <Icon name={v.icon} size={16} />{v.key === "board" ? "Board" : "List"}
+              </button>
+            ))}
+          </div>
+          {editable && <Btn onClick={() => setCreating(true)}><Icon name="add" size={17} />New Project</Btn>}
+        </>} />
 
       {projects.length === 0 ? (
         <EmptyState icon="folder_special" title="No projects yet" sub="Group related tasks together and track them as a team."
           action={editable && <Btn onClick={() => setCreating(true)}><Icon name="add" size={17} />New Project</Btn>} />
+      ) : view === "list" ? (
+        <ProjectListView projects={projects} users={users} tasks={tasks} onOpen={setSelectedId} />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 14 }}>
-          {projects.map(p => (
-            <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => setSelectedId(p.id)} />
-          ))}
-        </div>
+        <ProjectBoardView projects={projects} users={users} tasks={tasks} onOpen={setSelectedId} onBump={bump} />
       )}
 
       {creating && (

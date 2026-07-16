@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { C } from '../globals.js';
 
 /* Design intent (interface-design skill):
@@ -161,4 +161,33 @@ function Avatar({ name, size = 26, color }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl };
+/** Shared right-hand slide-over panel — used for the "Done" bucket on both
+ * the Task Manager and Projects boards (#6/#14) so completed items stay
+ * reachable without permanently occupying board width. Scrim click + ESC
+ * both close it, matching the modal dismissal pattern used elsewhere. */
+function SlideOver({ title, icon, onClose, children, width = 420 }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 560 }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(10,12,10,0.32)" }} />
+      <div className="gk-slide-in" style={{
+        position: "absolute", top: 0, right: 0, bottom: 0, width, maxWidth: "92vw",
+        background: C.sur, borderLeft: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
+        display: "flex", flexDirection: "column",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "18px 20px", borderBottom: `1.5px solid ${C.bdr}`, flexShrink: 0 }}>
+          {icon && <Icon name={icon} size={19} style={{ color: C.moss }} />}
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.txt, flex: 1, textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</div>
+          <IconBtn icon="close" title="Close" onClick={onClose} />
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver };

@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import {
   C, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
   getUsers, getSOPs, getProjects, fmtDateShort, canEdit, isOverdue,
-  TASK_STATUSES, TASK_PRIORITIES, taskPriorityMeta, inp,
+  TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
+  TASK_TYPES, taskType, inp,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver } from './shared.jsx';
 
 const emptyForm = () => ({
-  title: "", description: "", status: "todo", priority: "medium",
+  title: "", description: "", status: "todo", priority: "medium", type: "task",
   assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [],
 });
 
@@ -55,6 +56,22 @@ function TaskModal({ initial, users, sops, projects, onSave, onDelete, onClose, 
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={labelStyle}>Type</label>
+            <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, width: "fit-content" }}>
+              {TASK_TYPES.map(t => (
+                <button key={t.key} type="button" onClick={() => set("type", t.key)} style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+                  fontFamily: "inherit", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                  background: (form.type || "task") === t.key ? C.sur : "transparent",
+                  color: (form.type || "task") === t.key ? C.moss : C.mut,
+                  boxShadow: (form.type || "task") === t.key ? C.shadowSm : "none",
+                }}>
+                  <Icon name={t.icon} size={15} />{t.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label style={labelStyle}>Title</label>
             <input autoFocus value={form.title} onChange={e => set("title", e.target.value)} placeholder="Task title…" style={inp()} />
@@ -144,7 +161,11 @@ function TaskCard({ task, users, sops, projects, onOpen, onDragStart, onDragOver
   const project = (projects || []).find(p => p.id === task.projectId);
   const subTasks = task.subTasks || [];
   const stDone = subTasks.filter(s => s.done).length;
-  const overdue = isOverdue(task.dueDate, task.status === "done");
+  const tm = taskType(task);
+  const isMilestone = tm.key === "milestone";
+  const isNote = tm.key === "note";
+  // Notes don't nag about dates — no overdue flag, just a quiet timestamp.
+  const overdue = !isNote && isOverdue(task.dueDate, task.status === "done");
   const isDone = task.status === "done";
   return (
     <div draggable onDragStart={e => onDragStart(e, task.id)} onDragOver={e => onDragOver(e, task.id)} onClick={onOpen}
@@ -167,7 +188,13 @@ function TaskCard({ task, users, sops, projects, onOpen, onDragStart, onDragOver
           {isDone && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.6 : 1 }}>{task.title}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name={tm.icon} size={15} style={{ color: isMilestone ? C.moss : C.faint, flexShrink: 0 }} title={tm.label} />
+            <div style={{
+              fontSize: 15, fontWeight: isMilestone ? 800 : 700, color: isMilestone ? C.moss : C.txt,
+              textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.6 : 1,
+            }}>{task.title}</div>
+          </div>
           {project && (
             <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: project.color || C.moss, marginTop: 3, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }} title="Project">
               <Icon name="folder" size={13} />{project.name || "Untitled project"}
@@ -207,9 +234,32 @@ function TaskCard({ task, users, sops, projects, onOpen, onDragStart, onDragOver
   );
 }
 
+/** The Done bucket lives here instead of a permanent 4th board column
+ * (#6) — same task cards, reachable via the "Done (n)" button in the
+ * header. Un-checking a card's checkbox sends it back to To Do, the
+ * simplest correct un-done behavior. */
+function TaskDoneSlideOver({ tasks, users, sops, projects, onClose, onOpen, onQuickToggle, onOpenSop }) {
+  return (
+    <SlideOver title={`Done (${tasks.length})`} icon="task_alt" onClose={onClose}>
+      {tasks.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "30px 10px", fontSize: 13, color: C.faint }}>No completed tasks yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          {tasks.map(t => (
+            <TaskCard key={t.id} task={t} users={users} sops={sops} projects={projects}
+              onOpen={() => onOpen(t)} onDragStart={() => {}} onDragOver={() => {}} isDragOver={false}
+              onQuickToggle={() => onQuickToggle(t)} onOpenSop={onOpenSop} />
+          ))}
+        </div>
+      )}
+    </SlideOver>
+  );
+}
+
 function TaskManager({ user, onOpenSop }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
+  const [showDone, setShowDone] = useState(false);
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
   const [filterProject, setFilterProject] = useState("");
@@ -272,11 +322,15 @@ function TaskManager({ user, onOpenSop }) {
   };
 
   const openCount = tasks.filter(t => t.status !== "done").length;
+  const doneTasks = byStatus("done");
 
   return (
     <div className="gk-fade-in">
       <SectionHeader title="Task Manager" sub={`${openCount} open task${openCount === 1 ? "" : "s"}`}
-        right={editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>} />
+        right={<>
+          <OBtn onClick={() => setShowDone(true)}><Icon name="task_alt" size={16} />Done ({doneTasks.length})</OBtn>
+          {editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>}
+        </>} />
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
         <div style={{ position: "relative", flex: "1 1 220px", maxWidth: 320 }}>
@@ -307,7 +361,7 @@ function TaskManager({ user, onOpenSop }) {
           action={editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>} />
       ) : (
         <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
-          {TASK_STATUSES.map(s => {
+          {TASK_BOARD_STATUSES.map(s => {
             const items = byStatus(s.key);
             return (
               <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
@@ -335,6 +389,11 @@ function TaskManager({ user, onOpenSop }) {
       {modal && (
         <TaskModal initial={modal.task} isNew={modal.isNew} users={users} sops={sops} projects={projects}
           onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
+      )}
+
+      {showDone && (
+        <TaskDoneSlideOver tasks={doneTasks} users={users} sops={sops} projects={projects}
+          onClose={() => setShowDone(false)} onOpen={openEdit} onQuickToggle={quickToggle} onOpenSop={onOpenSop} />
       )}
     </div>
   );
