@@ -787,7 +787,10 @@ function _devSnapshotIfChanged(prevSop, nextSop) {
 }
 
 const addSOP = (sop) => {
-  const next = [...getSOPs(), sop];
+  // Upsert by id — SOPEditor's debounced autosave and unmount cleanup can
+  // both fire for a brand-new SOP; blind append duplicated it (server's
+  // sop_save already upserts, this makes dev mode and the cache match).
+  const next = [...getSOPs().filter(s => s.id !== sop.id), sop];
   if (REMOTE_MODE) { _cache.set("sops", next); _remoteSopSave(sop); return sop; }
   saveSOPs(next);
   return sop;
