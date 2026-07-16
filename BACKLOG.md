@@ -41,7 +41,7 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 ### Admin / Ops
 - ~~#13: Rollback to previous release~~ — shipped 2026-07-16, see top of file.
 
-### AI features (needs a scoping conversation before estimating — see note below)
+### AI features — DEFERRED (Hayden, Jul 16 2026: revisit after staff have used the tool and real search/automation needs are clearer)
 - **#11: AI search agent across the whole app** — natural-language search over SOPs/tasks/projects/content.
 - **#12: AI action agent** — natural-language prompts to create/assign/reassign SOPs and tasks, pull from a project or campaign, and generate a presentation-style summary with imagery and links.
 
