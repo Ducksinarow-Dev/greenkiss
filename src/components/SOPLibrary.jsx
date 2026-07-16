@@ -194,7 +194,7 @@ function pillBtnStyle(active, color) {
 }
 function countStyle(active, color) {
   return {
-    fontSize: 12, fontWeight: 700, background: active ? "rgba(255,255,255,0.6)" : C.s2,
+    fontSize: 12, fontWeight: 700, background: active ? C.sur : C.s2,
     color: active ? color : C.mut, borderRadius: 99, padding: "1px 7px",
   };
 }

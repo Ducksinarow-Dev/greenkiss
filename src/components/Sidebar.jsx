@@ -82,10 +82,11 @@ function ChangePinModal({ onClose }) {
   );
 }
 
-function Sidebar({ section, setSection, user, onLogout }) {
+function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
   const [showPinModal, setShowPinModal] = useState(false);
   const items = [...NAV_ITEMS];
   if (isAdmin(user)) items.push({ key: "admin", label: "Admin Panel", icon: "tune" });
+  const theme = getTheme();
 
   return (
     <div style={{
@@ -96,7 +97,7 @@ function Sidebar({ section, setSection, user, onLogout }) {
           can't be recolored by fill, the asset is a flattened raster). */}
       <div style={{ padding: "26px 20px 22px", display: "flex", alignItems: "center", gap: 11 }}>
         <img src={gkLogo} alt="" aria-hidden="true" style={
-          getTheme() === "dark"
+          theme === "dark"
             ? { width: 32, height: 32, flexShrink: 0, filter: "invert(1)", mixBlendMode: "screen" }
             : { width: 32, height: 32, flexShrink: 0, mixBlendMode: "multiply" }
         } />
@@ -139,6 +140,13 @@ function Sidebar({ section, setSection, user, onLogout }) {
           style={{ flex: 1, minWidth: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontFamily: "inherit" }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</div>
           <div style={{ fontSize: 11, color: C.mut, textTransform: "capitalize" }}>{user?.role}</div>
+        </button>
+        <button onClick={onToggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}
+          onMouseEnter={e => e.currentTarget.style.background = C.s2}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <Icon name={theme === "dark" ? "light_mode" : "dark_mode"} size={19} />
         </button>
         <button onClick={() => { clearCurrentUser(); onLogout(); }} title="Log out"
           style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}

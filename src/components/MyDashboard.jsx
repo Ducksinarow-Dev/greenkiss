@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  C, FONT_CAPS, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
+  C, FONT_CAPS, getTheme, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
   getContentItems, updateContentItem, getCampaigns, contentChannelMeta,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
@@ -192,7 +192,11 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
           padding: "72px 24px", textAlign: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14,
         }}>
-          <img src={gkLogo} alt="" aria-hidden="true" style={{ width: 44, height: 44, marginBottom: 18, mixBlendMode: "multiply", opacity: 0.5 }} />
+          <img src={gkLogo} alt="" aria-hidden="true" style={
+            getTheme() === "dark"
+              ? { width: 44, height: 44, marginBottom: 18, filter: "invert(1)", mixBlendMode: "screen", opacity: 0.5 }
+              : { width: 44, height: 44, marginBottom: 18, mixBlendMode: "multiply", opacity: 0.5 }
+          } />
           <div style={{ fontSize: 17, fontWeight: 700, color: C.txt, marginBottom: 6 }}>Nothing on your plate</div>
           <div style={{ fontSize: 14, color: C.mut, maxWidth: 360 }}>Tasks and sub-tasks assigned to you will show up here, grouped by when they're due.</div>
         </div>
