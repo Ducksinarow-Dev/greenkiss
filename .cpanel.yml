@@ -13,6 +13,6 @@
 # cp -R never touches them.
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/__CPANEL_USER__/public_html/__APP_PATH__/
+    - export DEPLOYPATH=/home/hubthegreenkiss/public_html/
     - /bin/mkdir -p $DEPLOYPATH
     - /bin/cp -R * $DEPLOYPATH
