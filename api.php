@@ -492,12 +492,13 @@ switch ($action) {
         $host = 'https://' . CPANEL_HOST . ':2083';
 
         // Step 1: bring the local checkout up to date with GitHub before
-        // deploying. The exact UAPI call for this isn't confidently confirmed
-        // (cPanel's own "Update from Remote" button does it) — best guess is
-        // VersionControl::update. Tolerated as best-effort: if it fails, we
-        // still proceed to deploy whatever commit is already checked out,
+        // deploying. VersionControl::update needs BOTH repository_root AND
+        // branch — without branch it's a settings no-op that reports success
+        // while pulling nothing (bit us in v0.1.3→v0.1.4). Still best-effort:
+        // if it fails, we proceed to deploy whatever commit is checked out,
         // which is a safe no-op rather than a destructive failure.
-        $pullResult = cpanelApiCall($host . '/execute/VersionControl/update', ['repository_root' => CPANEL_REPO_PATH], $authHeader);
+        $branch = defined('CPANEL_REPO_BRANCH') ? CPANEL_REPO_BRANCH : 'release';
+        $pullResult = cpanelApiCall($host . '/execute/VersionControl/update', ['repository_root' => CPANEL_REPO_PATH, 'branch' => $branch], $authHeader);
 
         // Step 2: deploy — runs the .cpanel.yml task, copying the checked-out
         // branch's files into the live document root.
@@ -506,14 +507,16 @@ switch ($action) {
         $deployStatus = $deployResult['data']['result']['status'] ?? null;
         $deployOk = $deployResult['httpCode'] === 200 && $deployResult['curlError'] === null
             && ($deployStatus === null || (int)$deployStatus === 1);
-        $pullOk = $pullResult['httpCode'] === 200 && $pullResult['curlError'] === null;
+        $pullStatus = $pullResult['data']['result']['status'] ?? null;
+        $pullOk = $pullResult['httpCode'] === 200 && $pullResult['curlError'] === null
+            && ($pullStatus === null || (int)$pullStatus === 1);
 
         // Human-readable step-by-step notes so a failure is debuggable from
         // the Admin Panel alone, without needing to tail a PHP error log.
         $notes = [];
         $notes[] = $pullOk
             ? 'Remote-update pull: ok (HTTP ' . $pullResult['httpCode'] . ').'
-            : 'Remote-update pull: failed (' . ($pullResult['curlError'] ?: ('HTTP ' . $pullResult['httpCode'])) . ') — this step is best-effort; deploy proceeds with whatever commit is already checked out.';
+            : 'Remote-update pull: failed (' . ($pullResult['curlError'] ?: ('HTTP ' . $pullResult['httpCode'] . (isset($pullResult['data']['result']['errors']) ? ' — ' . json_encode($pullResult['data']['result']['errors']) : ($pullResult['rawExcerpt'] ? ' — ' . $pullResult['rawExcerpt'] : '')))) . ') — this step is best-effort; deploy proceeds with whatever commit is already checked out.';
         $notes[] = $deployOk
             ? 'Deploy: triggered successfully.'
             : 'Deploy: failed (' . ($deployResult['curlError'] ?: ('HTTP ' . $deployResult['httpCode'] . (isset($deployResult['data']['result']['errors']) ? ' — ' . json_encode($deployResult['data']['result']['errors']) : ($deployResult['rawExcerpt'] ? ' — ' . $deployResult['rawExcerpt'] : '')))) . ').';

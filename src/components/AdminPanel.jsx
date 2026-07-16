@@ -419,8 +419,16 @@ function DeployPanel() {
   const doDeploy = async () => {
     setResult(null);
     try {
-      await adminDeploy();
-      setResult({ ok: true, message: "Deployed — reload to see it." });
+      const res = await adminDeploy();
+      // Deploy succeeding while the pull silently failed just redeploys the
+      // old commit — surface the per-step notes so that's visible, not silent.
+      const pullNote = (res?.notes || []).find(n => n.toLowerCase().includes("pull") && n.toLowerCase().includes("fail"));
+      setResult({
+        ok: true,
+        message: pullNote
+          ? "Deploy ran, but pulling the new release failed — the site may still be on the old version. " + pullNote
+          : "Deployed — reload to see it.",
+      });
       triggerSaved();
       load();
     } catch (e) {
