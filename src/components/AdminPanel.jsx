@@ -384,6 +384,7 @@ function DeployPanel() {
   const [versionInfo, setVersionInfo] = useState(null);
   const [lastDeploy, setLastDeploy] = useState(null);
   const [ghSha, setGhSha] = useState(null);
+  const [ghMsg, setGhMsg] = useState("");
   const [ghError, setGhError] = useState("");
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
@@ -398,13 +399,22 @@ function DeployPanel() {
     // Public repo, no auth needed — plain fetch straight from the browser.
     fetch(GITHUB_RELEASE_COMMIT_URL)
       .then(r => { if (!r.ok) throw new Error("GitHub check failed (" + r.status + ")"); return r.json(); })
-      .then(data => setGhSha(data.sha || null))
+      .then(data => { setGhSha(data.sha || null); setGhMsg(data.commit?.message || ""); })
       .catch(e => setGhError(e.message || "Could not check GitHub for the latest release."));
   };
   useEffect(() => { load(); }, []);
 
   const deployedCommit = versionInfo?.commit || "";
-  const upToDate = !!(ghSha && deployedCommit && ghSha.startsWith(deployedCommit));
+  // The release branch's own SHA never equals the main-branch commit the
+  // deployed build was stamped with — every release is a distinct commit on
+  // the release branch. But release.sh writes the source commit into the
+  // message ("Release v0.1.3 (54b6fa4 on main)"), so parse and compare that,
+  // with the version number as a fallback signal.
+  const ghSrcSha = (ghMsg.match(/\(([0-9a-f]{7,40}) on /) || [])[1] || null;
+  const ghVersion = (ghMsg.match(/Release v([\d.]+)/) || [])[1] || null;
+  const upToDate =
+    !!(ghSrcSha && deployedCommit && (ghSrcSha.startsWith(deployedCommit) || deployedCommit.startsWith(ghSrcSha))) ||
+    !!(ghVersion && versionInfo?.version && ghVersion === versionInfo.version);
 
   const doDeploy = async () => {
     setResult(null);
@@ -439,7 +449,7 @@ function DeployPanel() {
             {!ghError && ghSha && (
               <div>
                 <Pill color={upToDate ? C.moss : C.clay}>
-                  {upToDate ? "Up to date" : `Update available (${ghSha.slice(0, 7)} pending)`}
+                  {upToDate ? "Up to date" : `Update available (${ghVersion ? "v" + ghVersion : ghSha.slice(0, 7)} pending)`}
                 </Pill>
               </div>
             )}
