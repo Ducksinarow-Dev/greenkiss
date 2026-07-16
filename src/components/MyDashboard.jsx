@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
   C, FONT_CAPS, getTheme, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
-  getContentItems, updateContentItem, getCampaigns, contentChannelMeta,
+  getContentItems, updateContentItem, getCampaigns, contentChannelMeta, getTags,
+  getAlerts, deleteAlert, fmtDate,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
-import { Icon } from './shared.jsx';
+import { Icon, IconBtn } from './shared.jsx';
 import { TaskModal } from './TaskManager.jsx';
 import { ProjectCard } from './Projects.jsx';
 import gkLogo from '../assets/gk-logo.svg';
@@ -85,6 +86,45 @@ function ItemGroup({ group, items, onToggle, onOpen }) {
   );
 }
 
+/** #9 — the target user's alert strip: any staff member who flagged a task
+ * for someone shows up here, rose/pink accent, dismissible (dismiss =
+ * delete the alert record). Sits above everything else on the dashboard. */
+function AlertsStrip({ alerts, tasks, users, onDismiss, onOpenTask }) {
+  if (alerts.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 24, display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{
+        fontSize: 12, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
+        color: C.red, display: "flex", alignItems: "center", gap: 6,
+      }}>
+        <Icon name="campaign" size={14} />Alerts <span style={{ color: C.faint, fontWeight: 500 }}>({alerts.length})</span>
+      </div>
+      {alerts.map(a => {
+        const task = tasks.find(t => t.id === a.taskId);
+        const from = users.find(u => u.id === a.fromUserId);
+        return (
+          <div key={a.id} style={{
+            display: "flex", alignItems: "center", gap: 11, padding: "10px 14px", borderRadius: 10,
+            background: C.red + "0d", border: `1.5px solid ${C.red}38`,
+          }}>
+            <Icon name="campaign" size={17} style={{ color: C.red, flexShrink: 0 }} />
+            <div onClick={() => task && onOpenTask(task)} role={task ? "button" : undefined} tabIndex={task ? 0 : undefined}
+              style={{ flex: 1, minWidth: 0, cursor: task ? "pointer" : "default" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {task ? task.title : "Task no longer exists"}
+              </div>
+              <div style={{ fontSize: 12, color: C.mut, marginTop: 1 }}>
+                Flagged by {from ? from.name : "someone"} · {fmtDate(a.at)}
+              </div>
+            </div>
+            <IconBtn icon="close" title="Dismiss" onClick={() => onDismiss(a.id)} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MyDashboard({ user, onOpenProject, onOpenContent }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
@@ -96,10 +136,14 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
   const tasks = getTasks();
   const campaigns = getCampaigns();
   const contentItems = getContentItems();
+  const myAlerts = getAlerts().filter(a => a.toUserId === user.id).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const dismissAlert = (id) => { deleteAlert(id); bump(); };
+  const openAlertedTask = (task) => setModal({ task: { ...task }, isNew: false });
 
-  // My tasks: assigned to me directly.
+  // My tasks: assigned to me directly. Archived tasks are hidden everywhere,
+  // including here (#9).
   const myTaskItems = tasks
-    .filter(t => t.assignedTo === user.id)
+    .filter(t => t.assignedTo === user.id && !t.archived)
     .map(t => ({
       key: "task:" + t.id, kind: "task", task: t, title: t.title, dueDate: t.dueDate,
       group: classify(t.dueDate, t.status === "done"),
@@ -110,6 +154,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
   // with the parent task's title so it's clear what it belongs to.
   const mySubtaskItems = [];
   tasks.forEach(t => {
+    if (t.archived) return;
     (t.subTasks || []).forEach(s => {
       if (s.assigneeId !== user.id) return;
       const g = classify(s.dueDate, s.done);
@@ -187,6 +232,8 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
 
+      <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
+
       {totalOpen === 0 ? (
         <div style={{
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -220,7 +267,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
       )}
 
       {modal && (
-        <TaskModal initial={modal.task} isNew={false} users={users} sops={sops} projects={projects}
+        <TaskModal initial={modal.task} isNew={false} users={users} sops={sops} projects={projects} tags={getTags()}
           onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
       )}
     </div>

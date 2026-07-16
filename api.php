@@ -38,6 +38,12 @@
  *   POST  content_delete    {id}         - editor/admin
  *   POST  category_save     {category}   - editor/admin; upsert one category by id
  *   POST  category_delete   {id}         - editor/admin
+ *   POST  tag_save          {tag}        - editor/admin; upsert one tag by id (#8)
+ *   POST  tag_delete        {id}         - editor/admin
+ *   POST  alert_save        {alert}      - any authenticated user; upsert one alert by id (#9)
+ *   POST  alert_delete      {id}         - alert's target, its creator, or admin
+ *   POST  template_save     {template}   - editor/admin; upsert one task template by id (#9)
+ *   POST  template_delete   {id}         - editor/admin
  *   POST  ack_save          {sopId,userId,at,version} - any user; merges one ack entry
  *
  *   *     backup_run       ?cron_key=   - admin token OR cron_key; also runs lazily on writes
@@ -260,6 +266,69 @@ switch ($action) {
         if ($id === '') respond(400, ['error' => 'Missing id']);
         maybeAutoBackup($pdo);
         respond(200, ['ok' => true, 'categories' => collectionDelete($pdo, 'categories', $id)]);
+        break;
+
+    case 'tag_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $tag = $body['tag'] ?? null;
+        if (!is_array($tag) || empty($tag['id'])) respond(400, ['error' => 'Missing tag']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'tags' => collectionUpsert($pdo, 'tags', $tag)]);
+        break;
+
+    case 'tag_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'tags' => collectionDelete($pdo, 'tags', $id)]);
+        break;
+
+    case 'alert_save':
+        // Any authenticated user may create — a viewer might need to flag
+        // something for a manager even without edit rights.
+        $user = requireAuth($pdo, $body);
+        $alert = $body['alert'] ?? null;
+        if (!is_array($alert) || empty($alert['id'])) respond(400, ['error' => 'Missing alert']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'alerts' => collectionUpsert($pdo, 'alerts', $alert)]);
+        break;
+
+    case 'alert_delete':
+        // Delete requires being the alert's target, its creator, or an admin
+        // — dismissing someone else's flag isn't a role thing, it's an
+        // ownership thing.
+        $user = requireAuth($pdo, $body);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        $alerts = kvGet($pdo, 'alerts') ?: [];
+        $target = null;
+        foreach ($alerts as $a) { if (($a['id'] ?? null) === $id) { $target = $a; break; } }
+        if ($target === null) respond(200, ['ok' => true, 'alerts' => $alerts]);
+        $isOwner = $target['toUserId'] === $user['id'] || $target['fromUserId'] === $user['id'];
+        if (!$isOwner && $user['role'] !== 'admin') respond(403, ['error' => 'Insufficient permissions for this action']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'alerts' => collectionDelete($pdo, 'alerts', $id)]);
+        break;
+
+    case 'template_save':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $template = $body['template'] ?? null;
+        if (!is_array($template) || empty($template['id'])) respond(400, ['error' => 'Missing template']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'taskTemplates' => collectionUpsert($pdo, 'taskTemplates', $template)]);
+        break;
+
+    case 'template_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'taskTemplates' => collectionDelete($pdo, 'taskTemplates', $id)]);
         break;
 
     case 'ack_save':

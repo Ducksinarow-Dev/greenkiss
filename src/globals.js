@@ -47,6 +47,15 @@
  * @property {boolean} done
  * @property {string} [assigneeId] user id
  * @property {string} [dueDate] ISO date (yyyy-mm-dd)
+ * @property {"low"|"medium"|"high"|"urgent"} [priority] (#8/#9 tile anatomy)
+ *
+ * @typedef {Object} Tag
+ * @property {string} id
+ * @property {string} name
+ * @property {string} color hex, from CATEGORY_COLORS
+ * @property {string} createdAt
+ *
+ * @typedef {"none"|"daily"|"weekly"|"monthly"} Recurrence
  *
  * @typedef {Object} Task
  * @property {string} id
@@ -60,8 +69,25 @@
  * @property {string} [projectId] linked Project.id, empty for standalone tasks
  * @property {SubTask[]} subTasks
  * @property {"task"|"note"|"milestone"} [type] defaults to "task" when absent
+ * @property {string[]} [tagIds] (#8)
+ * @property {Recurrence} [recurrence] (#8) defaults to "none" when absent
+ * @property {string[]} [favouritedBy] user ids who've starred this task (#9)
+ * @property {boolean} [archived] (#9) hidden from board + dashboard when true
  * @property {string} createdAt
  * @property {number} [order]
+ *
+ * @typedef {Object} Alert
+ * @property {string} id
+ * @property {string} taskId
+ * @property {string} fromUserId
+ * @property {string} toUserId
+ * @property {string} at ISO timestamp
+ *
+ * @typedef {Object} TaskTemplate
+ * @property {string} id
+ * @property {string} name
+ * @property {Object} snapshot stripped Task shape (no id/status/assignee/dates)
+ * @property {string} createdAt
  *
  * @typedef {Object} Project
  * @property {string} id
@@ -636,6 +662,96 @@ const deleteCategory = (id) => {
   saveSOPs(sops);
 };
 
+/* ─── TAG STORAGE (#8 — foundation for tag chips + create-on-the-fly) ─
+   Same per-record collision-safe shape as categories. Colors are drawn
+   from the same CATEGORY_COLORS swatch set so tag chips visually match
+   the rest of the app's "ingredient label" tag treatment. */
+/** @returns {Tag[]} */
+const getTags = () => db.getSync("tags") || [];
+/** @param {Tag[]} t */
+const saveTags = (t) => db.setSync("tags", t);
+const addTag = (name, color) => {
+  const newTag = { id: uid(), name, color, createdAt: nowISO() };
+  const next = [...getTags(), newTag];
+  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionSave("tag_save", "tag", newTag, "tags"); return newTag; }
+  saveTags(next);
+  return newTag;
+};
+const updateTag = (id, changes) => {
+  const next = getTags().map(t => t.id === id ? { ...t, ...changes } : t);
+  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionSave("tag_save", "tag", next.find(t => t.id === id), "tags"); return next; }
+  saveTags(next);
+  return next;
+};
+const deleteTag = (id) => {
+  const next = getTags().filter(t => t.id !== id);
+  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionDelete("tag_delete", id, "tags"); }
+  else saveTags(next);
+  // Unlink rather than cascade-fail — tasks just lose the tag chip.
+  saveTasks(getTasks().map(t => (t.tagIds || []).includes(id) ? { ...t, tagIds: t.tagIds.filter(x => x !== id) } : t));
+};
+
+/* ─── ALERT STORAGE (#9 — "Alert staff member" overflow action) ──────
+   Any authenticated user may create (flagging something for a manager is
+   a viewer-appropriate action); delete is restricted server-side to the
+   alert's target, its creator, or an admin. */
+/** @returns {Alert[]} */
+const getAlerts = () => db.getSync("alerts") || [];
+/** @param {Alert[]} a */
+const saveAlerts = (a) => db.setSync("alerts", a);
+const addAlert = (taskId, toUserId) => {
+  const me = getCurrentUser();
+  const newAlert = { id: uid(), taskId, fromUserId: me?.id || "", toUserId, at: nowISO() };
+  const next = [...getAlerts(), newAlert];
+  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionSave("alert_save", "alert", newAlert, "alerts"); return newAlert; }
+  saveAlerts(next);
+  return newAlert;
+};
+const deleteAlert = (id) => {
+  const next = getAlerts().filter(a => a.id !== id);
+  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionDelete("alert_delete", id, "alerts"); }
+  else saveAlerts(next);
+};
+
+/* ─── TASK TEMPLATE STORAGE (#9 — "Templates" overflow action) ──────── */
+/** @returns {TaskTemplate[]} */
+const getTaskTemplates = () => db.getSync("taskTemplates") || [];
+/** @param {TaskTemplate[]} t */
+const saveTaskTemplates = (t) => db.setSync("taskTemplates", t);
+/** Strips id/status/assignee/dates so the template is a reusable shape,
+ * not a frozen copy of one specific task. Subtasks keep their text/priority
+ * but lose assignee/dates/done for the same reason. */
+const snapshotTaskForTemplate = (task) => ({
+  title: task.title, description: task.description || "", type: task.type || "task",
+  priority: task.priority || "medium", tagIds: task.tagIds || [], relatedSopId: task.relatedSopId || "",
+  subTasks: (task.subTasks || []).map(s => ({ text: s.text, priority: s.priority || "medium" })),
+});
+const addTaskTemplate = (name, task) => {
+  const newTpl = { id: uid(), name, snapshot: snapshotTaskForTemplate(task), createdAt: nowISO() };
+  const next = [...getTaskTemplates(), newTpl];
+  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionSave("template_save", "template", newTpl, "taskTemplates"); return newTpl; }
+  saveTaskTemplates(next);
+  return newTpl;
+};
+const deleteTaskTemplate = (id) => {
+  const next = getTaskTemplates().filter(t => t.id !== id);
+  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionDelete("template_delete", id, "taskTemplates"); }
+  else saveTaskTemplates(next);
+};
+/** Builds a fresh Task from a template — into a specific column/project,
+ * never overwriting anything. */
+const taskFromTemplate = (tpl, extra = {}) => {
+  const snap = tpl.snapshot || {};
+  return {
+    id: uid(), createdAt: nowISO(), title: snap.title || "", description: snap.description || "",
+    status: "todo", priority: snap.priority || "medium", type: snap.type || "task",
+    assignedTo: "", dueDate: "", relatedSopId: snap.relatedSopId || "", projectId: "",
+    tagIds: [...(snap.tagIds || [])],
+    subTasks: (snap.subTasks || []).map(s => ({ id: uid(), text: s.text, done: false, assigneeId: "", dueDate: "", priority: s.priority || "medium" })),
+    ...extra,
+  };
+};
+
 /* ─── SOP STORAGE ────────────────────────────────────────────────── */
 /** @returns {SOP[]} */
 const getSOPs = () => db.getSync("sops") || [];
@@ -923,6 +1039,136 @@ const TASK_PRIORITIES = [
 ];
 const taskPriorityMeta = Object.fromEntries(TASK_PRIORITIES.map(p => [p.key, p]));
 
+/* ─── RECURRENCE (#8 due-date popover) ───────────────────────────────
+   v1 semantics: a task stores `recurrence` ("none"|"daily"|"weekly"|
+   "monthly"). When a recurring task is marked done, a fresh copy is
+   created automatically — new id, status todo, dueDate advanced from
+   the CURRENT due date by the interval — while the completed one keeps
+   its done state untouched. */
+const RECURRENCE_OPTIONS = [
+  { key: "none", label: "Does not repeat" },
+  { key: "daily", label: "Daily" },
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+];
+/** @param {string} dateStr ISO date (yyyy-mm-dd) @param {Recurrence} recurrence */
+function advanceDate(dateStr, recurrence) {
+  const base = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  if (recurrence === "daily") base.setDate(base.getDate() + 1);
+  else if (recurrence === "weekly") base.setDate(base.getDate() + 7);
+  else if (recurrence === "monthly") base.setMonth(base.getMonth() + 1);
+  return base.toISOString().slice(0, 10);
+}
+/** Marks a task done/undone. If it's newly-done and recurring, spawns the
+ * next occurrence as a fresh standalone task (new id, status todo, same
+ * everything else, dueDate advanced). Returns nothing — caller re-reads. */
+function completeTaskWithRecurrence(task) {
+  const nowDone = task.status !== "done";
+  updateTask(task.id, { status: nowDone ? "done" : "todo" });
+  if (nowDone && task.recurrence && task.recurrence !== "none") {
+    const nextDue = advanceDate(task.dueDate, task.recurrence);
+    const { id, ...rest } = task;
+    addTask({
+      ...rest, status: "todo", dueDate: nextDue, createdAt: nowISO(),
+      favouritedBy: [], archived: false,
+      subTasks: (task.subTasks || []).map(s => ({ ...s, id: uid(), done: false })),
+    });
+  }
+}
+
+/* ─── TASK ACTIONS (#9 overflow menu) ─────────────────────────────── */
+/** Favourited tasks sort to the top of their column for that user. */
+function toggleFavourite(task, userId) {
+  const has = (task.favouritedBy || []).includes(userId);
+  const next = has ? (task.favouritedBy || []).filter(u => u !== userId) : [...(task.favouritedBy || []), userId];
+  updateTask(task.id, { favouritedBy: next });
+}
+/** New id, "(copy)" suffix, status todo, subtasks copied with new ids + done cleared. */
+function duplicateTask(task) {
+  const { id, ...rest } = task;
+  return addTask({
+    ...rest, title: (task.title || "Untitled task") + " (copy)", status: "todo",
+    createdAt: nowISO(), favouritedBy: [], archived: false,
+    subTasks: (task.subTasks || []).map(s => ({ ...s, id: uid(), done: false })),
+  });
+}
+/** Source's description appends to target's, subtasks move to target, tags
+ * union, source is deleted. */
+function mergeTaskInto(source, target) {
+  const mergedDesc = [target.description, source.description].filter(Boolean).join("\n\n---\n\n");
+  const movedSubs = (source.subTasks || []).map(s => ({ ...s, id: uid() }));
+  const mergedTags = [...new Set([...(target.tagIds || []), ...(source.tagIds || [])])];
+  updateTask(target.id, {
+    description: mergedDesc,
+    subTasks: [...(target.subTasks || []), ...movedSubs],
+    tagIds: mergedTags,
+  });
+  deleteTask(source.id);
+}
+/** Creates a project named after the task; the task's subtasks become real
+ * tasks with the project id (assignee/due preserved); original task deleted. */
+function convertTaskToProject(task) {
+  const proj = addProject({ ...defProject(), name: task.title || "Untitled project", description: task.description || "" });
+  const projectRecord = Array.isArray(proj) ? proj[proj.length - 1] : proj;
+  (task.subTasks || []).forEach(s => {
+    addTask({
+      ...emptyTaskShape(), title: s.text, status: s.done ? "done" : "todo", priority: s.priority || "medium",
+      assignedTo: s.assigneeId || "", dueDate: s.dueDate || "", projectId: projectRecord.id,
+    });
+  });
+  deleteTask(task.id);
+  return projectRecord;
+}
+/** This task becomes a subtask on the target task; original deleted. Its
+ * own subtasks/description/tags are flattened/lost (warned in the confirm). */
+function convertTaskToSubtask(task, targetTask) {
+  const newSub = { id: uid(), text: task.title, done: task.status === "done", assigneeId: task.assignedTo || "", dueDate: task.dueDate || "", priority: task.priority || "medium" };
+  updateTask(targetTask.id, { subTasks: [...(targetTask.subTasks || []), newSub] });
+  deleteTask(task.id);
+}
+const emptyTaskShape = () => ({
+  title: "", description: "", status: "todo", priority: "medium", type: "task",
+  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [], tagIds: [], recurrence: "none",
+});
+
+/** Favourited-by-this-user tasks sort first, then priority (urgent→low),
+ * then newest first — shared by every board that lists tasks (Task Manager
+ * + Projects' embedded board both need identical column ordering). */
+const TASK_PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 };
+function sortTasksForUser(tasks, userId) {
+  return [...tasks].sort((a, b) => {
+    const favA = (a.favouritedBy || []).includes(userId) ? 0 : 1;
+    const favB = (b.favouritedBy || []).includes(userId) ? 0 : 1;
+    if (favA !== favB) return favA - favB;
+    const pa = TASK_PRIORITY_ORDER[a.priority] ?? 3, pb = TASK_PRIORITY_ORDER[b.priority] ?? 3;
+    if (pa !== pb) return pa - pb;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+}
+
+/** Centralizes every #9 overflow-menu action so Task Manager and Projects'
+ * embedded task board dispatch identically. Fire-and-forget, matching every
+ * other storage helper's shape — caller re-reads + bumps/toasts after. */
+function dispatchTaskAction(task, action, extra, user) {
+  switch (action) {
+    case "favourite": toggleFavourite(task, user?.id || ""); break;
+    case "alert": addAlert(task.id, extra.userId); break;
+    case "duplicate": duplicateTask(task); break;
+    case "merge": mergeTaskInto(task, extra.target); break;
+    case "addToProject": updateTask(task.id, { projectId: extra.projectId }); break;
+    case "saveTemplate": addTaskTemplate(extra.name, task); break;
+    case "applyTemplate": addTask(taskFromTemplate(extra.template)); break;
+    case "archive": updateTask(task.id, { archived: !task.archived }); break;
+    case "unarchive": updateTask(task.id, { archived: false }); break;
+    case "delete": deleteTask(task.id); break;
+    case "convertProject": convertTaskToProject(task); break;
+    case "convertSubtask": convertTaskToSubtask(task, extra.target); break;
+    case "rename": updateTask(task.id, { title: extra.title }); break;
+    case "addSubtask": updateTask(task.id, { subTasks: [...(task.subTasks || []), { id: uid(), text: extra.text, done: false, assigneeId: "", dueDate: "", priority: "medium" }] }); break;
+    default: break;
+  }
+}
+
 /** True if a date string is in the past (before today) and the item isn't
  * already done. Shared by task cards, project timelines, and My Dashboard. */
 const isOverdue = (dateStr, done) => !!dateStr && !done && new Date(dateStr) < new Date(new Date().toDateString());
@@ -1034,7 +1280,7 @@ const GBP_CATEGORIES = [
  * @param {string} projectId @param {Task[]} allTasks
  * @returns {{done:number, total:number, pct:number}} */
 const projectProgress = (projectId, allTasks) => {
-  const tasks = (allTasks || []).filter(t => t.projectId === projectId);
+  const tasks = (allTasks || []).filter(t => t.projectId === projectId && !t.archived);
   const done = tasks.filter(t => t.status === "done").length;
   const total = tasks.length;
   return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
@@ -1240,12 +1486,18 @@ export {
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
+  getTags, saveTags, addTag, updateTag, deleteTag,
+  getAlerts, saveAlerts, addAlert, deleteAlert,
+  getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,
   getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, taskStatusMeta, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskTypeMeta, taskType,
+  RECURRENCE_OPTIONS, advanceDate, completeTaskWithRecurrence,
+  toggleFavourite, duplicateTask, mergeTaskInto, convertTaskToProject, convertTaskToSubtask, emptyTaskShape,
+  sortTasksForUser, dispatchTaskAction,
   isOverdue, isDueToday, isDueThisWeek,
   getProjects, saveProjects, getProject, addProject, updateProject, deleteProject, defProject,
   PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress, normalizeProjectStatus,

@@ -190,4 +190,63 @@ function SlideOver({ title, icon, onClose, children, width = 420 }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver };
+/** Small icon-only button matching the tile's four-icon metadata row —
+ * always visible as an outline placeholder even when unset, filled/tinted
+ * once a value is set. Shared by TaskCard's assignee/date/priority/tags
+ * row and the hover pill (#8/#9). */
+function MetaIconBtn({ icon, label, active, activeColor, onClick, children, title }) {
+  const [hov, setHov] = useState(false);
+  const color = active ? (activeColor || C.moss) : C.faint;
+  return (
+    <button type="button" onClick={onClick} title={title || label}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 5, height: 24, padding: children ? "0 8px 0 6px" : 0,
+        width: children ? "auto" : 24, justifyContent: "center",
+        borderRadius: 7, border: `1.5px solid ${active ? color + "55" : C.bdr}`,
+        background: hov ? (active ? color + "16" : C.s2) : (active ? color + "0d" : "transparent"),
+        color, cursor: "pointer", transition: "all .12s", flexShrink: 0,
+      }}>
+      <Icon name={icon} size={15} />
+      {children && <span style={{ fontSize: 11, fontWeight: 600, color, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 84 }}>{children}</span>}
+    </button>
+  );
+}
+
+/** Generic anchored popover — click-outside + ESC to close, clamps itself
+ * to stay on-screen near viewport edges. `anchorRect` is a DOMRect captured
+ * at open time (getBoundingClientRect of the triggering icon button).
+ * Shared by every #8 metadata popover (assignee/date/priority/tags) so
+ * positioning/dismissal logic lives in exactly one place. */
+function Popover({ anchorRect, onClose, children, width = 260 }) {
+  const ref = React.useRef(null);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("keydown", onKey);
+    // Delay attaching the outside-click listener one tick so the same click
+    // that opened the popover (via the anchor button) doesn't instantly close it.
+    const t = setTimeout(() => document.addEventListener("mousedown", onClick), 0);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onClick); clearTimeout(t); };
+  }, [onClose]);
+
+  if (!anchorRect) return null;
+  const margin = 10;
+  let left = anchorRect.left;
+  let top = anchorRect.bottom + 6;
+  if (left + width + margin > window.innerWidth) left = Math.max(margin, window.innerWidth - width - margin);
+  const estHeight = 320; // clamp guess; popover content scrolls internally past this
+  if (top + estHeight + margin > window.innerHeight) top = Math.max(margin, anchorRect.top - estHeight - 6);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 700 }} onClick={e => e.stopPropagation()}>
+      <div ref={ref} className="gk-fade-in" style={{
+        position: "fixed", left, top, width, maxWidth: "calc(100vw - 20px)", maxHeight: "70vh", overflowY: "auto",
+        background: C.sur, border: `1.5px solid ${C.bdr2}`, borderRadius: 12, boxShadow: C.shadowMd,
+        padding: 10, zIndex: 701,
+      }}>{children}</div>
+    </div>
+  );
+}
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover };

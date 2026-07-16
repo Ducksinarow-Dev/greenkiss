@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
   C, FONT_CAPS, getProjects, addProject, updateProject, deleteProject, defProject,
-  getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, confirmDelete, triggerSaved,
+  getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, getTags, getTaskTemplates, confirmDelete, triggerSaved,
   canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
-  TASK_BOARD_STATUSES, inp,
+  TASK_BOARD_STATUSES, inp, sortTasksForUser, completeTaskWithRecurrence, dispatchTaskAction,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver } from './shared.jsx';
 import { TaskCard, TaskModal, emptyForm as emptyTaskForm } from './TaskManager.jsx';
@@ -228,11 +228,14 @@ function TimelineStrip({ project, tasks }) {
   );
 }
 
-function ProjectDetail({ project, users, sops, allProjects, editable, onBack, onBump, onOpenSop }) {
+function ProjectDetail({ project, users, sops, allProjects, editable, currentUser, onBack, onBump, onOpenSop }) {
   const [editing, setEditing] = useState(false);
   const [taskModal, setTaskModal] = useState(null); // {task, isNew}
   const [showDone, setShowDone] = useState(false);
-  const tasks = getTasks().filter(t => t.projectId === project.id);
+  const allTasks = getTasks();
+  const tags = getTags();
+  const templates = getTaskTemplates();
+  const tasks = allTasks.filter(t => t.projectId === project.id && !t.archived);
   const sm = projectStatusMeta[project.status] || PROJECT_STATUSES[0];
   const lead = users.find(u => u.id === project.leadId);
 
@@ -265,7 +268,10 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
     triggerSaved();
     setTaskModal(null); onBump();
   };
-  const quickToggle = (task) => { updateTask(task.id, { status: task.status === "done" ? "todo" : "done" }); triggerSaved(); onBump(); };
+  const quickToggle = (task) => { completeTaskWithRecurrence(task); triggerSaved(); onBump(); };
+  const patchTask = (task, patch) => { updateTask(task.id, patch); triggerSaved(); onBump(); };
+  const taskAction = (task, action, extra) => { dispatchTaskAction(task, action, extra, currentUser); triggerSaved(); onBump(); };
+  const cardProps = { users, sops, projects: allProjects, tags, templates, allTasks, currentUser, onOpenSop };
 
   return (
     <div className="gk-fade-in">
@@ -305,7 +311,7 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
       ) : (
         <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
           {TASK_BOARD_STATUSES.map(s => {
-            const items = tasks.filter(t => t.status === s.key);
+            const items = sortTasksForUser(tasks.filter(t => t.status === s.key), currentUser?.id || "");
             return (
               <div key={s.key} style={{ flex: "1 1 260px", minWidth: 240, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
@@ -315,9 +321,10 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {items.map(t => (
-                    <TaskCard key={t.id} task={t} users={users} sops={sops} projects={allProjects}
+                    <TaskCard key={t.id} task={t} {...cardProps}
                       onOpen={() => openEditTask(t)} onDragStart={() => {}} onDragOver={() => {}} isDragOver={false}
-                      onQuickToggle={() => quickToggle(t)} onOpenSop={onOpenSop} />
+                      onQuickToggle={() => quickToggle(t)} onPatchTask={patch => patchTask(t, patch)}
+                      onAction={(action, extra) => taskAction(t, action, extra)} />
                   ))}
                   {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>No tasks</div>}
                 </div>
@@ -332,7 +339,7 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
           onSave={saveProject} onDelete={removeProject} onClose={() => setEditing(false)} />
       )}
       {taskModal && (
-        <TaskModal initial={taskModal.task} isNew={taskModal.isNew} users={users} sops={sops} projects={allProjects}
+        <TaskModal initial={taskModal.task} isNew={taskModal.isNew} users={users} sops={sops} projects={allProjects} tags={tags}
           onSave={saveTask} onDelete={deleteTaskModal} onClose={() => setTaskModal(null)} />
       )}
 
@@ -343,9 +350,10 @@ function ProjectDetail({ project, users, sops, allProjects, editable, onBack, on
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               {tasks.filter(t => t.status === "done").map(t => (
-                <TaskCard key={t.id} task={t} users={users} sops={sops} projects={allProjects}
+                <TaskCard key={t.id} task={t} {...cardProps}
                   onOpen={() => openEditTask(t)} onDragStart={() => {}} onDragOver={() => {}} isDragOver={false}
-                  onQuickToggle={() => quickToggle(t)} onOpenSop={onOpenSop} />
+                  onQuickToggle={() => quickToggle(t)} onPatchTask={patch => patchTask(t, patch)}
+                  onAction={(action, extra) => taskAction(t, action, extra)} />
               ))}
             </div>
           )}
@@ -532,7 +540,7 @@ function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
   };
 
   if (selected) {
-    return <ProjectDetail project={selected} users={users} sops={sops} allProjects={projects} editable={editable}
+    return <ProjectDetail project={selected} users={users} sops={sops} allProjects={projects} editable={editable} currentUser={user}
       onBack={() => { setSelectedId(null); bump(); }} onBump={bump} onOpenSop={onOpenSop} />;
   }
 
