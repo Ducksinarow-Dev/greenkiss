@@ -1,56 +1,63 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  C, FONT_CAPS, getCategories, getUsers, getCurrentUser, fmtDate, fmtDateShort, nowISO, todayLocalISO, inp,
-  getAcks, ackSop, isAckStale, triggerSaved,
-  hasFillableBlocks, getTodayInstance, getInstances, addInstance, updateInstance, findBacklinks,
+  C, FONT_CAPS, getCategories, getUsers, getSOPs, getProjects, getTags, getCurrentUser,
+  fmtDate, nowISO, inp, addTask, taskFromSop, asListBlock, blockBg,
+  getAcks, ackSop, isAckStale, triggerSaved, findBacklinks,
 } from '../globals.js';
-import { IconBtn, Btn, OBtn, Pill, Icon, SlideOver, MentionText } from './shared.jsx';
+import { IconBtn, Btn, OBtn, Pill, Icon, MentionText } from './shared.jsx';
+import { TaskModal } from './TaskManager.jsx';
 
-/* Instance-backed checklist (Phase 2) — checked state lives on the active
-   fill-out Instance, not component state, so it survives navigation and
-   feeds the per-document run history. With no active instance (nobody's
-   started today's run yet) it renders as an inert preview. Locked (a
-   completed or historical instance) is read-only. Print always reflects
-   the actual instance state now that state is real, not session-only. */
-function ChecklistViewerBlock({ block, instance, locked, onToggleCheck, hideFillHint }) {
+/* Viewer blocks manage their own session-only fill state (checkboxes, entry
+   values, completion fields) — reset on reload. Real tracked execution now
+   lives in "Run SOP → Task" (Phase D); in-doc ticking is a casual working aid,
+   the original pre-instance behavior. */
+
+/** List / checklist. `checkboxes` shows a leading interactive box per item
+ * (folds in the old Checklist block); `withEntry` shows a fill-in blank; each
+ * item may carry a link. Checkbox + entry state is component-local. */
+function ListViewerBlock({ block, onNavigate }) {
   const items = block.items || [];
+  const [checks, setChecks] = useState({});
+  const [entries, setEntries] = useState({});
   if (!items.length) return null;
-  const checkedMap = (instance && instance.values[block.id]) || {};
-  const interactive = !!instance && !locked;
+  const toggle = (id) => setChecks(p => ({ ...p, [id]: !p[id] }));
+  const label = (it) => it.url
+    ? <a href={it.url} target="_blank" rel="noreferrer" style={{ color: C.moss, fontWeight: 600, textDecoration: "none" }}>{it.text || it.url}</a>
+    : <MentionText text={it.text} onNavigate={onNavigate} />;
   return (
-    <div style={{ margin: "0 0 20px" }}>
-      {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
-
-      <div className="gk-no-print" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {items.map(it => {
-          const isChecked = !!checkedMap[it.id];
+    <div style={{ margin: "0 0 18px" }}>
+      <div className="gk-no-print" style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {items.map((it, idx) => {
+          const on = !!checks[it.id];
           return (
-            <div key={it.id} role="checkbox" aria-checked={isChecked} tabIndex={interactive ? 0 : -1}
-              onClick={() => interactive && onToggleCheck(block.id, it.id, !isChecked)}
-              onKeyDown={e => { if (interactive && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onToggleCheck(block.id, it.id, !isChecked); } }}
-              style={{ display: "flex", alignItems: "center", gap: 10, cursor: interactive ? "pointer" : "default", userSelect: "none", opacity: instance ? 1 : 0.55 }}>
-              <div style={{
-                width: 19, height: 19, borderRadius: 6, flexShrink: 0,
-                border: `1.5px solid ${isChecked ? C.moss : C.bdr2}`, background: isChecked ? C.moss : C.sur,
-                display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s",
-              }}>
-                {isChecked && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-              </div>
-              <span style={{ fontSize: 15, color: isChecked ? C.mut : C.txt2, textDecoration: isChecked ? "line-through" : "none", opacity: isChecked ? 0.55 : 1, transition: "opacity .15s" }}>{it.text}</span>
+            <div key={it.id} style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
+              {block.checkboxes ? (
+                <div role="checkbox" aria-checked={on} tabIndex={0}
+                  onClick={() => toggle(it.id)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(it.id); } }}
+                  style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, cursor: "pointer", alignSelf: "center",
+                    border: `1.5px solid ${on ? C.moss : C.bdr2}`, background: on ? C.moss : C.sur,
+                    display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}>
+                  {on && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </div>
+              ) : (
+                <span style={{ fontSize: 15, color: C.faint, flexShrink: 0, minWidth: 16 }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>
+              )}
+              <span style={{ fontSize: 15, color: on ? C.mut : C.txt2, textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1, flex: block.withEntry ? "0 0 auto" : 1 }}>{label(it)}</span>
+              {block.withEntry && (
+                <input value={entries[it.id] ?? (it.value || "")} onChange={e => setEntries(p => ({ ...p, [it.id]: e.target.value }))}
+                  style={{ flex: 1, minWidth: 60, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.bdr2}`, fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit", padding: "0 0 2px" }} />
+              )}
             </div>
           );
         })}
-        {!instance && !hideFillHint && (
-          <div style={{ fontSize: 12, color: C.faint, marginTop: 2 }}>Start today's run above to check items off.</div>
-        )}
       </div>
-
-      {/* Static print view — reflects the same checked state as the screen. */}
+      {/* print: static, reflects current tick state */}
       <div className="gk-print-only">
-        {items.map(it => (
+        {items.map((it, idx) => (
           <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 5, fontSize: 14 }}>
-            <span style={{ fontSize: 15, lineHeight: 1 }}>{checkedMap[it.id] ? "☑" : "☐"}</span>
-            <span>{it.text}</span>
+            <span style={{ fontSize: 15, lineHeight: 1 }}>{block.checkboxes ? (checks[it.id] ? "☑" : "☐") : (block.style === "numbered" ? `${idx + 1}.` : "•")}</span>
+            <span>{it.text}{block.withEntry ? `:  ${entries[it.id] ?? (it.value || "______")}` : ""}</span>
           </div>
         ))}
       </div>
@@ -58,99 +65,78 @@ function ChecklistViewerBlock({ block, instance, locked, onToggleCheck, hideFill
   );
 }
 
-/** Plain/bulleted/numbered list, optionally with a trailing "entry" blank
- * per line. With no active instance the entry (if any) shows the
- * template's own default value, read-only; inside an unlocked instance
- * it's a live input bound to that run's values. */
-function ListViewerBlock({ block, instance, locked, onEntryChange, onNavigate }) {
-  const items = block.items || [];
-  if (!items.length) return null;
-  const values = (instance && instance.values[block.id]) || null;
-  const editable = block.withEntry && !!instance && !locked;
-  return (
-    <div style={{ margin: "0 0 20px" }}>
-      {items.map((it, idx) => {
-        const val = values ? (values[it.id] ?? "") : (it.value || "");
-        return (
-          <div key={it.id} style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-            <span style={{ fontSize: 15, color: C.faint, flexShrink: 0, minWidth: 16 }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>
-            <span style={{ fontSize: 15, color: C.txt2, flex: block.withEntry ? "0 0 auto" : 1 }}><MentionText text={it.text} onNavigate={onNavigate} /></span>
-            {block.withEntry && (
-              editable ? (
-                <input value={val} onChange={e => onEntryChange(block.id, it.id, e.target.value)}
-                  style={{ flex: 1, minWidth: 60, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.bdrFocus}`, fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit", padding: "0 0 2px" }} />
-              ) : (
-                <span style={{ flex: 1, borderBottom: `1.5px solid ${C.bdr2}`, minWidth: 40, fontSize: 15, color: C.txt, paddingBottom: 1 }}>{val || " "}</span>
-              )
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Completion block — the only block whose fields don't exist until a run
- * is underway. No instance -> a prompt to start one. In-progress instance
- * -> Completed By/Date auto-filled from the session, Notes editable, a
- * Submit button that locks the whole instance. Completed/historical -> a
- * read-only summary of who/when/notes (Phase 2, "auto-fill + lock"). */
-function CompletionViewerBlock({ block, instance, locked, onNotesChange, onSubmit }) {
-  const users = getUsers();
-  const nameFor = (id) => users.find(u => u.id === id)?.name || "—";
-  if (!instance) {
-    return (
-      <div className="gk-no-print" style={{ margin: "8px 0 20px", padding: "16px 18px", border: `1.5px dashed ${C.bdr2}`, borderRadius: 12, color: C.mut, fontSize: 13 }}>
-        Start today's run above to complete this section.
-      </div>
-    );
-  }
-  const values = instance.values[block.id] || {};
-  if (locked) {
-    return (
-      <div style={{ margin: "8px 0 20px", padding: "16px 18px", background: C.mossSoft, border: `1.5px solid ${C.moss}55`, borderRadius: 12 }}>
-        <div style={{ fontWeight: 700, color: C.moss, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}><Icon name="task_alt" size={16} />Completed</div>
-        <div style={{ fontSize: 14, color: C.txt2 }}>Completed By: {nameFor(instance.completedBy)}</div>
-        <div style={{ fontSize: 14, color: C.txt2 }}>Date: {fmtDate(instance.completedAt)}</div>
-        {values.notes && <div style={{ fontSize: 14, color: C.txt2, marginTop: 6, whiteSpace: "pre-wrap" }}>Notes: {values.notes}</div>}
-      </div>
-    );
-  }
+/** Completion footer — session-fillable, printable. Completed By defaults to
+ * the current user, Date to today; nothing locks (tracked completion lives on
+ * the Run→Task now). */
+function CompletionViewerBlock() {
   const me = getCurrentUser();
+  const [by, setBy] = useState(me?.name || "");
+  const [date, setDate] = useState(nowISO().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const row = { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 };
+  const lbl = { fontSize: 14, fontWeight: 700, color: C.txt2, minWidth: 110 };
   return (
-    <div className="gk-no-print" style={{ margin: "8px 0 20px", padding: "16px 18px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12 }}>
-      <div style={{ fontWeight: 700, color: C.txt, marginBottom: 10 }}>Completion</div>
-      <div style={{ fontSize: 14, color: C.txt2, marginBottom: 6 }}>Completed By: <strong>{me?.name || "—"}</strong></div>
-      <div style={{ fontSize: 14, color: C.txt2, marginBottom: 10 }}>Date: <strong>{fmtDate(nowISO())}</strong></div>
-      <textarea value={values.notes || ""} onChange={e => onNotesChange(block.id, e.target.value)} placeholder="Notes…" rows={3}
-        style={{ ...inp({ fontSize: 14, lineHeight: 1.6, minHeight: 64, marginBottom: 12 }) }} />
-      <Btn onClick={() => onSubmit(block.id)}><Icon name="task_alt" size={15} />Mark Complete</Btn>
+    <div style={{ margin: "8px 0 20px", padding: "16px 18px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12 }}>
+      <div style={{ fontWeight: 700, color: C.txt, marginBottom: 12, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em", fontSize: 13 }}>Completion</div>
+      <div style={row}><span style={lbl}>Completed By</span><input value={by} onChange={e => setBy(e.target.value)} style={{ ...inp({ fontSize: 14, padding: "6px 10px", maxWidth: 260 }) }} /></div>
+      <div style={row}><span style={lbl}>Date</span><input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...inp({ fontSize: 14, padding: "6px 10px", width: "auto" }) }} /></div>
+      <div style={{ marginTop: 4 }}><span style={lbl}>Notes</span>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} style={{ ...inp({ fontSize: 14, lineHeight: 1.6, minHeight: 60, marginTop: 6 }) }} />
+      </div>
     </div>
   );
 }
 
-function ViewerBlock({ block, instance, locked, onToggleCheck, onEntryChange, onNotesChange, onSubmitCompletion, hideFillHint, onNavigate }) {
+/** Index — a table of contents from headings + any numbered block, each a
+ * jump link into the document (scrolls to that block's anchor). */
+function IndexViewerBlock({ allBlocks, onJump }) {
+  const entries = (allBlocks || [])
+    .map(raw => asListBlock(raw))
+    .filter(b => b.type === "heading" || b.num != null)
+    .map(b => {
+      let text = b.type === "heading" ? (b.text || "Untitled")
+        : (b.type === "list" ? (b.items?.[0]?.text || "List") : (b.text || "Section"));
+      return { id: b.id, num: b.num, text };
+    })
+    .filter(e => e.text);
+  if (!entries.length) return null;
+  return (
+    <nav style={{ margin: "0 0 22px", padding: "14px 18px", background: C.s2, borderRadius: 12, border: `1.5px solid ${C.bdr}` }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", marginBottom: 8 }}>Index</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {entries.map(e => (
+          <button key={e.id} onClick={() => onJump && onJump(e.id)} className="gk-no-print"
+            style={{ display: "flex", gap: 8, background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left", color: C.txt2, fontSize: 14 }}>
+            {e.num != null && <span style={{ color: C.moss, fontWeight: 700, minWidth: 20 }}>{e.num}.</span>}
+            <span style={{ textDecoration: "underline", textDecorationColor: C.bdr2 }}>{e.text}</span>
+          </button>
+        ))}
+        {/* print: plain list, no buttons */}
+        <div className="gk-print-only">
+          {entries.map(e => <div key={e.id} style={{ fontSize: 14 }}>{e.num != null ? `${e.num}. ` : ""}{e.text}</div>)}
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function ViewerBlock({ block: raw, onNavigate, allBlocks, onJump }) {
+  const block = asListBlock(raw);
+  if (block.type === "index") return <IndexViewerBlock allBlocks={allBlocks} onJump={onJump} />;
   if (block.type === "heading") {
     return (
       <div style={{ margin: "26px 0 10px" }}>
-        <h2 style={{ fontSize: 21, fontWeight: 800, color: C.txt, margin: 0 }}>{block.text}</h2>
+        <h2 style={{ fontSize: 21, fontWeight: 800, color: C.txt, margin: 0 }}>{block.num != null ? `${block.num}. ` : ""}{block.text}</h2>
         {block.description && <p style={{ fontSize: 14, color: C.mut, margin: "6px 0 0", lineHeight: 1.6 }}><MentionText text={block.description} onNavigate={onNavigate} /></p>}
       </div>
     );
   }
-  if (block.type === "list") {
-    return <ListViewerBlock block={block} instance={instance} locked={locked} onEntryChange={onEntryChange} onNavigate={onNavigate} />;
-  }
+  if (block.type === "list") return <ListViewerBlock block={block} onNavigate={onNavigate} />;
   if (block.type === "text") {
     if (!block.text) return null;
     return <p style={{ fontSize: 16, lineHeight: 1.75, color: C.txt2, whiteSpace: "pre-wrap", margin: "0 0 16px" }}><MentionText text={block.text} onNavigate={onNavigate} /></p>;
   }
-  if (block.type === "checklist") {
-    return <ChecklistViewerBlock block={block} instance={instance} locked={locked} onToggleCheck={onToggleCheck} hideFillHint={hideFillHint} />;
-  }
-  if (block.type === "completion") {
-    return <CompletionViewerBlock block={block} instance={instance} locked={locked} onNotesChange={onNotesChange} onSubmit={onSubmitCompletion} />;
-  }
+  if (block.type === "completion") return <CompletionViewerBlock />;
   if (block.type === "links") {
     const links = block.links || [];
     if (!links.length) return null;
@@ -188,13 +174,7 @@ function ReadReceipts({ sop, user, onAcked }) {
   const acks = getAcks();
   const mine = (acks[sop.id] && acks[sop.id][user.id]) || null;
   const stale = isAckStale(mine, sop);
-
-  const markRead = () => {
-    ackSop(sop.id, user.id, sop.updatedAt);
-    triggerSaved();
-    onAcked && onAcked();
-  };
-
+  const markRead = () => { ackSop(sop.id, user.id, sop.updatedAt); triggerSaved(); onAcked && onAcked(); };
   return (
     <div className="gk-no-print" style={{ marginTop: 28, paddingTop: 20, borderTop: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
       {mine && !stale && (
@@ -239,61 +219,6 @@ function ReadByList({ sop }) {
   );
 }
 
-/* Today's Run strip + history (Phase 2). Only shown for documents that
- * actually capture fill-state (checklist/list-with-entry/completion) —
- * reference-only docs (vendor directory, appendices) never show this and
- * behave exactly as a plain read-only document. */
-function InstanceStrip({ instance, historyView, onStart, onContinueOther, onOpenHistory, nameFor }) {
-  return (
-    <div className="gk-no-print" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 18, padding: "12px 16px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12 }}>
-      {historyView ? (
-        <>
-          <Icon name="history" size={17} style={{ color: C.mut }} />
-          <div style={{ fontSize: 13, color: C.txt2, flex: 1 }}>
-            Viewing the run from {fmtDateShort(historyView.date)} — {historyView.status === "completed" ? `completed by ${nameFor(historyView.completedBy)}` : "in progress"}
-          </div>
-          <OBtn onClick={onContinueOther}>Back to current</OBtn>
-        </>
-      ) : instance ? (
-        <>
-          <Icon name={instance.status === "completed" ? "task_alt" : "pending_actions"} size={17} style={{ color: instance.status === "completed" ? C.moss : C.mut }} />
-          <div style={{ fontSize: 13, color: C.txt2, flex: 1 }}>
-            {instance.status === "completed"
-              ? `Completed today by ${nameFor(instance.completedBy)}`
-              : `Today's run in progress — started by ${nameFor(instance.startedBy)}`}
-          </div>
-          {instance.status === "completed" && <OBtn onClick={onStart}>Start another run today</OBtn>}
-        </>
-      ) : (
-        <>
-          <Icon name="today" size={17} style={{ color: C.mut }} />
-          <div style={{ fontSize: 13, color: C.txt2, flex: 1 }}>No run started for today yet.</div>
-          <Btn onClick={onStart}>Start Today's Run</Btn>
-        </>
-      )}
-      <IconBtn icon="list_alt" title="Past runs" onClick={onOpenHistory} />
-    </div>
-  );
-}
-
-function RunsHistorySlideOver({ sop, onClose, onSelect, nameFor }) {
-  const runs = getInstances(sop.id);
-  return (
-    <SlideOver title="Past Runs" icon="history" onClose={onClose}>
-      {runs.length === 0 && <div style={{ fontSize: 13, color: C.mut }}>No runs yet.</div>}
-      {runs.map(i => (
-        <button key={i.id} onClick={() => onSelect(i)}
-          style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", borderRadius: 9, border: `1.5px solid ${C.bdr}`, background: C.sur, marginBottom: 8, cursor: "pointer", fontFamily: "inherit" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{fmtDate(i.date)}</div>
-          <div style={{ fontSize: 12, color: C.mut }}>
-            {i.status === "completed" ? `Completed by ${nameFor(i.completedBy)}` : `In progress — started by ${nameFor(i.startedBy)}`}
-          </div>
-        </button>
-      ))}
-    </SlideOver>
-  );
-}
-
 /** "Referenced by" — every other document/playbook-section that mentions
  * this one, computed lazily at render time (no reverse index to maintain). */
 function BacklinksList({ sop, onNavigate }) {
@@ -314,103 +239,70 @@ function BacklinksList({ sop, onNavigate }) {
   );
 }
 
-function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate }) {
+function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenTasks }) {
   const categories = getCategories();
   const cat = categories.find(c => c.id === sop.categoryId);
   const printedOn = fmtDate(nowISO());
-  // ReadReceipts and ReadByList both read getAcks() fresh on render, but
-  // they're siblings — marking read only re-renders ReadReceipts itself,
-  // so the editor-facing "Read by" list needs this to force its own
-  // re-render too (bumped by ReadReceipts.onAcked).
   const [ackVersion, setAckVersion] = useState(0);
+  const [runDraft, setRunDraft] = useState(null); // pre-filled task awaiting confirm
+  const isForm = sop.kind === "form";
 
-  const fillable = hasFillableBlocks(sop.blocks);
-  const [instance, setInstance] = useState(() => fillable ? getTodayInstance(sop.id) : null);
-  const [historyView, setHistoryView] = useState(null);
-  const [showRuns, setShowRuns] = useState(false);
-  useEffect(() => {
-    setInstance(fillable ? getTodayInstance(sop.id) : null);
-    setHistoryView(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sop.id]);
+  const jump = (id) => { const el = document.getElementById("blk-" + id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
 
-  const users = getUsers();
-  const nameFor = (id) => users.find(u => u.id === id)?.name || "—";
-
-  const activeInstance = historyView || instance;
-  const locked = !!historyView || (!!instance && instance.status === "completed");
-  const displayBlocks = activeInstance ? activeInstance.blocksSnapshot : sop.blocks;
-
-  const startRun = () => {
-    const created = addInstance({
-      docId: sop.id, docKind: sop.kind || "sop", date: todayLocalISO(),
-      blocksSnapshot: sop.blocks, startedBy: user?.id || "", startedAt: nowISO(),
-      status: "in_progress",
-    });
-    setInstance(created);
-    setHistoryView(null);
-    triggerSaved();
-  };
-  const patchInstanceValues = (blockId, patch) => {
-    if (!instance) return;
-    const values = { ...instance.values, [blockId]: { ...(instance.values[blockId] || {}), ...patch } };
-    setInstance({ ...instance, values });
-    updateInstance(instance.id, { values });
-  };
-  const toggleCheck = (blockId, itemId, checked) => patchInstanceValues(blockId, { [itemId]: checked });
-  const changeEntry = (blockId, itemId, text) => patchInstanceValues(blockId, { [itemId]: text });
-  const changeNotes = (blockId, text) => patchInstanceValues(blockId, { notes: text });
-  const submitCompletion = () => {
-    if (!instance) return;
-    const changes = { status: "completed", completedBy: user?.id || "", completedAt: nowISO() };
-    setInstance({ ...instance, ...changes });
-    updateInstance(instance.id, changes);
-    triggerSaved();
-  };
+  const blocks = sop.blocks || [];
 
   return (
     <div className="gk-fade-in" style={{ maxWidth: 820, margin: "0 auto" }}>
-      <div className="gk-no-print" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+      {/* Floating header — Edit / Run / Print stay reachable without scrolling up (#8). */}
+      <div className="gk-no-print" style={{ position: "sticky", top: 0, zIndex: 40, background: C.bg, display: "flex", alignItems: "center", gap: 10, padding: "10px 0 12px", marginBottom: 8, borderBottom: `1.5px solid ${C.bdr}` }}>
         <IconBtn icon="arrow_back" title="Back to library" onClick={onClose} />
         <div style={{ flex: 1 }} />
+        <Btn onClick={() => setRunDraft(taskFromSop(sop, user))}><Icon name="play_circle" size={16} />{isForm ? "Fill out" : "Run SOP"}</Btn>
         {canEditSop && <OBtn onClick={onEdit}><Icon name="edit" size={16} />Edit</OBtn>}
-        <Btn onClick={() => window.print()}><Icon name="print" size={16} />Print / PDF</Btn>
+        <OBtn onClick={() => window.print()}><Icon name="print" size={16} />Print</OBtn>
       </div>
 
-      {fillable && (
-        <InstanceStrip instance={instance} historyView={historyView}
-          onStart={startRun} onContinueOther={() => setHistoryView(null)}
-          onOpenHistory={() => setShowRuns(true)} nameFor={nameFor} />
-      )}
-
       <div className="gk-print-area" style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "36px 40px" }}>
-        {/* Phase 6 QoL (d): print-only header — wordmark + title + printed-on date */}
         <div className="gk-print-only" style={{ marginBottom: 22, paddingBottom: 14, borderBottom: "1.5px solid #ccc" }}>
           <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
-          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{sop.title || "Untitled SOP"}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{sop.title || "Untitled"}</div>
           <div style={{ fontSize: 11, marginTop: 4 }}>Printed on {printedOn}</div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-          {cat && <Pill color={cat.color}>{cat.name}</Pill>}
-          {sop.code && <Pill color={C.faint}>{sop.code}</Pill>}
-          <Pill color={sop.status === "published" ? C.moss : sop.status === "archived" ? C.faint : C.faint}>
-            {sop.status === "published" ? "Published" : sop.status === "archived" ? "Archived" : "Draft"}
-          </Pill>
+        {/* Title row with the version/code to its right (#1). */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              {cat && <Pill color={cat.color}>{cat.name}</Pill>}
+              <Pill color={sop.status === "published" ? C.moss : C.faint}>
+                {sop.status === "published" ? "Published" : sop.status === "archived" ? "Archived" : "Draft"}
+              </Pill>
+            </div>
+            <h1 style={{ fontSize: 30, fontWeight: 800, color: C.txt, margin: 0, letterSpacing: -0.4 }}>{sop.title || "Untitled"}</h1>
+          </div>
+          {sop.code && (
+            <div style={{ flexShrink: 0, textAlign: "right", fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: C.mut, border: `1.5px solid ${C.bdr}`, borderRadius: 8, padding: "6px 10px" }}>
+              {sop.code}
+            </div>
+          )}
         </div>
-        <h1 style={{ fontSize: 30, fontWeight: 800, color: C.txt, margin: "0 0 8px", letterSpacing: -0.4 }}>{sop.title || "Untitled SOP"}</h1>
-        <div style={{ fontSize: 13, color: C.mut, marginBottom: 26 }}>
+        <div style={{ fontSize: 13, color: C.mut, margin: "8px 0 26px" }}>
           Updated {fmtDate(sop.updatedAt)}{sop.updatedBy ? ` by ${sop.updatedBy}` : ""}
         </div>
-        {(displayBlocks || []).length === 0 && <div style={{ color: C.mut, fontSize: 15 }}>This SOP has no content yet.</div>}
+
+        {blocks.length === 0 && <div style={{ color: C.mut, fontSize: 15 }}>This document has no content yet.</div>}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0 24px" }}>
-          {(displayBlocks || []).map(b => (
-            <div key={b.id} style={{ flex: `0 0 calc(${b.width || 100}% - 24px)`, minWidth: 0 }}>
-              <ViewerBlock block={b} instance={activeInstance} locked={locked}
-                onToggleCheck={toggleCheck} onEntryChange={changeEntry} onNotesChange={changeNotes}
-                onSubmitCompletion={submitCompletion} onNavigate={onNavigate} />
-            </div>
-          ))}
+          {blocks.map(b => {
+            const bg = blockBg(b.bg);
+            return (
+              <div key={b.id} id={"blk-" + b.id} style={{
+                flex: `0 0 calc(${b.width || 100}% - 24px)`, minWidth: 0,
+                ...(bg !== "transparent" ? { background: bg, borderRadius: 10, padding: "10px 14px", margin: "0 0 4px" } : {}),
+              }}>
+                <ViewerBlock block={b} onNavigate={onNavigate} allBlocks={blocks} onJump={jump} />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -418,9 +310,12 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate }) {
       {canEditSop && <ReadByList key={ackVersion} sop={sop} />}
       <BacklinksList sop={sop} onNavigate={onNavigate} />
 
-      {showRuns && (
-        <RunsHistorySlideOver sop={sop} onClose={() => setShowRuns(false)} nameFor={nameFor}
-          onSelect={(i) => { setHistoryView(i); setShowRuns(false); }} />
+      {runDraft && (
+        <TaskModal initial={runDraft} isNew wide
+          users={getUsers()} sops={getSOPs()} projects={getProjects()} tags={getTags()}
+          onClose={() => setRunDraft(null)}
+          onSave={(form) => { addTask(form); triggerSaved(); setRunDraft(null); onOpenTasks && onOpenTasks(); }}
+        />
       )}
     </div>
   );

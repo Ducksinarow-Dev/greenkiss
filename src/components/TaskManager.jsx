@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   C, FONT_CAPS, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
   getUsers, getSOPs, getProjects, getTags, addTag, getTaskTemplates, deleteTaskTemplate,
-  fmtDateShort, canEdit, isOverdue, CATEGORY_COLORS,
+  fmtDateShort, fmtDate, nowISO, getCurrentUser, canEdit, isOverdue, CATEGORY_COLORS,
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskType, inp,
   RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction,
@@ -288,10 +288,20 @@ function SubTaskRow({ sub, users, onChange, onRemove }) {
   );
 }
 
-function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onClose, isNew }) {
+function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onClose, isNew, wide }) {
   const [form, setForm] = useState(initial);
   const [subInput, setSubInput] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const isSopRun = !!form.fromSopRun;
+  const [completing, setCompleting] = useState(false);
+  const [runNotes, setRunNotes] = useState("");
+
+  // Day-end "Complete run" for SOP-run tasks: record who + when + notes, mark
+  // done, and save (mirrors the old in-viewer Completion block).
+  const confirmCompleteRun = () => {
+    const me = getCurrentUser();
+    onSave({ ...form, status: "done", runCompletion: { by: me?.id || "", at: nowISO(), notes: runNotes.trim() } });
+  };
 
   const addSub = () => {
     if (!subInput.trim()) return;
@@ -310,13 +320,20 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
       onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 28,
+        width: "100%", maxWidth: wide ? 720 : 560, maxHeight: "88vh", overflowY: "auto", padding: 28,
       }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
-          <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? "New Task" : "Edit Task"}</div>
+          <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? (isSopRun ? "Run SOP — new task" : "New Task") : "Edit Task"}</div>
           {!isNew && <IconBtn icon="delete" danger title="Delete task" onClick={onDelete} />}
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
+        {isSopRun && (
+          <div style={{ fontSize: 12.5, color: C.mut, marginBottom: 16, background: C.mossSoft, borderRadius: 9, padding: "8px 12px" }}>
+            <Icon name="play_circle" size={14} style={{ color: C.moss, verticalAlign: "-2px", marginRight: 5 }} />
+            Prefilled from the SOP. Adjust assignee / date, then Create to add it to the board.
+            {form.runCompletion?.at && <span style={{ display: "block", marginTop: 4, color: C.moss, fontWeight: 700 }}>Run completed {fmtDate(form.runCompletion.at)}.</span>}
+          </div>
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
@@ -439,9 +456,24 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+        {completing && (
+          <div style={{ marginTop: 20, padding: "14px 16px", background: C.mossSoft, border: `1.5px solid ${C.moss}55`, borderRadius: 12 }}>
+            <label style={labelStyle}>Completion notes (optional)</label>
+            <textarea autoFocus rows={2} value={runNotes} onChange={e => setRunNotes(e.target.value)} placeholder="Anything worth noting about this run…" style={inp({ lineHeight: 1.5 })} />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
+              <OBtn onClick={() => setCompleting(false)}>Cancel</OBtn>
+              <Btn onClick={confirmCompleteRun}><Icon name="task_alt" size={15} />Complete run</Btn>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 24 }}>
+          {isSopRun && !isNew && form.status !== "done" && !completing && (
+            <OBtn onClick={() => setCompleting(true)}><Icon name="task_alt" size={15} />Complete run</OBtn>
+          )}
+          <div style={{ flex: 1 }} />
           <OBtn onClick={onClose}>Cancel</OBtn>
-          <Btn onClick={() => onSave(form)} disabled={!form.title.trim()}>Save</Btn>
+          <Btn onClick={() => onSave(form)} disabled={!form.title.trim()}>{isNew && isSopRun ? "Create" : "Save"}</Btn>
         </div>
       </div>
     </div>

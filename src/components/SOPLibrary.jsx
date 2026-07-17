@@ -58,7 +58,7 @@ function SOPCard({ sop, category, onOpen }) {
  * is called when a mention/backlink points somewhere this library can't show
  * in place (a document of the other kind, or a Playbook section) so the
  * host (App.jsx) can switch nav sections. */
-function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNavigateOut }) {
+function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNavigateOut, onOpenTasks }) {
   const [refresh, setRefresh] = useState(0);
   const [activeCat, setActiveCat] = useState("all");
   const [query, setQuery] = useState("");
@@ -119,7 +119,7 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNa
   }
 
   if (openSop && mode === "view") {
-    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} />;
+    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} onOpenTasks={onOpenTasks} />;
   }
 
   const newDoc = () => defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : "", kind);

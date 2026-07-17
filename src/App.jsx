@@ -79,10 +79,10 @@ function App() {
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
         {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} />}
         {section === "library" && (
-          <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} />
+          <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
         {section === "forms" && (
-          <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} />
+          <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
         {section === "playbook" && (
           <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} />

@@ -24,15 +24,19 @@
  * @property {string} id
  * @property {string} text
  *
- * @typedef {{id:string,type:"heading",text:string,description?:string,width?:number}} HeadingBlock
- * @typedef {{id:string,type:"text",text:string,width?:number}} TextBlock
- * @typedef {{id:string,type:"links",title?:string,links:LinkItem[],width?:number}} LinksBlock
- * @typedef {{id:string,type:"image",src:string,caption:string,width?:number}} ImageBlock
- * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[],width?:number}} ChecklistBlock
- * @typedef {{id:string,text:string,value?:string}} ListItem
- * @typedef {{id:string,type:"list",style:"bulleted"|"numbered",withEntry?:boolean,items:ListItem[],width?:number}} ListBlock
- * @typedef {{id:string,type:"completion",width?:number}} CompletionBlock
- * @typedef {HeadingBlock|TextBlock|LinksBlock|ImageBlock|ChecklistBlock|ListBlock|CompletionBlock} Block
+ * Every block also carries optional `width?:number` (33|40|50|60|100),
+ * `bg?:string` (emphasis background key, see BLOCK_BGS), and `num?:number`
+ * (a "number at will" that feeds the index block).
+ * @typedef {{id:string,type:"heading",text:string,description?:string}} HeadingBlock
+ * @typedef {{id:string,type:"text",text:string}} TextBlock
+ * @typedef {{id:string,type:"links",title?:string,links:LinkItem[]}} LinksBlock
+ * @typedef {{id:string,type:"image",src:string,caption:string}} ImageBlock
+ * @typedef {{id:string,text:string,value?:string,url?:string}} ListItem
+ * @typedef {{id:string,type:"list",style:"bulleted"|"numbered",withEntry?:boolean,checkboxes?:boolean,items:ListItem[]}} ListBlock
+ * @typedef {{id:string,type:"completion"}} CompletionBlock
+ * @typedef {{id:string,type:"index"}} IndexBlock
+ * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[]}} ChecklistBlock legacy — normalized to a checkbox ListBlock on read (asListBlock)
+ * @typedef {HeadingBlock|TextBlock|LinksBlock|ImageBlock|ListBlock|CompletionBlock|IndexBlock|ChecklistBlock} Block
  *
  * @typedef {Object} SOP
  * @property {string} id
@@ -309,14 +313,24 @@ const API_BASE = "api.php";
 /* ─── UTILS (used below, hoisted here) ───────────────────────────────── */
 const uid = () => Math.random().toString(36).slice(2, 9);
 const nowISO = () => new Date().toISOString();
+/** Parse a stored date. A bare "YYYY-MM-DD" (our task/project date shape) must
+ * be read as LOCAL midnight — `new Date("2026-07-16")` parses as UTC midnight,
+ * which lands on the previous calendar day in any timezone behind UTC, so a
+ * task due today would render "yesterday" and read as overdue. Full ISO
+ * timestamps (with a "T") keep their exact instant. */
+const parseDate = (s) => {
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(s);
+};
 const fmtDate = (iso) => {
   if (!iso) return "";
-  try { return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
+  try { return parseDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
   catch { return iso; }
 };
 const fmtDateShort = (iso) => {
   if (!iso) return "";
-  try { return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+  try { return parseDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
   catch { return iso; }
 };
 
@@ -879,11 +893,63 @@ const defSOP = (categoryId = "", kind = "sop") => ({
   kind,
   code: "",
   typePrefix: "",
-  blocks: [],
+  // New docs open with an index block at the top (auto-builds a TOC from
+  // headings + numbered blocks as content is added; deletable if unwanted).
+  blocks: [{ id: uid(), type: "index" }],
   createdAt: nowISO(),
   updatedAt: nowISO(),
   updatedBy: getCurrentUser()?.name || "",
 });
+
+/** Per-block emphasis background (#7) — resolves a stored key to a theme-aware
+ * color (so the value survives light/dark swaps). Shared by editor + viewer. */
+const blockBg = (key) => {
+  if (key === "sage") return C.mossSoft;
+  if (key === "clay") return C.clay + "22";
+  if (key === "neutral") return C.s2;
+  return "transparent";
+};
+
+/** Legacy `checklist` blocks normalize to a checkbox `list` block on read, so
+ * one code path (list editor/viewer) handles both and old data re-saves as a
+ * list. Non-checklist blocks pass through untouched. */
+const asListBlock = (b) => {
+  if (!b || b.type !== "checklist") return b;
+  return {
+    id: b.id, type: "list", style: "bulleted", checkboxes: true, withEntry: false,
+    width: b.width, bg: b.bg, num: b.num,
+    items: (b.items || []).map(it => ({ id: it.id, text: it.text || "", value: "", url: it.url || "" })),
+  };
+};
+
+/** Builds a draft Task from an SOP for the "Run SOP" flow (Phase D). Text/
+ * heading/plain-list content flows into the description; every checkbox list
+ * item (and legacy checklist item) becomes a subtask. The caller opens the
+ * task modal pre-filled with this and confirms before it's actually created. */
+function taskFromSop(sop, user) {
+  const lines = [];
+  const subTasks = [];
+  (sop.blocks || []).forEach(raw => {
+    const b = asListBlock(raw);
+    if (b.type === "heading") { lines.push((b.text || "").toUpperCase()); if (b.description) lines.push(b.description); }
+    else if (b.type === "text") { if (b.text) lines.push(b.text); }
+    else if (b.type === "list") {
+      (b.items || []).forEach(it => {
+        if (b.checkboxes) subTasks.push({ id: uid(), text: it.text || "", done: false, assigneeId: "", dueDate: "", priority: "medium" });
+        else lines.push((b.style === "numbered" ? "• " : "• ") + (it.text || "") + (b.withEntry ? ": ______" : ""));
+      });
+    }
+    // index/completion/links/image are skipped in the task copy.
+  });
+  return {
+    id: uid(), createdAt: nowISO(),
+    title: `${sop.title || "SOP"} — ${todayLocalISO()}`,
+    description: lines.join("\n\n"),
+    status: "todo", priority: "medium", type: "task",
+    assignedTo: user?.id || "", dueDate: todayLocalISO(), relatedSopId: sop.id, projectId: "",
+    subTasks, tagIds: [], fromSopRun: true,
+  };
+}
 
 /** Distinct heading texts used across every SOP/Form, most-recently-updated
  * document first — feeds the heading autocomplete `<datalist>` so headings
@@ -1504,13 +1570,15 @@ function dispatchTaskAction(task, action, extra, user) {
 
 /** True if a date string is in the past (before today) and the item isn't
  * already done. Shared by task cards, project timelines, and My Dashboard. */
-const isOverdue = (dateStr, done) => !!dateStr && !done && new Date(dateStr) < new Date(new Date().toDateString());
-const isDueToday = (dateStr) => !!dateStr && dateStr === new Date().toISOString().slice(0, 10);
+// All compared in LOCAL terms (see parseDate) — `new Date().toDateString()`
+// is local midnight today; a bare date string parses to local midnight too.
+const isOverdue = (dateStr, done) => !!dateStr && !done && parseDate(dateStr) < new Date(new Date().toDateString());
+const isDueToday = (dateStr) => !!dateStr && dateStr === todayLocalISO();
 /** True if a date string falls within the next 7 days (inclusive of today, exclusive of overdue). */
 const isDueThisWeek = (dateStr) => {
   if (!dateStr) return false;
-  const today = new Date(new Date().toISOString().slice(0, 10));
-  const d = new Date(dateStr);
+  const today = new Date(new Date().toDateString());
+  const d = parseDate(dateStr);
   const in7 = new Date(today); in7.setDate(in7.getDate() + 7);
   return d >= today && d <= in7;
 };
@@ -1831,7 +1899,7 @@ export {
   getAlerts, saveAlerts, addAlert, deleteAlert,
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
-  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks,
+  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks, asListBlock, blockBg, taskFromSop,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, deleteInstance, getTodayInstance, todayLocalISO,
   parseMentionText, getMentionCandidates, findBacklinks,
