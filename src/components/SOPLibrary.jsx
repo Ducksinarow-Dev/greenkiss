@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
-  seedStandardSections, triggerSaved,
+  seedStandardSections, triggerSaved, inp,
 } from '../globals.js';
 import { Btn, OBtn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import SOPViewer from './SOPViewer.jsx';
@@ -58,12 +58,13 @@ function SOPCard({ sop, category, onOpen }) {
  * is called when a mention/backlink points somewhere this library can't show
  * in place (a document of the other kind, or a Playbook section) so the
  * host (App.jsx) can switch nav sections. */
-function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNavigateOut, onOpenTasks }) {
+function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind = "sop", onNavigateOut, onOpenTasks }) {
   const [refresh, setRefresh] = useState(0);
   const [activeCat, setActiveCat] = useState("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState(null);
   const [mode, setMode] = useState("view"); // "view" | "edit"
+  const [scrollBlk, setScrollBlk] = useState(null); // magnet deep-anchor (blk id)
   const [creating, setCreating] = useState(null);
   const [sort, setSort] = useState("updated");
   const [showArchived, setShowArchived] = useState(false);
@@ -73,16 +74,17 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNa
   const bump = () => setRefresh(r => r + 1);
   const isForm = kind === "form";
 
-  // Deep-link: a Task Manager "Related SOP" link can request a specific SOP open.
+  // Deep-link: a Task Manager "Related SOP" link or a magnet can request a
+  // specific SOP open (optionally scrolled to one block).
   useEffect(() => {
-    if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); onClearFocus && onClearFocus(); }
-  }, [focusId, focusMode, onClearFocus]);
+    if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); setScrollBlk(focusBlockId || null); onClearFocus && onClearFocus(); }
+  }, [focusId, focusMode, focusBlockId, onClearFocus]);
 
-  // A mention/backlink click: same-kind documents open in place; anything
-  // else (the other kind, or a Playbook section) bubbles up to App.jsx.
-  const handleNavigate = (navKind, id) => {
-    if (navKind === (isForm ? "form" : "sop")) { setOpenId(id); setMode("view"); return; }
-    onNavigateOut && onNavigateOut(navKind, id);
+  // A mention/backlink/magnet click: same-kind documents open in place;
+  // anything else (the other kind, Playbook, a task) bubbles up to App.jsx.
+  const handleNavigate = (navKind, id, blockId) => {
+    if (navKind === (isForm ? "form" : "sop")) { setOpenId(id); setMode("view"); setScrollBlk(blockId || null); return; }
+    onNavigateOut && onNavigateOut(navKind, id, blockId);
   };
 
   const sops = showArchived ? allSops : allSops.filter(s => s.status !== "archived");
@@ -119,7 +121,7 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNa
   }
 
   if (openSop && mode === "view") {
-    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} onOpenTasks={onOpenTasks} />;
+    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} onOpenTasks={onOpenTasks} scrollToBlock={scrollBlk} onScrolled={() => setScrollBlk(null)} />;
   }
 
   const newDoc = () => defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : "", kind);
@@ -172,18 +174,20 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNa
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
-        <button onClick={() => setActiveCat("all")} style={pillBtnStyle(activeCat === "all", C.moss)}>
-          All <span style={countStyle(activeCat === "all", C.moss)}>{sops.length}</span>
-        </button>
-        {categories.map(c => (
-          <button key={c.id} onClick={() => setActiveCat(c.id)} style={pillBtnStyle(activeCat === c.id, c.color)}>
-            {c.name} <span style={countStyle(activeCat === c.id, c.color)}>{counts[c.id] || 0}</span>
-          </button>
-        ))}
-        {counts.none > 0 && (
-          <button onClick={() => setActiveCat("none")} style={pillBtnStyle(activeCat === "none", C.faint)}>
-            Uncategorized <span style={countStyle(activeCat === "none", C.faint)}>{counts.none}</span>
+      {/* One dropdown instead of a pill per category (R3 #8) — the pill row
+          got unwieldy once the 12 standard sections were loaded. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 24 }}>
+        <select value={activeCat} onChange={e => setActiveCat(e.target.value)}
+          style={{ ...inp({ width: "auto", fontSize: 14, padding: "9px 12px", minWidth: 220 }) }}>
+          <option value="all">All categories ({sops.length})</option>
+          {categories.map(c => (
+            <option key={c.id} value={c.id}>{c.name} ({counts[c.id] || 0})</option>
+          ))}
+          {counts.none > 0 && <option value="none">Uncategorized ({counts.none})</option>}
+        </select>
+        {activeCat !== "all" && (
+          <button onClick={() => setActiveCat("all")} style={{ background: "none", border: "none", color: C.mut, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+            Clear filter
           </button>
         )}
       </div>
@@ -207,22 +211,6 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNa
       )}
     </div>
   );
-}
-
-function pillBtnStyle(active, color) {
-  return {
-    display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 99,
-    border: `1.5px solid ${active ? color : C.bdr}`, background: active ? color + "16" : C.sur,
-    color: active ? color : C.txt2, fontSize: 12, fontWeight: active ? 600 : 500,
-    textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
-    cursor: "pointer", transition: "all .15s",
-  };
-}
-function countStyle(active, color) {
-  return {
-    fontSize: 12, fontWeight: 700, background: active ? C.sur : C.s2,
-    color: active ? color : C.mut, borderRadius: 99, padding: "1px 7px",
-  };
 }
 
 export default SOPLibrary;

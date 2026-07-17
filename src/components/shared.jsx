@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, inp } from '../globals.js';
 
 /* Design intent (interface-design skill):
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -351,4 +351,59 @@ const MentionField = React.forwardRef(function MentionField({ value, onChange, m
   );
 });
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField };
+/** Shared link picker (R3 A½) — two modes in one popover: paste a web URL,
+ * or search internal targets (SOPs/Forms by title+code, numbered blocks,
+ * Playbook pages, Tasks by title/tag) which inserts a gk: magnet link.
+ * Used by list-item links and the WYSIWYG link button, so internal linking
+ * looks identical everywhere. */
+function LinkPopover({ anchorRect, initial, onSet, onClose }) {
+  const [mode, setMode] = useState(isMagnet(initial) ? "internal" : "url");
+  const [draft, setDraft] = useState(initial || "");
+  const [query, setQuery] = useState("");
+  const results = mode === "internal" ? getLinkSearchCandidates(query) : [];
+  const tabBtn = (key, label) => (
+    <button type="button" onClick={() => setMode(key)} style={{
+      flex: 1, padding: "6px 10px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
+      fontSize: 12, fontWeight: 600, background: mode === key ? C.sur : "transparent",
+      color: mode === key ? C.moss : C.mut, boxShadow: mode === key ? C.shadowSm : "none",
+    }}>{label}</button>
+  );
+  return (
+    <Popover anchorRect={anchorRect} onClose={onClose} width={300}>
+      <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, marginBottom: 10 }}>
+        {tabBtn("url", "Web address")}
+        {tabBtn("internal", "Internal (magnet)")}
+      </div>
+      {mode === "url" ? (
+        <>
+          <input autoFocus value={draft} onChange={e => setDraft(e.target.value)} placeholder="https://…  or paste a gk: magnet link"
+            onKeyDown={e => { if (e.key === "Enter") { onSet(draft.trim()); onClose(); } }}
+            style={{ ...inp({ fontSize: 13, padding: "7px 9px", marginBottom: 10 }) }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <button type="button" onClick={() => { onSet(""); onClose(); }} style={{ background: "none", border: "none", color: C.mut, fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Clear link</button>
+            <Btn onClick={() => { onSet(draft.trim()); onClose(); }} style={{ padding: "5px 14px", fontSize: 12 }}>Save</Btn>
+          </div>
+        </>
+      ) : (
+        <>
+          <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search SOPs, numbered blocks, tasks, tags…"
+            style={{ ...inp({ fontSize: 13, padding: "7px 9px", marginBottom: 8 }) }} />
+          <div style={{ maxHeight: 220, overflowY: "auto" }}>
+            {results.length === 0 && <div style={{ fontSize: 12.5, color: C.mut, padding: "4px 2px" }}>No matches — try a title, code, block number, or tag.</div>}
+            {results.map(r => (
+              <button key={r.url} type="button" onClick={() => { onSet(r.url); onClose(); }}
+                style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", padding: "7px 9px", background: "none", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                onMouseEnter={e => e.currentTarget.style.background = C.s2}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ fontSize: 13.5, color: C.txt, fontWeight: 600 }}>{r.label}</span>
+                <span style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>{r.sub}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </Popover>
+  );
+}
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover };

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, uid, getTasks, addTask, updateTask, deleteTask, confirmDelete, triggerSaved,
   getUsers, getSOPs, getProjects, getTags, addTag, getTaskTemplates, deleteTaskTemplate,
   fmtDateShort, fmtDate, nowISO, getCurrentUser, canEdit, isOverdue, CATEGORY_COLORS,
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskType, inp,
-  RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction,
+  RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover } from './shared.jsx';
 
@@ -324,6 +324,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
       }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? (isSopRun ? "Run SOP — new task" : "New Task") : "Edit Task"}</div>
+          {!isNew && <IconBtn icon="my_location" title="Copy magnet link to this task" onClick={() => copyMagnet("task", form.id)} />}
           {!isNew && <IconBtn icon="delete" danger title="Delete task" onClick={onDelete} />}
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
@@ -821,9 +822,17 @@ function TaskDoneSlideOver({ doneTasks, archivedTasks, cardProps, onClose }) {
   );
 }
 
-function TaskManager({ user, onOpenSop }) {
+function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
+
+  // Magnet deep-link (gk:task:<id>): open that task's modal on arrival.
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const t = getTasks().find(x => x.id === focusTaskId);
+    if (t) setModal({ task: { ...t }, isNew: false });
+    onClearFocus && onClearFocus();
+  }, [focusTaskId, onClearFocus]);
   const [showDone, setShowDone] = useState(false);
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
@@ -943,6 +952,24 @@ function TaskManager({ user, onOpenSop }) {
         <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
           {TASK_BOARD_STATUSES.map(s => {
             const items = byStatus(s.key);
+            // Empty "Review Before Closing" collapses to a thin tab (R3 #7) —
+            // still a live drop target, so dragging a card onto it works and
+            // the column expands as soon as it holds anything.
+            if (s.key === "review" && items.length === 0) {
+              return (
+                <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
+                  title="Review Before Closing — drop a task here"
+                  style={{
+                    flex: "0 0 44px", minWidth: 44, background: C.bg, border: `1.5px dashed ${C.bdr}`, borderRadius: 13,
+                    display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 14, gap: 10, minHeight: 160,
+                  }}>
+                  <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col, flexShrink: 0 }} />
+                  <div style={{ writingMode: "vertical-rl", fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.1em" }}>
+                    {s.label}
+                  </div>
+                </div>
+              );
+            }
             return (
               <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
                 style={{ flex: "1 1 280px", minWidth: 260, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12, minHeight: 160 }}>

@@ -1,11 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   C, FONT_CAPS, getCategories, getUsers, getSOPs, getProjects, getTags, getCurrentUser,
-  fmtDate, nowISO, inp, addTask, taskFromSop, asListBlock, blockBg,
+  fmtDate, nowISO, inp, addTask, taskFromSop, sopHasTaskRoles, asListBlock, blockBg,
   getAcks, ackSop, isAckStale, triggerSaved, findBacklinks,
+  isMagnet, openMagnet, copyMagnet, sanitizeHtml, mentionTokensToHtml,
 } from '../globals.js';
 import { IconBtn, Btn, OBtn, Pill, Icon, MentionText } from './shared.jsx';
 import { TaskModal } from './TaskManager.jsx';
+
+/** Renders any stored link: gk: magnet links navigate internally (with a
+ * distinct glyph), everything else opens a new tab. */
+function ItemLink({ url, children, nav }) {
+  if (isMagnet(url)) {
+    return (
+      <a href="#" onClick={e => { e.preventDefault(); openMagnet(url, nav); }}
+        style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Icon name="my_location" size={13} />{children}
+      </a>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <Icon name="open_in_new" size={13} />{children}
+    </a>
+  );
+}
 
 /* Viewer blocks manage their own session-only fill state (checkboxes, entry
    values, completion fields) — reset on reload. Real tracked execution now
@@ -15,18 +34,18 @@ import { TaskModal } from './TaskManager.jsx';
 /** List / checklist. `checkboxes` shows a leading interactive box per item
  * (folds in the old Checklist block); `withEntry` shows a fill-in blank; each
  * item may carry a link. Checkbox + entry state is component-local. */
-function ListViewerBlock({ block, onNavigate }) {
+function ListViewerBlock({ block, onNavigate, nav }) {
   const items = block.items || [];
   const [checks, setChecks] = useState({});
   const [entries, setEntries] = useState({});
   if (!items.length) return null;
   const toggle = (id) => setChecks(p => ({ ...p, [id]: !p[id] }));
   const label = (it) => it.url
-    ? <a href={it.url} target="_blank" rel="noreferrer" style={{ color: C.moss, fontWeight: 600, textDecoration: "none" }}>{it.text || it.url}</a>
+    ? <ItemLink url={it.url} nav={nav}>{it.text || it.url}</ItemLink>
     : <MentionText text={it.text} onNavigate={onNavigate} />;
   return (
-    <div style={{ margin: "0 0 18px" }}>
-      <div className="gk-no-print" style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+    <div style={{ margin: "0 0 14px" }}>
+      <div className="gk-no-print" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {items.map((it, idx) => {
           const on = !!checks[it.id];
           return (
@@ -120,35 +139,61 @@ function IndexViewerBlock({ allBlocks, onJump }) {
   );
 }
 
-function ViewerBlock({ block: raw, onNavigate, allBlocks, onJump }) {
+/** WYSIWYG text render — sanitized stored HTML with mention tokens swapped
+ * to clickable pills and gk: anchors intercepted for internal navigation.
+ * One click delegate on the paragraph handles both. */
+function RichTextView({ block, onNavigate, nav }) {
+  const html = useMemo(() => mentionTokensToHtml(sanitizeHtml(block.html)), [block.html]);
+  const onClick = (e) => {
+    const mention = e.target.closest("[data-mention]");
+    if (mention) {
+      const [kind, id] = mention.getAttribute("data-mention").split(":");
+      if (onNavigate) onNavigate(kind, id);
+      return;
+    }
+    const a = e.target.closest("a");
+    if (a) {
+      const href = a.getAttribute("href") || "";
+      if (isMagnet(href)) { e.preventDefault(); openMagnet(href, nav); }
+      else { a.target = "_blank"; a.rel = "noreferrer"; }
+    }
+  };
+  return (
+    <div onClick={onClick} className="gk-richtext" dangerouslySetInnerHTML={{ __html: html }}
+      style={{ fontSize: 16, lineHeight: 1.6, color: C.txt2, whiteSpace: "pre-wrap", overflowWrap: "break-word", margin: "0 0 12px" }} />
+  );
+}
+
+function ViewerBlock({ block: raw, onNavigate, allBlocks, onJump, nav }) {
   const block = asListBlock(raw);
   if (block.type === "index") return <IndexViewerBlock allBlocks={allBlocks} onJump={onJump} />;
   if (block.type === "heading") {
     return (
-      <div style={{ margin: "26px 0 10px" }}>
+      <div style={{ margin: "20px 0 8px" }}>
         <h2 style={{ fontSize: 21, fontWeight: 800, color: C.txt, margin: 0 }}>{block.num != null ? `${block.num}. ` : ""}{block.text}</h2>
-        {block.description && <p style={{ fontSize: 14, color: C.mut, margin: "6px 0 0", lineHeight: 1.6 }}><MentionText text={block.description} onNavigate={onNavigate} /></p>}
+        {block.description && <p style={{ fontSize: 14, color: C.mut, margin: "4px 0 0", lineHeight: 1.5 }}><MentionText text={block.description} onNavigate={onNavigate} /></p>}
       </div>
     );
   }
-  if (block.type === "list") return <ListViewerBlock block={block} onNavigate={onNavigate} />;
+  if (block.type === "list") return <ListViewerBlock block={block} onNavigate={onNavigate} nav={nav} />;
   if (block.type === "text") {
+    if (block.html) return <RichTextView block={block} onNavigate={onNavigate} nav={nav} />;
     if (!block.text) return null;
-    return <p style={{ fontSize: 16, lineHeight: 1.75, color: C.txt2, whiteSpace: "pre-wrap", margin: "0 0 16px" }}><MentionText text={block.text} onNavigate={onNavigate} /></p>;
+    return <p style={{ fontSize: 16, lineHeight: 1.6, color: C.txt2, whiteSpace: "pre-wrap", margin: "0 0 12px" }}><MentionText text={block.text} onNavigate={onNavigate} /></p>;
   }
+  if (block.type === "divider") return <hr className="gk-no-print-break" style={{ border: "none", height: 2, background: C.bdr, borderRadius: 2, margin: "18px 0" }} />;
   if (block.type === "completion") return <CompletionViewerBlock />;
   if (block.type === "links") {
     const links = block.links || [];
     if (!links.length) return null;
     return (
-      <div style={{ margin: "0 0 20px" }}>
-        {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 8 }}>{block.title}</div>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ margin: "0 0 16px" }}>
+        {block.title && <div style={{ fontSize: 13, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 6 }}>{block.title}</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {links.map(l => (
-            <a key={l.id} href={l.url} target="_blank" rel="noreferrer"
-              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 15, color: C.moss, textDecoration: "none", fontWeight: 600 }}>
-              <Icon name="open_in_new" size={15} />{l.label || l.url}
-            </a>
+            <span key={l.id} style={{ fontSize: 15 }}>
+              <ItemLink url={l.url} nav={nav}>{l.label || l.url}</ItemLink>
+            </span>
           ))}
         </div>
       </div>
@@ -239,15 +284,36 @@ function BacklinksList({ sop, onNavigate }) {
   );
 }
 
-function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenTasks }) {
+function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenTasks, scrollToBlock, onScrolled }) {
   const categories = getCategories();
   const cat = categories.find(c => c.id === sop.categoryId);
   const printedOn = fmtDate(nowISO());
   const [ackVersion, setAckVersion] = useState(0);
   const [runDraft, setRunDraft] = useState(null); // pre-filled task awaiting confirm
+  const [runGate, setRunGate] = useState(false);  // "not set up for tasks yet" notice
+  const [hoverBlk, setHoverBlk] = useState(null);
   const isForm = sop.kind === "form";
 
   const jump = (id) => { const el = document.getElementById("blk-" + id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
+
+  // Magnet deep-anchor: scroll to the requested block once rendered.
+  useEffect(() => {
+    if (!scrollToBlock) return;
+    const t = setTimeout(() => { jump(scrollToBlock); onScrolled && onScrolled(); }, 60);
+    return () => clearTimeout(t);
+  }, [scrollToBlock, sop.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Magnet navigation rides the same onNavigate App already wires for
+  // mentions — extended with a "task" kind and an optional block anchor.
+  const nav = useMemo(() => ({
+    goToSop: (id, blockId) => onNavigate && onNavigate("sop", id, blockId),
+    goToTask: (id) => onNavigate && onNavigate("task", id),
+    goToPlaybookSection: (id) => onNavigate && onNavigate("playbook", id),
+  }), [onNavigate]);
+
+  const startRun = () => {
+    if (sopHasTaskRoles(sop)) setRunDraft(taskFromSop(sop, user));
+    else setRunGate(true);
+  };
 
   const blocks = sop.blocks || [];
 
@@ -257,7 +323,7 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
       <div className="gk-no-print" style={{ position: "sticky", top: 0, zIndex: 40, background: C.bg, display: "flex", alignItems: "center", gap: 10, padding: "10px 0 12px", marginBottom: 8, borderBottom: `1.5px solid ${C.bdr}` }}>
         <IconBtn icon="arrow_back" title="Back to library" onClick={onClose} />
         <div style={{ flex: 1 }} />
-        <Btn onClick={() => setRunDraft(taskFromSop(sop, user))}><Icon name="play_circle" size={16} />{isForm ? "Fill out" : "Run SOP"}</Btn>
+        <Btn onClick={startRun}><Icon name="play_circle" size={16} />{isForm ? "Fill out" : "Run SOP"}</Btn>
         {canEditSop && <OBtn onClick={onEdit}><Icon name="edit" size={16} />Edit</OBtn>}
         <OBtn onClick={() => window.print()}><Icon name="print" size={16} />Print</OBtn>
       </div>
@@ -295,11 +361,21 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
           {blocks.map(b => {
             const bg = blockBg(b.bg);
             return (
-              <div key={b.id} id={"blk-" + b.id} style={{
-                flex: `0 0 calc(${b.width || 100}% - 24px)`, minWidth: 0,
-                ...(bg !== "transparent" ? { background: bg, borderRadius: 10, padding: "10px 14px", margin: "0 0 4px" } : {}),
-              }}>
-                <ViewerBlock block={b} onNavigate={onNavigate} allBlocks={blocks} onJump={jump} />
+              <div key={b.id} id={"blk-" + b.id}
+                onMouseEnter={() => setHoverBlk(b.id)} onMouseLeave={() => setHoverBlk(h => h === b.id ? null : h)}
+                style={{
+                  flex: `0 0 calc(${b.width || 100}% - 24px)`, minWidth: 0, position: "relative",
+                  ...(bg !== "transparent" ? { background: bg, borderRadius: 10, padding: "10px 14px", margin: "0 0 4px" } : {}),
+                }}>
+                {/* hover: copy a magnet link straight from the reading view */}
+                {hoverBlk === b.id && (
+                  <button type="button" className="gk-no-print" title="Copy magnet link to this block"
+                    onClick={() => copyMagnet("sop", sop.id, b.id)}
+                    style={{ position: "absolute", top: 2, right: 0, display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: `1px solid ${C.bdr}`, background: C.sur, color: C.mut, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, zIndex: 5 }}>
+                    <Icon name="my_location" size={12} />Copy link
+                  </button>
+                )}
+                <ViewerBlock block={b} onNavigate={onNavigate} allBlocks={blocks} onJump={jump} nav={nav} />
               </div>
             );
           })}
@@ -316,6 +392,25 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
           onClose={() => setRunDraft(null)}
           onSave={(form) => { addTask(form); triggerSaved(); setRunDraft(null); onOpenTasks && onOpenTasks(); }}
         />
+      )}
+
+      {/* Default-none gate (R3 C): no blocks routed yet → force the one-time setup */}
+      {runGate && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }} onClick={() => setRunGate(false)}>
+          <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{ background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd, maxWidth: 420, width: "100%", padding: 26 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+              <Icon name="tune" size={20} style={{ color: C.clay }} />
+              <div style={{ fontSize: 17, fontWeight: 800, color: C.txt }}>Not set up for tasks yet</div>
+            </div>
+            <div style={{ fontSize: 14, color: C.txt2, lineHeight: 1.6, marginBottom: 18 }}>
+              Before this {isForm ? "form" : "SOP"} can be run as a task, each block needs a <strong>Task</strong> setting (the small dropdown in its toolbar): <strong>Desc</strong> sends it to the task description, <strong>List</strong> turns its items into subtasks.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <OBtn onClick={() => setRunGate(false)}>Close</OBtn>
+              {canEditSop && <Btn onClick={() => { setRunGate(false); onEdit(); }}><Icon name="edit" size={15} />Open editor</Btn>}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

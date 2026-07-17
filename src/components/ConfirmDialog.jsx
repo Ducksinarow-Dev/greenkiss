@@ -24,9 +24,12 @@ function ConfirmDialog() {
 
 function SavedToast() {
   const [vis, setVis] = useState(false);
+  const [msg, setMsg] = useState("Saved");
   const timer = useRef(null);
   useEffect(() => {
-    _gkRefs.showSavedToast = () => { setVis(true); clearTimeout(timer.current); timer.current = setTimeout(() => setVis(false), 1600); };
+    // Doubles as the generic toast: triggerToast("Copied") passes a message,
+    // plain triggerSaved() passes none and falls back to "Saved".
+    _gkRefs.showSavedToast = (m) => { setMsg(typeof m === "string" && m ? m : "Saved"); setVis(true); clearTimeout(timer.current); timer.current = setTimeout(() => setVis(false), 1600); };
     return () => { _gkRefs.showSavedToast = null; clearTimeout(timer.current); };
   }, []);
   return (
@@ -37,7 +40,7 @@ function SavedToast() {
       opacity: vis ? 1 : 0, transform: vis ? "translateY(0)" : "translateY(-12px)",
       transition: "opacity .25s, transform .25s", pointerEvents: "none",
     }}>
-      <Icon name="check_circle" size={17} /> Saved
+      <Icon name="check_circle" size={17} /> {msg}
     </div>
   );
 }

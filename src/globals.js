@@ -25,10 +25,12 @@
  * @property {string} text
  *
  * Every block also carries optional `width?:number` (33|40|50|60|100),
- * `bg?:string` (emphasis background key, see BLOCK_BGS), and `num?:number`
- * (a "number at will" that feeds the index block).
+ * `bg?:string` (emphasis background key, see BLOCK_BGS), `num?:number`
+ * (a "number at will" that feeds the index block), and `taskRole?:string`
+ * (""|"description"|"checklist" — Run-SOP routing, R3 Phase C).
  * @typedef {{id:string,type:"heading",text:string,description?:string}} HeadingBlock
- * @typedef {{id:string,type:"text",text:string}} TextBlock
+ * @typedef {{id:string,type:"text",text:string,html?:string}} TextBlock html = optional rich formatting (R3 B3); text stays the synced plain version
+ * @typedef {{id:string,type:"divider"}} DividerBlock
  * @typedef {{id:string,type:"links",title?:string,links:LinkItem[]}} LinksBlock
  * @typedef {{id:string,type:"image",src:string,caption:string}} ImageBlock
  * @typedef {{id:string,text:string,value?:string,url?:string}} ListItem
@@ -36,7 +38,7 @@
  * @typedef {{id:string,type:"completion"}} CompletionBlock
  * @typedef {{id:string,type:"index"}} IndexBlock
  * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[]}} ChecklistBlock legacy — normalized to a checkbox ListBlock on read (asListBlock)
- * @typedef {HeadingBlock|TextBlock|LinksBlock|ImageBlock|ListBlock|CompletionBlock|IndexBlock|ChecklistBlock} Block
+ * @typedef {HeadingBlock|TextBlock|DividerBlock|LinksBlock|ImageBlock|ListBlock|CompletionBlock|IndexBlock|ChecklistBlock} Block
  *
  * @typedef {Object} SOP
  * @property {string} id
@@ -351,6 +353,9 @@ function confirmDelete(msg) {
   });
 }
 function triggerSaved() { if (_gkRefs.showSavedToast) _gkRefs.showSavedToast(); }
+/** Generic top-right toast with a custom message ("Copied", etc.) — same
+ * component as the Saved toast, different text. */
+function triggerToast(msg) { if (_gkRefs.showSavedToast) _gkRefs.showSavedToast(msg); }
 function _setOffline(v) { if (_gkRefs.setOffline) _gkRefs.setOffline(v); }
 
 /* ─── LOW-LEVEL API CLIENT (remote mode only) ────────────────────────
@@ -922,29 +927,45 @@ const asListBlock = (b) => {
   };
 };
 
-/** Builds a draft Task from an SOP for the "Run SOP" flow (Phase D). Text/
- * heading/plain-list content flows into the description; every checkbox list
- * item (and legacy checklist item) becomes a subtask. The caller opens the
- * task modal pre-filled with this and confirms before it's actually created. */
+/** True if any block on the SOP has been routed for the Run-SOP task
+ * (taskRole set) — the "Run SOP" button gates on this so the one-time
+ * block-routing setup can't be skipped. */
+const sopHasTaskRoles = (sop) => (sop?.blocks || []).some(b => b.taskRole === "description" || b.taskRole === "checklist");
+
+/** Builds a draft Task from an SOP for the "Run SOP" flow. Routing is
+ * explicit per block (`block.taskRole`, saved with the SOP): "description"
+ * blocks contribute their plain text to the description, "checklist" list
+ * blocks contribute their items as subtasks, everything else is skipped.
+ * The description opens with a compact auto-summary (title, code, section
+ * headings) so the task reads at a glance without duplicating the doc. */
 function taskFromSop(sop, user) {
   const lines = [];
   const subTasks = [];
+  const sections = (sop.blocks || []).map(asListBlock)
+    .filter(b => b.type === "heading" && (b.text || "").trim())
+    .map(b => (b.num != null ? `${b.num}. ` : "") + b.text.trim());
   (sop.blocks || []).forEach(raw => {
     const b = asListBlock(raw);
+    if (b.taskRole === "checklist" && b.type === "list") {
+      (b.items || []).forEach(it => subTasks.push({ id: uid(), text: it.text || "", done: false, assigneeId: "", dueDate: "", priority: "medium" }));
+      return;
+    }
+    if (b.taskRole !== "description") return;
     if (b.type === "heading") { lines.push((b.text || "").toUpperCase()); if (b.description) lines.push(b.description); }
     else if (b.type === "text") { if (b.text) lines.push(b.text); }
     else if (b.type === "list") {
-      (b.items || []).forEach(it => {
-        if (b.checkboxes) subTasks.push({ id: uid(), text: it.text || "", done: false, assigneeId: "", dueDate: "", priority: "medium" });
-        else lines.push((b.style === "numbered" ? "• " : "• ") + (it.text || "") + (b.withEntry ? ": ______" : ""));
-      });
+      const rows = (b.items || []).map((it, i) => (b.style === "numbered" ? `${i + 1}. ` : "• ") + (it.text || "") + (b.withEntry ? ": ______" : ""));
+      if (rows.length) lines.push(rows.join("\n"));
     }
-    // index/completion/links/image are skipped in the task copy.
   });
+  const summary = [
+    `Run of ${sop.title || "SOP"}${sop.code ? ` (${sop.code})` : ""}.`,
+    sections.length ? `Sections: ${sections.join(" · ")}.` : "",
+  ].filter(Boolean).join("\n");
   return {
     id: uid(), createdAt: nowISO(),
     title: `${sop.title || "SOP"} — ${todayLocalISO()}`,
-    description: lines.join("\n\n"),
+    description: [summary, ...lines].filter(Boolean).join("\n\n"),
     status: "todo", priority: "medium", type: "task",
     assignedTo: user?.id || "", dueDate: todayLocalISO(), relatedSopId: sop.id, projectId: "",
     subTasks, tagIds: [], fromSopRun: true,
@@ -1128,6 +1149,109 @@ function getMentionCandidates(query) {
   return out.slice(0, 8);
 }
 
+/* ─── MAGNET LINKS (R3 A½) ────────────────────────────────────────────
+   Copy-pasteable internal deep links that work in ANY url field:
+     gk:sop:<sopId>              → open that SOP/Form
+     gk:sop:<sopId>:<blockId>    → open it scrolled to that block (viewer
+                                    blocks render id="blk-<id>")
+     gk:task:<taskId>            → open Task Manager with that task's modal
+     gk:playbook:<sectionId>     → open that Playbook page
+   Plain strings, so no storage changes anywhere — link renderers just
+   check isMagnet() and navigate internally instead of target="_blank". */
+const isMagnet = (url) => typeof url === "string" && url.startsWith("gk:");
+/** @returns {{kind:"sop"|"task"|"playbook", id:string, blockId?:string}|null} */
+function parseMagnet(url) {
+  const m = /^gk:(sop|task|playbook):([\w-]+)(?::([\w-]+))?$/.exec(url || "");
+  return m ? { kind: m[1], id: m[2], blockId: m[3] || "" } : null;
+}
+const magnetFor = (kind, id, blockId) => `gk:${kind}:${id}${blockId ? ":" + blockId : ""}`;
+/** Copies a magnet link to the clipboard and toasts. */
+function copyMagnet(kind, id, blockId) {
+  const link = magnetFor(kind, id, blockId);
+  try { navigator.clipboard.writeText(link); } catch {
+    // http/older browsers: fall back to a hidden textarea copy
+    const ta = document.createElement("textarea");
+    ta.value = link; document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch {}
+    document.body.removeChild(ta);
+  }
+  triggerToast("Magnet link copied");
+  return link;
+}
+/** One resolver for clicking any magnet link. `nav` is App.jsx's navigation
+ * surface: { goToSop(id, blockId), goToTask(id), goToPlaybookSection(id) }. */
+function openMagnet(url, nav) {
+  const m = parseMagnet(url);
+  if (!m || !nav) return false;
+  if (m.kind === "sop" && nav.goToSop) nav.goToSop(m.id, m.blockId);
+  else if (m.kind === "task" && nav.goToTask) nav.goToTask(m.id);
+  else if (m.kind === "playbook" && nav.goToPlaybookSection) nav.goToPlaybookSection(m.id);
+  else return false;
+  return true;
+}
+
+/** Search over every internal linkable target for the link popover:
+ * SOPs/Forms by title + code, their NUMBERED blocks as sub-entries
+ * ("SOP-OPS-001 › 3. Register Setup"), Playbook sections, and Tasks by
+ * title or tag name. Returns {label, sub, url} rows (url = magnet link). */
+function getLinkSearchCandidates(query) {
+  const q = (query || "").toLowerCase().trim();
+  const matches = (...fields) => !q || fields.some(f => (f || "").toLowerCase().includes(q));
+  const out = [];
+  getSOPs().forEach(s => {
+    const docLabel = s.title || "Untitled";
+    const docKindLabel = s.kind === "form" ? "Form" : "SOP";
+    if (matches(s.title, s.code)) out.push({ label: docLabel, sub: `${docKindLabel}${s.code ? " · " + s.code : ""}`, url: magnetFor("sop", s.id) });
+    (s.blocks || []).map(asListBlock).forEach(b => {
+      if (b.num == null) return;
+      const blockLabel = b.type === "heading" ? b.text : (b.type === "list" ? (b.items?.[0]?.text || "List") : (b.text || "").slice(0, 40));
+      if (matches(blockLabel, String(b.num), s.title, s.code)) {
+        out.push({ label: `${docLabel} › ${b.num}. ${blockLabel || "Block"}`, sub: docKindLabel + " block", url: magnetFor("sop", s.id, b.id) });
+      }
+    });
+  });
+  const playbook = db.getSync("playbook") || { sections: [] };
+  (playbook.sections || []).forEach(s => {
+    if (matches(s.title)) out.push({ label: s.title || "Untitled", sub: "Playbook", url: magnetFor("playbook", s.id) });
+  });
+  const tags = getTags();
+  getTasks().forEach(t => {
+    if (t.archived) return;
+    const tagNames = (t.tagIds || []).map(id => tags.find(x => x.id === id)?.name || "");
+    if (matches(t.title, ...tagNames)) out.push({ label: t.title || "Untitled task", sub: "Task" + (tagNames.filter(Boolean).length ? " · " + tagNames.filter(Boolean).join(", ") : ""), url: magnetFor("task", t.id) });
+  });
+  return out.slice(0, 10);
+}
+
+/* ─── RICH TEXT (R3 B3) ───────────────────────────────────────────────
+   WYSIWYG text blocks store sanitized HTML in block.html alongside the
+   synced plain block.text (innerText), so search/excerpts/taskFromSop
+   keep reading plain text untouched. Sanitizer is allowlist-lite: strips
+   script/style/iframe elements, on* attributes, and javascript: hrefs —
+   enough for an internal, login-gated tool where editors are staff. */
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html");
+  const root = doc.body.firstChild;
+  root.querySelectorAll("script,style,iframe,object,embed,link,meta").forEach(el => el.remove());
+  root.querySelectorAll("*").forEach(el => {
+    [...el.attributes].forEach(a => {
+      const n = a.name.toLowerCase();
+      if (n.startsWith("on")) el.removeAttribute(a.name);
+      if ((n === "href" || n === "src") && /^\s*javascript:/i.test(a.value)) el.removeAttribute(a.name);
+    });
+  });
+  return root.innerHTML;
+}
+const escapeHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** Replaces @[Label](kind:id) tokens inside an HTML string with clickable
+ * pill spans (`data-mention="kind:id"`) — the HTML twin of MentionText,
+ * used by the WYSIWYG viewer render. Tokens never contain < or >, so a
+ * plain regex replace over the markup is safe. */
+function mentionTokensToHtml(html) {
+  return (html || "").replace(new RegExp(MENTION_RE.source, "g"), (_, label, kind, id) =>
+    `<span data-mention="${kind}:${id}" style="display:inline-flex;padding:0 6px;border-radius:5px;background:${C.mossSoft};color:${C.moss};font-weight:600;cursor:pointer;font-size:0.94em">${escapeHtml(label)}</span>`);
+}
+
 /** Every document/playbook-section that mentions the given target,
  * grouped by source — rendered as a "Referenced by" list. */
 function findBacklinks(targetKind, targetId) {
@@ -1155,6 +1279,23 @@ function findBacklinks(targetKind, targetId) {
    live `contacts` records instead (see OperationsPlaybook.jsx). */
 const getPlaybook = () => db.getSync("playbook") || null;
 const savePlaybook = (p) => db.setSync("playbook", p);
+
+/* Playbook change history (R3 E): whole-doc snapshots with author + date,
+   written at edit boundaries (leaving edit mode, section add/delete, and
+   before any restore so restores are themselves undoable). Capped at 20.
+   Rides the generic kv path like the playbook doc itself. */
+const getPlaybookRevs = () => db.getSync("playbookRevs") || [];
+function addPlaybookRev(label = "") {
+  const playbook = getPlaybook();
+  if (!playbook) return;
+  const revs = getPlaybookRevs();
+  const snapshot = JSON.parse(JSON.stringify(playbook));
+  // Skip if identical to the newest snapshot — edit-mode exits without
+  // changes shouldn't burn a history slot.
+  if (revs[0] && JSON.stringify(revs[0].snapshot) === JSON.stringify(snapshot)) return;
+  const entry = { id: uid(), savedAt: nowISO(), savedBy: getCurrentUser()?.name || "", label, snapshot };
+  db.setSync("playbookRevs", [entry, ...revs].slice(0, 20));
+}
 
 const _mk = (title, blocks) => ({ id: uid(), title, blocks });
 const _txt = (t) => ({ id: uid(), type: "text", text: t });
@@ -1899,7 +2040,9 @@ export {
   getAlerts, saveAlerts, addAlert, deleteAlert,
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
-  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks, asListBlock, blockBg, taskFromSop,
+  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
+  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
+  getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, deleteInstance, getTodayInstance, todayLocalISO,
   parseMentionText, getMentionCandidates, findBacklinks,

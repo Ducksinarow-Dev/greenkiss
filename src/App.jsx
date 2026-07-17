@@ -10,6 +10,7 @@ import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
+import LoginReminders from './components/LoginReminders.jsx';
 
 function BootScreen() {
   return (
@@ -24,10 +25,11 @@ function App() {
   const [user, setUser] = useState(() => getCurrentUser());
   const [booting, setBooting] = useState(() => REMOTE_MODE && !!getCurrentUser() && !isRemoteWarm());
   const [section, setSection] = useState("dashboard");
-  const [sopFocus, setSopFocus] = useState(null); // {id, mode}
+  const [sopFocus, setSopFocus] = useState(null); // {id, mode, blockId}
   const [projectFocus, setProjectFocus] = useState(null); // project id
   const [contentFocus, setContentFocus] = useState(null); // content item id
   const [playbookFocus, setPlaybookFocus] = useState(null); // playbook section id
+  const [taskFocus, setTaskFocus] = useState(null); // task id (magnet deep-link)
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
   // in place — it doesn't trigger React re-renders on its own. themeVersion is
@@ -61,17 +63,22 @@ function App() {
   // Routes to the SOP Library or the Forms section depending on the
   // target document's own `kind` — so a mention/backlink click lands in
   // the right nav section without the caller needing to know which.
-  const goToSop = (id) => {
+  const goToSop = (id, blockId) => {
     const doc = getSOP(id);
-    setSopFocus({ id, mode: "view" });
+    setSopFocus({ id, mode: "view", blockId: blockId || null });
     setSection(doc && doc.kind === "form" ? "forms" : "library");
   };
   const goToProject = (id) => { setProjectFocus(id); setSection("projects"); };
   const goToContent = (id) => { setContentFocus(id); setSection("calendar"); };
   const goToPlaybookSection = (id) => { setPlaybookFocus(id); setSection("playbook"); };
+  const goToTask = (id) => { setTaskFocus(id); setSection("tasks"); };
   // Shared by both SOPLibrary mounts (library/forms) as onNavigateOut — a
-  // mention pointing at the other kind or at a Playbook section.
-  const onNavigateOut = (kind, id) => { if (kind === "playbook") goToPlaybookSection(id); else goToSop(id); };
+  // mention/magnet pointing at the other kind, a Playbook section, or a task.
+  const onNavigateOut = (kind, id, blockId) => {
+    if (kind === "playbook") goToPlaybookSection(id);
+    else if (kind === "task") goToTask(id);
+    else goToSop(id, blockId);
+  };
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
@@ -79,15 +86,15 @@ function App() {
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
         {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} />}
         {section === "library" && (
-          <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
+          <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
         {section === "forms" && (
-          <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
+          <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
         {section === "playbook" && (
-          <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} />
+          <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} onNavigateOut={onNavigateOut} />
         )}
-        {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} />}
+        {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} onClearFocus={() => setContentFocus(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
@@ -95,6 +102,7 @@ function App() {
       <ConfirmDialog />
       <SavedToast />
       <OfflineIndicator />
+      <LoginReminders user={user} onOpenTasks={() => setSection("tasks")} />
     </div>
   );
 }

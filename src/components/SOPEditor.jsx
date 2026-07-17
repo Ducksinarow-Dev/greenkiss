@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   C, FONT_CAPS, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
   getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp, getAllHeadingTexts, getAllTypePrefixes, asListBlock, blockBg,
+  sanitizeHtml, escapeHtml, getMentionCandidates, copyMagnet,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, MentionField, Popover } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, MentionField, Popover, LinkPopover } from './shared.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 
 /* ─── Inline "+ New category" popover (#4) — editors no longer need to
@@ -44,6 +45,7 @@ const BLOCK_DEFS = [
   { type: "heading", label: "Title & Description", icon: "title" },
   { type: "text", label: "Text", icon: "notes" },
   { type: "list", label: "List / Checklist", icon: "checklist" },
+  { type: "divider", label: "Line Break", icon: "horizontal_rule" },
   { type: "completion", label: "Completion", icon: "task_alt" },
   { type: "links", label: "Link Group", icon: "link" },
   { type: "image", label: "Image", icon: "image" },
@@ -68,6 +70,7 @@ function newBlock(type) {
   if (type === "heading") return { id: uid(), type: "heading", text: "", description: "" };
   if (type === "text") return { id: uid(), type: "text", text: "" };
   if (type === "list") return { id: uid(), type: "list", style: "bulleted", checkboxes: false, withEntry: false, items: [] };
+  if (type === "divider") return { id: uid(), type: "divider" };
   if (type === "completion") return { id: uid(), type: "completion" };
   if (type === "links") return { id: uid(), type: "links", title: "Links", links: [] };
   if (type === "image") return { id: uid(), type: "image", src: "", caption: "" };
@@ -116,20 +119,127 @@ function textToListItems(text) {
     .map(l => ({ id: uid(), text: l.replace(LIST_LINE_RE, ""), value: "", url: "" }));
 }
 
+/* WYSIWYG text block (R3 B3) — contentEditable + document.execCommand
+ * (deprecated but universal, dependency-free). Stores BOTH fields on every
+ * edit: `html` (sanitized formatting) and `text` (innerText) so search,
+ * excerpts, and Run-SOP keep reading plain text unchanged. The DOM is only
+ * written on mount/per-block — never re-controlled per keystroke — so the
+ * caret is stable. */
+function RichToolbarBtn({ icon, label, title, onClick, style }) {
+  return (
+    <button type="button" title={title} onMouseDown={e => e.preventDefault() /* keep the text selection */} onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center", minWidth: 26, height: 26, padding: "0 5px",
+        borderRadius: 6, border: `1px solid ${C.bdr}`, background: C.sur, color: C.txt2, cursor: "pointer",
+        fontFamily: "inherit", fontSize: 12, fontWeight: 700, ...style,
+      }}>
+      {icon ? <Icon name={icon} size={15} /> : label}
+    </button>
+  );
+}
+
 function TextBlockEditor({ block, onChange, onConvertToList }) {
   const ref = useRef(null);
-  useEffect(() => {
-    if (ref.current) { ref.current.style.height = "auto"; ref.current.style.height = ref.current.scrollHeight + "px"; }
-  }, [block.text]);
+  const savedRange = useRef(null);
   const [menu, setMenu] = useState(false);
+  const [linkRect, setLinkRect] = useState(null);
+  const [mentionRect, setMentionRect] = useState(null);
+  const [mentionQuery, setMentionQuery] = useState("");
+
+  // Write the DOM once per block — legacy plain-text blocks get escaped +
+  // <br>'d on first edit and gain html from then on.
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.innerHTML = block.html || escapeHtml(block.text || "").replace(/\n/g, "<br>");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block.id]);
+
+  const sync = () => {
+    const el = ref.current;
+    if (!el) return;
+    onChange({ ...block, html: sanitizeHtml(el.innerHTML), text: el.innerText.replace(/\n\n/g, "\n") });
+  };
+  const saveSel = () => { const s = window.getSelection(); if (s && s.rangeCount) savedRange.current = s.getRangeAt(0).cloneRange(); };
+  const restoreSel = () => {
+    ref.current?.focus();
+    const r = savedRange.current;
+    if (r) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+  };
+  const exec = (cmd, val) => { restoreSel(); document.execCommand(cmd, false, val); sync(); };
+  const selectionHtml = () => {
+    const s = window.getSelection();
+    if (!s || !s.rangeCount || s.isCollapsed) return "";
+    const div = document.createElement("div");
+    div.appendChild(s.getRangeAt(0).cloneContents());
+    return div.innerHTML;
+  };
+  const extraBold = () => {
+    restoreSel();
+    const html = selectionHtml();
+    if (!html) return;
+    document.execCommand("insertHTML", false, `<span style="font-weight:800">${html}</span>`);
+    sync();
+  };
+  const setLink = (url) => {
+    restoreSel();
+    if (!url) { document.execCommand("unlink"); sync(); return; }
+    const s = window.getSelection();
+    if (!s || s.isCollapsed) document.execCommand("insertHTML", false, `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`);
+    else document.execCommand("createLink", false, url);
+    sync();
+  };
+  const insertMention = (item) => {
+    restoreSel();
+    document.execCommand("insertText", false, `@[${item.label}](${item.kind}:${item.id}) `);
+    sync();
+    setMentionRect(null);
+  };
+
   const canConvert = looksLikeList(block.text);
+  const COLORS = [C.txt, C.moss, C.red, C.clay];
+
   return (
     <div>
-      <MentionField ref={ref} multiline value={block.text} onChange={text => onChange({ ...block, text })}
-        placeholder="Write the procedure here. Line breaks are preserved. Type @ to link a SOP, form, contact, or playbook section."
-        rows={3}
-        style={{ ...inp({ fontSize: 15, lineHeight: 1.65, minHeight: 80 }) }}
+      {/* Formatting toolbar — Bold / Extra bold / Size / Color / Link / @internal */}
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+        <RichToolbarBtn icon="format_bold" title="Bold" onClick={() => exec("bold")} />
+        <RichToolbarBtn label="XB" title="Extra bold" onClick={extraBold} />
+        <RichToolbarBtn label="S" title="Small text" onClick={() => exec("fontSize", 2)} style={{ fontSize: 10 }} />
+        <RichToolbarBtn label="M" title="Normal text" onClick={() => exec("fontSize", 3)} />
+        <RichToolbarBtn label="L" title="Large text" onClick={() => exec("fontSize", 5)} style={{ fontSize: 14 }} />
+        {COLORS.map(col => (
+          <RichToolbarBtn key={col} title="Text colour" onClick={() => exec("foreColor", col)}
+            label=" " style={{ background: col, minWidth: 18, width: 18, height: 18, borderRadius: 9, border: `1.5px solid ${C.bdr2}` }} />
+        ))}
+        <RichToolbarBtn icon="link" title="Add link (web or magnet)" onClick={e => { saveSel(); setLinkRect(e.currentTarget.getBoundingClientRect()); }} />
+        <RichToolbarBtn icon="alternate_email" title="Link an SOP, contact, or playbook page inline" onClick={e => { saveSel(); setMentionQuery(""); setMentionRect(e.currentTarget.getBoundingClientRect()); }} />
+      </div>
+
+      <div ref={ref} contentEditable suppressContentEditableWarning
+        onInput={sync} onBlur={sync} onMouseUp={saveSel} onKeyUp={saveSel}
+        data-placeholder="Write the procedure here…"
+        style={{ ...inp({ fontSize: 15, lineHeight: 1.6, minHeight: 80 }), whiteSpace: "pre-wrap", overflowWrap: "break-word" }}
       />
+
+      {linkRect && (
+        <LinkPopover anchorRect={linkRect} initial="" onSet={setLink} onClose={() => setLinkRect(null)} />
+      )}
+      {mentionRect && (
+        <Popover anchorRect={mentionRect} onClose={() => setMentionRect(null)} width={260}>
+          <input autoFocus value={mentionQuery} onChange={e => setMentionQuery(e.target.value)} placeholder="Search SOPs, contacts, playbook…"
+            style={{ ...inp({ fontSize: 13, padding: "7px 9px", marginBottom: 8 }) }} />
+          {getMentionCandidates(mentionQuery).map(r => (
+            <button key={r.kind + r.id} type="button" onMouseDown={e => e.preventDefault()} onClick={() => insertMention(r)}
+              style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", padding: "7px 9px", background: "none", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+              onMouseEnter={e => e.currentTarget.style.background = C.s2}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <span style={{ fontSize: 13.5, color: C.txt, fontWeight: 600 }}>{r.label}</span>
+              <span style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>{r.sub}</span>
+            </button>
+          ))}
+        </Popover>
+      )}
+
       {canConvert && (
         <div style={{ position: "relative", marginTop: 6 }}>
           <button type="button" onClick={() => setMenu(m => !m)}
@@ -140,7 +250,7 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
             <div style={{ position: "absolute", top: "100%", left: 0, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 9, boxShadow: C.shadowMd, padding: 5, zIndex: 20, minWidth: 150 }} onMouseLeave={() => setMenu(false)}>
               {[["bulleted", false, "Bulleted"], ["numbered", false, "Numbered"], ["bulleted", true, "Checklist"]].map(([style, checkboxes, label]) => (
                 <button key={label} type="button"
-                  onClick={() => { onConvertToList({ id: block.id, type: "list", style, checkboxes, withEntry: false, items: textToListItems(block.text), width: block.width, bg: block.bg, num: block.num }); setMenu(false); }}
+                  onClick={() => { onConvertToList({ id: block.id, type: "list", style, checkboxes, withEntry: false, items: textToListItems(block.text), width: block.width, bg: block.bg, num: block.num, taskRole: block.taskRole }); setMenu(false); }}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, color: C.txt, borderRadius: 6 }}
                   onMouseEnter={e => e.currentTarget.style.background = C.s2}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>{label}</button>
@@ -153,26 +263,22 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
   );
 }
 
-/** Compact per-item link editor — a small popover to attach/clear a URL. */
+/** Per-item link editor — a clearly visible bordered "Link" button (moss
+ * when a link is set) opening the shared web/internal LinkPopover. */
 function ListItemLinkBtn({ url, onSet }) {
   const [rect, setRect] = useState(null);
-  const [draft, setDraft] = useState(url || "");
   return (
     <>
-      <IconBtn icon="link" title={url ? "Edit link" : "Add link"} onClick={e => { setDraft(url || ""); setRect(e.currentTarget.getBoundingClientRect()); }}
-        style={{ color: url ? C.moss : C.faint }} />
-      {rect && (
-        <Popover anchorRect={rect} onClose={() => setRect(null)} width={240}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: C.txt2, marginBottom: 6 }}>Link URL</div>
-          <input autoFocus value={draft} onChange={e => setDraft(e.target.value)} placeholder="https://…"
-            onKeyDown={e => { if (e.key === "Enter") { onSet(draft.trim()); setRect(null); } }}
-            style={{ ...inp({ fontSize: 13, padding: "7px 9px", marginBottom: 8 }) }} />
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <button type="button" onClick={() => { onSet(""); setRect(null); }} style={{ background: "none", border: "none", color: C.mut, fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Clear</button>
-            <Btn onClick={() => { onSet(draft.trim()); setRect(null); }} style={{ padding: "5px 12px", fontSize: 12 }}>Save</Btn>
-          </div>
-        </Popover>
-      )}
+      <button type="button" title={url ? "Edit link" : "Add a link (web or internal magnet)"}
+        onClick={e => setRect(e.currentTarget.getBoundingClientRect())}
+        style={{
+          display: "flex", alignItems: "center", gap: 4, padding: "5px 9px", borderRadius: 7, cursor: "pointer",
+          border: `1.5px solid ${url ? C.moss : C.bdr2}`, background: url ? C.mossSoft : C.sur,
+          color: url ? C.moss : C.txt2, fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, flexShrink: 0,
+        }}>
+        <Icon name="link" size={14} />{url ? "Linked" : "Link"}
+      </button>
+      {rect && <LinkPopover anchorRect={rect} initial={url || ""} onSet={onSet} onClose={() => setRect(null)} />}
     </>
   );
 }
@@ -180,7 +286,7 @@ function ListItemLinkBtn({ url, onSet }) {
 /* One flexible list block: bulleted/numbered, optional leading checkboxes
  * (folds in the old Checklist type), optional trailing entry blank per line
  * ("Orders waiting to ship: ___"), and an optional link per item. */
-function ListBlockEditor({ block, onChange }) {
+function ListBlockEditor({ block, onChange, onConvertToText }) {
   const items = block.items || [];
   const setItems = (i) => onChange({ ...block, items: i });
   const [draft, setDraft] = useState("");
@@ -189,44 +295,56 @@ function ListBlockEditor({ block, onChange }) {
     setItems([...items, { id: uid(), text: draft.trim(), value: "", url: "" }]);
     setDraft("");
   };
-  const toggle = (k) => (
-    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: C.txt2, cursor: "pointer" }}>
-      <input type="checkbox" checked={!!block[k]} onChange={e => onChange({ ...block, [k]: e.target.checked })} />
-      {k === "checkboxes" ? "Add checkboxes to beginning of each line" : "Show entry field at end of each line"}
+  // All three controls share one aligned row (wrapping as whole units) —
+  // identical 28px control heights so nothing stair-steps (R3 #12).
+  const toggle = (k, label) => (
+    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: C.txt2, cursor: "pointer", height: 28, whiteSpace: "nowrap" }}>
+      <input type="checkbox" checked={!!block[k]} onChange={e => onChange({ ...block, [k]: e.target.checked })} style={{ margin: 0 }} />
+      {label}
     </label>
   );
+  const revertToText = () => {
+    const text = items.map((it, i) => (block.style === "numbered" ? `${i + 1}. ` : "• ") + (it.text || "")).join("\n");
+    onConvertToText({ id: block.id, type: "text", text, width: block.width, bg: block.bg, num: block.num, taskRole: block.taskRole });
+  };
   return (
     <div>
-      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 2, border: `1.5px solid ${C.bdr}` }}>
+      <div style={{ display: "flex", gap: "6px 16px", alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 2, border: `1.5px solid ${C.bdr}`, height: 28, boxSizing: "border-box" }}>
           {["bulleted", "numbered"].map(s => (
             <button key={s} type="button" onClick={() => onChange({ ...block, style: s })} style={{
-              padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              padding: "0 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
               background: (block.style || "bulleted") === s ? C.sur : "transparent",
               color: (block.style || "bulleted") === s ? C.txt : C.mut,
             }}>{s === "bulleted" ? "Bulleted" : "Numbered"}</button>
           ))}
         </div>
-        {toggle("checkboxes")}
-        {toggle("withEntry")}
+        {toggle("checkboxes", "Add checkboxes to beginning of each line")}
+        {toggle("withEntry", "Show entry field at end of each line")}
+        <button type="button" onClick={revertToText} title="Turn this list back into a plain text block"
+          style={{ background: "none", border: "none", color: C.mut, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 4, height: 28 }}>
+          <Icon name="notes" size={14} />Convert to text
+        </button>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {items.map((it, idx) => (
-          <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Icon name="drag_indicator" size={16} style={{ color: C.faint, cursor: "grab" }} />
+          <div key={it.id} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+            <Icon name="drag_indicator" size={16} style={{ color: C.faint, cursor: "grab", flexShrink: 0 }} />
             {block.checkboxes
               ? <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${C.bdr2}`, flexShrink: 0 }} />
               : <span style={{ fontSize: 13, color: C.faint, width: 18, flexShrink: 0, textAlign: "right" }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>}
             <MentionField value={it.text} onChange={text => setItems(items.map(x => x.id === it.id ? { ...x, text } : x))}
-              placeholder="List item… (@ to link)" style={{ ...inp({ fontSize: 14, padding: "7px 10px", flex: 1 }) }} />
+              placeholder="List item… (@ to link)" style={{ ...inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px", minWidth: 100, width: "auto" }) }} />
             {block.withEntry && (
               <input value={it.value || ""} onChange={e => setItems(items.map(x => x.id === it.id ? { ...x, value: e.target.value } : x))}
-                placeholder="___" style={{ ...inp({ fontSize: 14, padding: "7px 10px", width: 90, flexShrink: 0 }) }} />
+                placeholder="___" style={{ ...inp({ fontSize: 14, padding: "7px 10px", width: 80, flexShrink: 0 }) }} />
             )}
-            <ListItemLinkBtn url={it.url} onSet={u => setItems(items.map(x => x.id === it.id ? { ...x, url: u } : x))} />
-            <IconBtn icon="arrow_upward" title="Move up" onClick={() => { if (idx === 0) return; const n = [...items]; [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]]; setItems(n); }} />
-            <IconBtn icon="arrow_downward" title="Move down" onClick={() => { if (idx === items.length - 1) return; const n = [...items]; [n[idx + 1], n[idx]] = [n[idx], n[idx + 1]]; setItems(n); }} />
-            <IconBtn icon="close" danger title="Remove item" onClick={() => setItems(items.filter(x => x.id !== it.id))} />
+            <div style={{ display: "flex", gap: 2, alignItems: "center", flexShrink: 0 }}>
+              <ListItemLinkBtn url={it.url} onSet={u => setItems(items.map(x => x.id === it.id ? { ...x, url: u } : x))} />
+              <IconBtn icon="arrow_upward" title="Move up" onClick={() => { if (idx === 0) return; const n = [...items]; [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]]; setItems(n); }} />
+              <IconBtn icon="arrow_downward" title="Move down" onClick={() => { if (idx === items.length - 1) return; const n = [...items]; [n[idx + 1], n[idx]] = [n[idx], n[idx + 1]]; setItems(n); }} />
+              <IconBtn icon="close" danger title="Remove item" onClick={() => setItems(items.filter(x => x.id !== it.id))} />
+            </div>
           </div>
         ))}
       </div>
@@ -238,6 +356,11 @@ function ListBlockEditor({ block, onChange }) {
       </div>
     </div>
   );
+}
+
+/* Line-break block — a simple horizontal rule for visual separation. */
+function DividerBlockEditor() {
+  return <div style={{ padding: "14px 4px" }}><div style={{ height: 2, background: C.bdr2, borderRadius: 2 }} /></div>;
 }
 
 /* Completion block — fixed shape matching the source docs' "Completed By /
@@ -342,7 +465,7 @@ function ImageBlockEditor({ block, onChange }) {
    held (onMouseDown) — because a permanently-draggable ancestor blocks mouse
    text-selection inside child inputs in Chromium (the "can't select, only
    arrow-key" bug). Reset on drag end / mouse up. */
-function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOver, onDrop, isDragOver }) {
+function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOver, onDrop, isDragOver, docMagnet }) {
   const block = asListBlock(raw); // legacy checklist → list, one edit path
   const def = BLOCK_DEFS.find(d => d.type === block.type) || { icon: "notes" };
   const width = blockWidth(block);
@@ -381,12 +504,30 @@ function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOv
           style={{ fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 40 }}>
           {BLOCK_BGS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
         </select>
+        {/* Run-SOP routing (R3 C): where this block goes when staff Run the SOP */}
+        {(block.type === "heading" || block.type === "text" || block.type === "list") && (
+          <select value={block.taskRole || ""} onChange={e => onChange({ ...block, taskRole: e.target.value || undefined })}
+            title="Task routing — what this block becomes when the SOP is run as a task"
+            style={{ fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${block.taskRole ? C.moss : C.bdr}`, background: block.taskRole ? C.mossSoft : C.inset, color: block.taskRole ? C.moss : C.mut, cursor: "pointer", fontFamily: "inherit", width: 40 }}>
+            <option value="">Task</option>
+            <option value="description">Desc</option>
+            <option value="checklist">List</option>
+          </select>
+        )}
+        {docMagnet && (
+          <button type="button" title="Copy magnet link to this block (paste it in any link field)"
+            onClick={() => copyMagnet(docMagnet.kind, docMagnet.id, block.id)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 40, height: 20, borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer" }}>
+            <Icon name="my_location" size={13} />
+          </button>
+        )}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         {block.type === "index" && <IndexBlockEditor />}
         {block.type === "heading" && <HeadingBlockEditor block={block} onChange={onChange} />}
         {block.type === "text" && <TextBlockEditor block={block} onChange={onChange} onConvertToList={onChange} />}
-        {block.type === "list" && <ListBlockEditor block={block} onChange={onChange} />}
+        {block.type === "list" && <ListBlockEditor block={block} onChange={onChange} onConvertToText={onChange} />}
+        {block.type === "divider" && <DividerBlockEditor />}
         {block.type === "completion" && <CompletionBlockEditor block={block} onChange={onChange} />}
         {block.type === "links" && <LinksBlockEditor block={block} onChange={onChange} />}
         {block.type === "image" && <ImageBlockEditor block={block} onChange={onChange} />}
@@ -427,7 +568,7 @@ function AddBlockMenu({ onAdd, openUp }) {
    category/status chrome — shared by SOPEditor and the Operations
    Playbook's per-section editor (Phase 5) so both ride the exact same
    block system instead of two copies of this logic. */
-function BlocksEditor({ blocks, onChange, trailing }) {
+function BlocksEditor({ blocks, onChange, trailing, docMagnet }) {
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 
@@ -460,7 +601,7 @@ function BlocksEditor({ blocks, onChange, trailing }) {
             onChange={next => updateBlock(b.id, next)}
             onDelete={() => deleteBlockAt(b.id)}
             onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}
-            isDragOver={dragOverIdx === i}
+            isDragOver={dragOverIdx === i} docMagnet={docMagnet}
           />
         ))}
         {blocks.length === 0 && (
@@ -614,7 +755,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         )}
       </div>
 
-      <BlocksEditor blocks={blocks} onChange={setBlocks} trailing={<Btn onClick={handleClose}>Done</Btn>} />
+      <BlocksEditor blocks={blocks} onChange={setBlocks} docMagnet={{ kind: "sop", id: sop.id }} trailing={<Btn onClick={handleClose}>Done</Btn>} />
 
       {showHistory && <HistoryPanel sopId={sop.id} onClose={() => setShowHistory(false)} onRestored={handleRestored} />}
     </div>
