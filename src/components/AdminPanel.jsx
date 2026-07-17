@@ -477,6 +477,11 @@ function DeployPanel() {
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState(null);
+  const [finishing, setFinishing] = useState(false);
+  // True while this panel is mounted — a page reload wipes everything, but if
+  // the admin navigates away mid-poll we stop touching state.
+  const alive = useRef(true);
+  useEffect(() => () => { alive.current = false; }, []);
 
   const load = () => {
     setLoading(true);
@@ -504,24 +509,61 @@ function DeployPanel() {
     !!(ghSrcSha && deployedCommit && (ghSrcSha.startsWith(deployedCommit) || deployedCommit.startsWith(ghSrcSha))) ||
     !!(ghVersion && versionInfo?.version && ghVersion === versionInfo.version);
 
+  // cPanel copies the new build into public_html asynchronously — admin_deploy
+  // returns before VERSION on disk actually flips. Poll it until it reports the
+  // new build, then reload so the admin lands on the new bundle instead of the
+  // stale one this session is still running. Bounded so a stuck/failed deploy
+  // surfaces a manual-reload prompt rather than spinning forever.
+  const pollUntilLive = (prevVersion, prevCommit, target) => {
+    const started = Date.now();
+    const TIMEOUT_MS = 120000;
+    const giveUp = () => {
+      if (!alive.current) return;
+      setFinishing(false);
+      setResult({ ok: true, message: "Update triggered, but the new build hasn't appeared yet. Give it a minute and reload the page; if it's still on the old version, use cPanel's Manage → Pull or Deploy." });
+    };
+    const tick = () => {
+      if (!alive.current) return;
+      apiCall("version_info", { method: "GET" }).then(vi => {
+        const v = vi?.version || null, c = vi?.commit || "";
+        const live = target
+          ? v === target
+          : (!!v && v !== prevVersion) || (!!c && c !== prevCommit);
+        if (live) { window.location.reload(); return; }
+        if (Date.now() - started > TIMEOUT_MS) return giveUp();
+        setTimeout(tick, 3000);
+      }).catch(() => {
+        // api.php can briefly refuse mid-copy — keep trying until the timeout.
+        if (Date.now() - started > TIMEOUT_MS) return giveUp();
+        setTimeout(tick, 3000);
+      });
+    };
+    setTimeout(tick, 3000); // give the first file copy a head start
+  };
+
   const doDeploy = async () => {
     setResult(null);
+    const prevVersion = versionInfo?.version || null;
+    const prevCommit = versionInfo?.commit || "";
+    const target = ghVersion; // the pending release version, if GitHub check succeeded
     try {
       const res = await adminDeploy();
+      setConfirming(false);
       // Deploy succeeding while the pull silently failed just redeploys the
       // old commit — surface the per-step notes so that's visible, not silent.
       const pullNote = (res?.notes || []).find(n => n.toLowerCase().includes("pull") && n.toLowerCase().includes("fail"));
-      setResult({
-        ok: true,
-        message: pullNote
-          ? "Deploy ran, but pulling the new release failed — the site may still be on the old version. " + pullNote
-          : "Deployed — reload to see it.",
-      });
+      if (pullNote) {
+        setResult({ ok: true, message: "Deploy ran, but pulling the new release failed — the site may still be on the old version. " + pullNote });
+        triggerSaved();
+        load();
+        return;
+      }
+      // Auto-reload once the new build is confirmed live.
       triggerSaved();
-      load();
+      setFinishing(true);
+      pollUntilLive(prevVersion, prevCommit, target);
     } catch (e) {
       setResult({ ok: false, message: e.message || "Deploy failed." });
-    } finally {
       setConfirming(false);
     }
   };
@@ -530,7 +572,7 @@ function DeployPanel() {
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
       <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Software Update</div>
-        <Btn onClick={() => setConfirming(true)} disabled={loading}><Icon name="rocket_launch" size={16} />Update Now</Btn>
+        <Btn onClick={() => setConfirming(true)} disabled={loading || finishing}><Icon name="rocket_launch" size={16} />Update Now</Btn>
       </div>
       <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
         {loading && <div style={{ fontSize: 14, color: C.mut }}>Checking…</div>}
@@ -557,6 +599,16 @@ function DeployPanel() {
               </div>
             )}
           </>
+        )}
+        {finishing && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.moss, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Icon name="progress_activity" size={16} style={{ animation: "gkspin 1s linear infinite" }} />
+            Update in progress — this page will reload automatically once the new version is live.
+            <button type="button" onClick={() => window.location.reload()}
+              style={{ background: "none", border: "none", color: C.moss, textDecoration: "underline", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, padding: 0 }}>
+              Reload now
+            </button>
+          </div>
         )}
         {result && (
           <div style={{ fontSize: 13, fontWeight: 600, color: result.ok ? C.moss : C.red }}>
