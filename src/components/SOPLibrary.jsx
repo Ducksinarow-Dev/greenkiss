@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
+  seedStandardSections, triggerSaved,
 } from '../globals.js';
-import { Btn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
+import { Btn, OBtn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import SOPViewer from './SOPViewer.jsx';
 import SOPEditor from './SOPEditor.jsx';
 import ImportSopButton from './SOPImporter.jsx';
@@ -36,6 +37,7 @@ function SOPCard({ sop, category, onOpen }) {
           <Pill color={sop.status === "published" ? C.moss : C.faint}>
             {sop.status === "published" ? "Published" : sop.status === "archived" ? "Archived" : "Draft"}
           </Pill>
+          {sop.code && <Pill color={C.faint}>{sop.code}</Pill>}
         </div>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {sop.title || "Untitled SOP"}
@@ -49,7 +51,14 @@ function SOPCard({ sop, category, onOpen }) {
   );
 }
 
-function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
+/** `kind` distinguishes the SOP Library ("sop", also covers WI/CL/LOG/APP —
+ * they're all just SOPs with a different `typePrefix`) from the standalone
+ * Forms nav section ("form") — same storage, editor, viewer, and Instances
+ * mechanic, just filtered and labeled differently (Phase 6). `onNavigateOut`
+ * is called when a mention/backlink points somewhere this library can't show
+ * in place (a document of the other kind, or a Playbook section) so the
+ * host (App.jsx) can switch nav sections. */
+function SOPLibrary({ user, focusId, focusMode, onClearFocus, kind = "sop", onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const [activeCat, setActiveCat] = useState("all");
   const [query, setQuery] = useState("");
@@ -60,13 +69,21 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
   const [showArchived, setShowArchived] = useState(false);
 
   const categories = getCategories();
-  const allSops = getSOPs();
+  const allSops = getSOPs().filter(s => (s.kind || "sop") === kind);
   const bump = () => setRefresh(r => r + 1);
+  const isForm = kind === "form";
 
   // Deep-link: a Task Manager "Related SOP" link can request a specific SOP open.
   useEffect(() => {
     if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); onClearFocus && onClearFocus(); }
   }, [focusId, focusMode, onClearFocus]);
+
+  // A mention/backlink click: same-kind documents open in place; anything
+  // else (the other kind, or a Playbook section) bubbles up to App.jsx.
+  const handleNavigate = (navKind, id) => {
+    if (navKind === (isForm ? "form" : "sop")) { setOpenId(id); setMode("view"); return; }
+    onNavigateOut && onNavigateOut(navKind, id);
+  };
 
   const sops = showArchived ? allSops : allSops.filter(s => s.status !== "archived");
   const archivedCount = allSops.length - allSops.filter(s => s.status !== "archived").length;
@@ -102,21 +119,24 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
   }
 
   if (openSop && mode === "view") {
-    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} />;
+    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} />;
   }
+
+  const newDoc = () => defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : "", kind);
 
   return (
     <div className="gk-fade-in">
       <SectionHeader
-        title="SOP Library"
-        sub={`${sops.length} procedure${sops.length === 1 ? "" : "s"}`}
+        title={isForm ? "Forms" : "SOP Library"}
+        sub={`${sops.length} ${isForm ? "form" : "procedure"}${sops.length === 1 ? "" : "s"}`}
         right={canEdit(user) && (
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <ImportSopButton onImported={({ title, blocks }) => setCreating({
-              ...defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""), title, blocks,
-            })} />
-            <Btn onClick={() => setCreating(defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""))}>
-              <Icon name="add" size={17} />New SOP
+            <OBtn onClick={() => { const n = seedStandardSections(); if (n) triggerSaved(); bump(); }} title="Add the 12 standard Green Kiss sections as categories, if missing">
+              <Icon name="playlist_add" size={16} />Load standard sections
+            </OBtn>
+            <ImportSopButton onImported={({ title, blocks }) => setCreating({ ...newDoc(), title, blocks })} />
+            <Btn onClick={() => setCreating(newDoc())}>
+              <Icon name="add" size={17} />New {isForm ? "Form" : "SOP"}
             </Btn>
           </div>
         )}
@@ -125,7 +145,7 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
       <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative", flex: "1 1 260px", maxWidth: 380 }}>
           <Icon name="search" size={18} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: C.faint }} />
-          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search SOPs…"
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder={isForm ? "Search forms…" : "Search SOPs…"}
             style={{
               width: "100%", background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9,
               padding: "10px 14px 10px 38px", fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit",
@@ -169,11 +189,11 @@ function SOPLibrary({ user, focusId, focusMode, onClearFocus }) {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState icon="menu_book" title={query ? "No matches" : "No SOPs here yet"}
-          sub={query ? "Try a different search term or category." : "Create the first procedure for this category."}
+        <EmptyState icon={isForm ? "description" : "menu_book"} title={query ? "No matches" : `No ${isForm ? "forms" : "SOPs"} here yet`}
+          sub={query ? "Try a different search term or category." : `Create the first ${isForm ? "form" : "procedure"} for this category.`}
           action={canEdit(user) && !query && (
-            <Btn onClick={() => setCreating(defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : ""))}>
-              <Icon name="add" size={17} />New SOP
+            <Btn onClick={() => setCreating(newDoc())}>
+              <Icon name="add" size={17} />New {isForm ? "Form" : "SOP"}
             </Btn>
           )}
         />

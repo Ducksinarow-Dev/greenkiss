@@ -24,22 +24,53 @@
  * @property {string} id
  * @property {string} text
  *
- * @typedef {{id:string,type:"heading",text:string}} HeadingBlock
- * @typedef {{id:string,type:"text",text:string}} TextBlock
- * @typedef {{id:string,type:"links",title?:string,links:LinkItem[]}} LinksBlock
- * @typedef {{id:string,type:"image",src:string,caption:string}} ImageBlock
- * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[]}} ChecklistBlock
- * @typedef {HeadingBlock|TextBlock|LinksBlock|ImageBlock|ChecklistBlock} Block
+ * @typedef {{id:string,type:"heading",text:string,description?:string,width?:number}} HeadingBlock
+ * @typedef {{id:string,type:"text",text:string,width?:number}} TextBlock
+ * @typedef {{id:string,type:"links",title?:string,links:LinkItem[],width?:number}} LinksBlock
+ * @typedef {{id:string,type:"image",src:string,caption:string,width?:number}} ImageBlock
+ * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[],width?:number}} ChecklistBlock
+ * @typedef {{id:string,text:string,value?:string}} ListItem
+ * @typedef {{id:string,type:"list",style:"bulleted"|"numbered",withEntry?:boolean,items:ListItem[],width?:number}} ListBlock
+ * @typedef {{id:string,type:"completion",width?:number}} CompletionBlock
+ * @typedef {HeadingBlock|TextBlock|LinksBlock|ImageBlock|ChecklistBlock|ListBlock|CompletionBlock} Block
  *
  * @typedef {Object} SOP
  * @property {string} id
  * @property {string} title
  * @property {string} categoryId
  * @property {"draft"|"published"|"archived"} status
+ * @property {"sop"|"form"} [kind] defaults to "sop" when absent (#Forms)
+ * @property {string} [code] free-text document code, e.g. "SOP-OPS-001"
+ * @property {string} [typePrefix] free-text type label, e.g. "SOP"/"WI"/"CL"/"FRM"
  * @property {Block[]} blocks
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {string} updatedBy
+ *
+ * @typedef {Object} Contact
+ * @property {string} id
+ * @property {string} name
+ * @property {string} [role]
+ * @property {string} [email]
+ * @property {string} [phone]
+ * @property {string} [notes]
+ * @property {string} [userId] linked login user, if any
+ * @property {string} createdAt
+ *
+ * @typedef {Object.<string, Object>} InstanceValues blockId -> block-specific fill state
+ *
+ * @typedef {Object} Instance
+ * @property {string} id
+ * @property {string} docId SOP.id being filled out
+ * @property {"sop"|"form"} docKind
+ * @property {string} date ISO date (yyyy-mm-dd) this run belongs to
+ * @property {Block[]} blocksSnapshot frozen copy of the template at start time
+ * @property {string} startedBy user id
+ * @property {string} startedAt ISO timestamp
+ * @property {"in_progress"|"completed"} status
+ * @property {InstanceValues} values
+ * @property {string} [completedBy] user id
+ * @property {string} [completedAt] ISO timestamp
  *
  * @typedef {Object} SubTask
  * @property {string} id
@@ -691,6 +722,32 @@ const deleteTag = (id) => {
   saveTasks(getTasks().map(t => (t.tagIds || []).includes(id) ? { ...t, tagIds: t.tagIds.filter(x => x !== id) } : t));
 };
 
+/* ─── CONTACT STORAGE (internal team + vendor contacts for Playbook Key
+   Contacts and @person mentions) — same per-record collision-safe shape
+   as tags/categories. ──────────────────────────────────────────────── */
+/** @returns {Contact[]} */
+const getContacts = () => db.getSync("contacts") || [];
+/** @param {Contact[]} c */
+const saveContacts = (c) => db.setSync("contacts", c);
+const addContact = (contact) => {
+  const newContact = { id: uid(), createdAt: nowISO(), ...contact };
+  const next = [...getContacts(), newContact];
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", newContact, "contacts"); return newContact; }
+  saveContacts(next);
+  return newContact;
+};
+const updateContact = (id, changes) => {
+  const next = getContacts().map(c => c.id === id ? { ...c, ...changes } : c);
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", next.find(c => c.id === id), "contacts"); return next; }
+  saveContacts(next);
+  return next;
+};
+const deleteContact = (id) => {
+  const next = getContacts().filter(c => c.id !== id);
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionDelete("contact_delete", id, "contacts"); }
+  else saveContacts(next);
+};
+
 /* ─── ALERT STORAGE (#9 — "Alert staff member" overflow action) ──────
    Any authenticated user may create (flagging something for a manager is
    a viewer-appropriate action); delete is restricted server-side to the
@@ -814,16 +871,69 @@ const duplicateSOP = (sop) => {
   return addSOP(copy);
 };
 
-const defSOP = (categoryId = "") => ({
+const defSOP = (categoryId = "", kind = "sop") => ({
   id: uid(),
   title: "",
   categoryId,
   status: "draft",
+  kind,
+  code: "",
+  typePrefix: "",
   blocks: [],
   createdAt: nowISO(),
   updatedAt: nowISO(),
   updatedBy: getCurrentUser()?.name || "",
 });
+
+/** Distinct heading texts used across every SOP/Form, most-recently-updated
+ * document first — feeds the heading autocomplete `<datalist>` so headings
+ * converge on consistent naming without a hardcoded list (Phase 1). */
+const getAllHeadingTexts = () => {
+  const seen = new Set();
+  const out = [];
+  [...getSOPs()].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).forEach(s => {
+    (s.blocks || []).forEach(b => {
+      if (b.type === "heading" && b.text && !seen.has(b.text)) { seen.add(b.text); out.push(b.text); }
+    });
+  });
+  return out;
+};
+
+/** Type-prefix suggestions for the SOP editor's code field (#Phase 4) —
+ * whatever's already in use across every SOP, plus the doc's standard set,
+ * never enforced (the field stays free text). */
+const getAllTypePrefixes = () => {
+  const standard = ["SOP", "WI", "CL", "FRM", "TMP", "LOG", "APP", "POL", "REF", "DOC"];
+  const used = getSOPs().map(s => s.typePrefix).filter(Boolean);
+  return Array.from(new Set([...standard, ...used]));
+};
+
+/** The 12 numbered sections from the Green Kiss Operations Management
+ * System doc, seeded as `categories` on request (never automatically) —
+ * name-collision-safe so re-running never duplicates, and never touches
+ * categories that already exist. Colors cycle through CATEGORY_COLORS. */
+const STANDARD_SECTIONS = [
+  "01. Operations", "02. Order Management", "03. Inventory Management",
+  "04. Purchasing & Vendor Management", "05. Product Management", "06. Shopify Administration",
+  "07. Finance & Administration", "08. Health, Safety & Security", "09. Team Communication & HR",
+  "10. Marketing & Merchandising", "11. Reporting & Continuous Improvement", "12. References & Standards",
+];
+function seedStandardSections() {
+  const existing = getCategories();
+  const existingNames = new Set(existing.map(c => c.name));
+  const toAdd = STANDARD_SECTIONS.filter(name => !existingNames.has(name));
+  toAdd.forEach((name, i) => addCategory(name, CATEGORY_COLORS[i % CATEGORY_COLORS.length]));
+  return toAdd.length;
+}
+
+/** True if a document has any block that captures per-run fill state
+ * (checklist / list-with-entry / completion) — gates whether SOPViewer
+ * shows the Instances "Today's Run" UI at all (Phase 2). Reference-only
+ * docs (vendor directory, appendices) have none of these and behave
+ * exactly as a plain read-only document. */
+const hasFillableBlocks = (blocks) => (blocks || []).some(b =>
+  b.type === "checklist" || b.type === "completion" || (b.type === "list" && b.withEntry)
+);
 
 /** Full-text search across title + all block text/labels/urls/captions. */
 const sopMatchesSearch = (sop, query) => {
@@ -831,9 +941,10 @@ const sopMatchesSearch = (sop, query) => {
   const q = query.toLowerCase();
   if ((sop.title || "").toLowerCase().includes(q)) return true;
   return (sop.blocks || []).some(b => {
-    if (b.type === "heading" || b.type === "text") return (b.text || "").toLowerCase().includes(q);
+    if (b.type === "heading") return (b.text || "").toLowerCase().includes(q) || (b.description || "").toLowerCase().includes(q);
+    if (b.type === "text") return (b.text || "").toLowerCase().includes(q);
     if (b.type === "image") return (b.caption || "").toLowerCase().includes(q);
-    if (b.type === "checklist") return (b.items || []).some(i => (i.text || "").toLowerCase().includes(q));
+    if (b.type === "checklist" || b.type === "list") return (b.items || []).some(i => (i.text || "").toLowerCase().includes(q));
     if (b.type === "links") return (b.links || []).some(l => (l.label || "").toLowerCase().includes(q) || (l.url || "").toLowerCase().includes(q));
     return false;
   });
@@ -846,6 +957,225 @@ const sopExcerpt = (sop, maxLen = 140) => {
   const flat = (raw || "").replace(/\s+/g, " ").trim();
   return flat.length > maxLen ? flat.slice(0, maxLen).trim() + "…" : flat;
 };
+
+/* ─── INSTANCE STORAGE (Phase 2 — dated, attributed "daily run" fill-outs
+   of a SOP or Form). Same per-record collision-safe shape as tags/contacts.
+   blocksSnapshot is frozen at start time so editing the live template
+   later never rewrites a past run's history. ─────────────────────────── */
+/** @returns {Instance[]} */
+const getAllInstances = () => db.getSync("instances") || [];
+/** @param {Instance[]} i */
+const saveInstances = (i) => db.setSync("instances", i);
+/** @param {string} docId @returns {Instance[]} newest first */
+const getInstances = (docId) => getAllInstances().filter(i => i.docId === docId).sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+const addInstance = (instance) => {
+  const newInstance = { id: uid(), values: {}, ...instance };
+  const next = [...getAllInstances(), newInstance];
+  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", newInstance, "instances"); return newInstance; }
+  saveInstances(next);
+  return newInstance;
+};
+const updateInstance = (id, changes) => {
+  const next = getAllInstances().map(i => i.id === id ? { ...i, ...changes } : i);
+  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", next.find(i => i.id === id), "instances"); return next; }
+  saveInstances(next);
+  return next;
+};
+const deleteInstance = (id) => {
+  const next = getAllInstances().filter(i => i.id !== id);
+  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionDelete("instance_delete", id, "instances"); }
+  else saveInstances(next);
+};
+/** Today's calendar date in the browser's own timezone, not UTC — plain
+ * `nowISO().slice(0,10)` rolls over at UTC midnight, which is late
+ * afternoon/evening in North American timezones, so an opening/closing
+ * checklist run near end-of-day would otherwise get silently tagged with
+ * tomorrow's date. */
+const todayLocalISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+/** Today's instance for a doc, if any — in progress OR already completed
+ * (getInstances is newest-first, so this is the latest one). Used so the
+ * "Today's Run" strip shows the right state (Continue / Completed today)
+ * across page reloads, not just within the session that completed it. */
+const getTodayInstance = (docId) => {
+  const today = todayLocalISO();
+  return getInstances(docId).find(i => i.date === today) || null;
+};
+
+/* ─── INTERNAL LINKING — mentions + backlinks (Phase 3) ───────────────
+   Mentions are stored inline in plain text as `@[Label](kind:id)` — no
+   rich-text editor needed, diffable, and trivially regex-parseable. kind
+   is one of "sop"/"form"/"contact"/"playbook". Backlinks aren't a
+   maintained reverse index (nothing to keep in sync or drift) — they're
+   computed by scanning every document's text at render time, which is
+   trivially fast at this data scale (dozens–low hundreds of documents). */
+const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook):([\w-]+)\)/g;
+
+/** Splits text into {text} and {mention:{kind,id,label}} segments, in order. */
+function parseMentionText(text) {
+  const out = [];
+  let last = 0;
+  const re = new RegExp(MENTION_RE);
+  let m;
+  while ((m = re.exec(text || ""))) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index) });
+    out.push({ mention: { label: m[1], kind: m[2], id: m[3] } });
+    last = m.index + m[0].length;
+  }
+  if (last < (text || "").length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/** Every place a document's own free-text lives, for mention scanning
+ * (backlinks) — heading text/description, text blocks, list item labels,
+ * link labels. Checklist items and completion notes are per-run fill
+ * state, not template content, so they're not scanned. */
+function documentTextFields(blocks) {
+  const out = [];
+  (blocks || []).forEach(b => {
+    if (b.type === "heading") { out.push(b.text || ""); out.push(b.description || ""); }
+    else if (b.type === "text") out.push(b.text || "");
+    else if (b.type === "list") (b.items || []).forEach(i => out.push(i.text || ""));
+    else if (b.type === "links") (b.links || []).forEach(l => out.push(l.label || ""));
+  });
+  return out;
+}
+
+/** Search candidates for the @mention popover — SOPs, Forms, Contacts,
+ * and (once seeded) Playbook sections, filtered by query. */
+function getMentionCandidates(query) {
+  const q = (query || "").toLowerCase();
+  const matches = (s) => !q || (s || "").toLowerCase().includes(q);
+  const out = [];
+  getSOPs().forEach(s => {
+    if (matches(s.title)) out.push({ kind: s.kind === "form" ? "form" : "sop", id: s.id, label: s.title || "Untitled", sub: s.kind === "form" ? "Form" : "SOP" });
+  });
+  getContacts().forEach(c => {
+    if (matches(c.name)) out.push({ kind: "contact", id: c.id, label: c.name, sub: c.role || "Contact" });
+  });
+  const playbook = db.getSync("playbook") || { sections: [] };
+  (playbook.sections || []).forEach(s => {
+    if (matches(s.title)) out.push({ kind: "playbook", id: s.id, label: s.title, sub: "Playbook" });
+  });
+  return out.slice(0, 8);
+}
+
+/** Every document/playbook-section that mentions the given target,
+ * grouped by source — rendered as a "Referenced by" list. */
+function findBacklinks(targetKind, targetId) {
+  const out = [];
+  const scan = (blocks, sourceKind, sourceId, sourceLabel) => {
+    const hit = documentTextFields(blocks).some(t => {
+      MENTION_RE.lastIndex = 0;
+      let m;
+      while ((m = MENTION_RE.exec(t))) { if (m[2] === targetKind && m[3] === targetId) return true; }
+      return false;
+    });
+    if (hit) out.push({ kind: sourceKind, id: sourceId, label: sourceLabel });
+  };
+  getSOPs().forEach(s => scan(s.blocks, s.kind === "form" ? "form" : "sop", s.id, s.title || "Untitled"));
+  const playbook = db.getSync("playbook") || { sections: [] };
+  (playbook.sections || []).forEach(s => scan(s.blocks, "playbook", s.id, s.title || "Untitled"));
+  return out;
+}
+
+/* ─── OPERATIONS PLAYBOOK (Phase 5) ───────────────────────────────────
+   A single document, not a collection — one kv key holding {sections:[
+   {id,title,blocks}]}, written through the generic kv_set path (same as
+   `categories`' bulk writes), editor/admin gated server-side by default.
+   Key Contacts is deliberately NOT one of these sections — it renders
+   live `contacts` records instead (see OperationsPlaybook.jsx). */
+const getPlaybook = () => db.getSync("playbook") || null;
+const savePlaybook = (p) => db.setSync("playbook", p);
+
+const _mk = (title, blocks) => ({ id: uid(), title, blocks });
+const _txt = (t) => ({ id: uid(), type: "text", text: t });
+const _head = (t, d = "") => ({ id: uid(), type: "heading", text: t, description: d });
+const _list = (items, style = "bulleted") => ({ id: uid(), type: "list", style, withEntry: false, items: items.map(t => ({ id: uid(), text: t, value: "" })) });
+
+/** Seeds the Playbook from the Green Kiss Operations Playbook doc the first
+ * time anyone opens the section — never overwrites an existing one. "Refer
+ * to SOP-XXX" lines are seeded as plain text (not live @mentions) since the
+ * matching SOP records may not exist yet under those exact codes; editors
+ * can turn them into real links once the SOPs are in the Library. */
+function seedPlaybookIfEmpty() {
+  if (getPlaybook()) return false;
+  savePlaybook({
+    sections: [
+      _mk("Purpose", [
+        _txt("The purpose of this Operations Playbook is to provide a centralized reference for operational responsibilities, processes, systems, and resources used by The Green Kiss.\n\nThis playbook serves as the primary operational reference document and directs team members to detailed Standard Operating Procedures (SOPs), checklists, and supporting resources."),
+        _head("Objectives"),
+        _list(["Maintain operational consistency", "Support onboarding and training", "Reduce reliance on verbal instructions", "Improve efficiency and accountability", "Preserve organizational knowledge", "Support future business growth"]),
+      ]),
+      _mk("Scope", [
+        _txt("This playbook covers:"),
+        _list(["Order Management", "Fulfillment & Shipping", "Receiving", "Inventory Management", "Purchasing & Replenishment", "Vendor Management", "Product Management", "Shopify Administration", "Reporting & Operational Controls"]),
+        _txt("Detailed work instructions are maintained in separate SOP documents."),
+      ]),
+      _mk("Document Management", [
+        _txt("This document should be reviewed whenever:"),
+        _list(["Operational processes change", "New vendors are added", "New software or systems are implemented", "Significant workflow improvements are introduced"]),
+      ]),
+      _mk("Company Overview", [
+        _head("Mission", "TO BE FILLED"),
+        _head("Business Model"),
+        _txt("The Green Kiss is a clean beauty retailer operating both physical and online sales channels."),
+        _head("Location"),
+        _txt("#109 – 3531 Uptown Boulevard, Victoria, BC V8Z 0B9"),
+      ]),
+      _mk("Roles & Responsibilities", [
+        _head("Operations Lead", "Responsible for:"),
+        _list(["Inventory Management", "Purchasing", "Vendor Coordination", "Operational Reporting", "Process Improvement", "SOP Development", "Inventory Accuracy"]),
+        _head("Operations Assistant", "Responsible for:"),
+        _list(["Order Fulfillment", "Shipment Receiving", "Inventory Organization", "Packaging", "Sample Preparation", "Inventory Counts", "Administrative Support"]),
+      ]),
+      _mk("Daily Operations", [
+        _head("Daily Priorities"),
+        _list(["Customer Orders", "Customer Service Issues Affecting Orders", "Receiving Shipments", "Inventory Maintenance", "Administrative Projects"], "numbered"),
+        _head("Opening Procedures", "Refer to CL-001 Operations Opening Checklist"),
+        _head("End-of-Day Procedures", "Refer to CL-002 End-of-Day Operations Checklist"),
+      ]),
+      _mk("Order Management", [
+        _head("Order Fulfillment", "Refer to SOP-ORD-001 Order Fulfillment & Packing"),
+        _head("Shipping Procedures", "Refer to SOP-ORD-002 Shipping Procedures"),
+        _head("In-Store Pickup", "Refer to SOP-ORD-003 In-Store Pickup"),
+        _head("Order Exception Handling", "Refer to SOP-ORD-004 Order Exception Handling"),
+      ]),
+      _mk("Receiving & Inventory", [
+        _head("Shipment Receiving", "Refer to SOP-INV-001 Receiving Inventory"),
+        _head("Discrepancy Report", "Refer to FRM-001 Shipment Discrepancy Report"),
+        _head("Inventory Management", "Refer to SOP-INV-002 Inventory Management"),
+        _head("Inventory Audits", "Refer to SOP-INV-003 Inventory Audits"),
+        _head("Expiry Management", "Refer to SOP-INV-004 Expiry Management"),
+      ]),
+      _mk("Purchasing & Vendor Management", [
+        _head("Ordering Procedures", "Refer to SOP-PUR-001 Purchase Ordering"),
+        _head("Tester Ordering", "Refer to SOP-PUR-002 Tester Ordering"),
+        _head("Vendor Management", "Refer to SOP-PUR-003 Vendor Management"),
+      ]),
+      _mk("Product Management", [
+        _head("New Product Setup", "Refer to SOP-PM-001 New Product Setup"),
+        _head("Product Maintenance and Updates", "Refer to SOP-PM-002 Product Maintenance & Updates"),
+        _head("Product Delisting", "Refer to SOP-PM-003 Product Delisting"),
+      ]),
+      _mk("Shopify Administration", [
+        _list(["Collections", "Tags", "Markets", "Shipping Profiles", "Discount Management", "Troubleshooting Library"]),
+      ]),
+      _mk("Reporting", [
+        _list(["Weekly Operations Reporting", "Inventory Reporting", "Vendor Reporting", "Shipping Performance Reporting"]),
+      ]),
+      _mk("Continuous Improvement", [
+        _list(["Process Improvement Log", "Known Issues Register", "Future Projects"]),
+      ]),
+      _mk("Appendices", [
+        _list(["Appendix A – Vendor Directory", "Appendix B – Inventory Location Map", "Appendix C – Shipping Decision Tree", "Appendix D – Shopify Quick Reference Guide", "Appendix E – Forms & Templates", "Appendix F – Definitions"]),
+      ]),
+    ],
+  });
+  return true;
+}
 
 /* ─── VERSION HISTORY (Phase 6 #3) ───────────────────────────────────
    Remote mode: hits revisions_list/revision_get/revision_restore.
@@ -1471,7 +1801,7 @@ async function fetchLastDeploy() {
 async function releaseList() { const res = await apiCall("release_list", { method: "GET" }); return res.releases || []; }
 async function releaseRollback(name) { return apiCall("release_rollback", { method: "POST", body: { name } }); }
 
-const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content"];
+const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content", "contacts", "instances", "playbook"];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
   const out = { exportedAt: nowISO(), app: "greenkiss", data: {} };
@@ -1501,6 +1831,11 @@ export {
   getAlerts, saveAlerts, addAlert, deleteAlert,
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
+  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks,
+  getContacts, saveContacts, addContact, updateContact, deleteContact,
+  getAllInstances, saveInstances, getInstances, addInstance, updateInstance, deleteInstance, getTodayInstance, todayLocalISO,
+  parseMentionText, getMentionCandidates, findBacklinks,
+  getPlaybook, savePlaybook, seedPlaybookIfEmpty,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,

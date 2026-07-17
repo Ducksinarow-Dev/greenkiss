@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { C, FONT_CAPS } from '../globals.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText } from '../globals.js';
 
 /* Design intent (interface-design skill):
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -249,4 +249,106 @@ function Popover({ anchorRect, onClose, children, width = 260 }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover };
+/* ─── INTERNAL LINKING (Phase 3) — mentions rendered as clickable pills,
+   and a shared @-trigger input for inserting them. Token format and
+   candidate search live in globals.js; this is just the UI half. */
+
+/** Renders `@[Label](kind:id)` tokens inside plain text as clickable
+ * pills. Contact mentions pop a small info card in place; sop/form/
+ * playbook mentions call onNavigate(kind, id) so the host screen can
+ * switch documents/sections. */
+function MentionText({ text, onNavigate }) {
+  const [contactCard, setContactCard] = useState(null); // {contact, anchorRect}
+  const segments = parseMentionText(text);
+  if (segments.length === 1 && segments[0].text !== undefined) return <>{segments[0].text}</>;
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.text !== undefined) return <React.Fragment key={i}>{seg.text}</React.Fragment>;
+        const { kind, id, label } = seg.mention;
+        return (
+          <span key={i} role="button" tabIndex={0}
+            onClick={e => {
+              if (kind === "contact") setContactCard({ contact: getContacts().find(c => c.id === id), anchorRect: e.currentTarget.getBoundingClientRect() });
+              else onNavigate && onNavigate(kind, id);
+            }}
+            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.click(); }}
+            style={{ display: "inline-flex", padding: "0 6px", borderRadius: 5, background: C.mossSoft, color: C.moss, fontWeight: 600, cursor: "pointer", fontSize: "0.94em" }}
+          >{label}</span>
+        );
+      })}
+      {contactCard && (
+        <Popover anchorRect={contactCard.anchorRect} onClose={() => setContactCard(null)} width={240}>
+          {contactCard.contact ? (
+            <div>
+              <div style={{ fontWeight: 700, color: C.txt, marginBottom: 4 }}>{contactCard.contact.name}</div>
+              {contactCard.contact.role && <div style={{ fontSize: 12, color: C.mut, marginBottom: 6 }}>{contactCard.contact.role}</div>}
+              {contactCard.contact.email && <div style={{ fontSize: 13, color: C.txt2 }}>{contactCard.contact.email}</div>}
+              {contactCard.contact.phone && <div style={{ fontSize: 13, color: C.txt2 }}>{contactCard.contact.phone}</div>}
+            </div>
+          ) : <div style={{ fontSize: 13, color: C.mut }}>Contact not found.</div>}
+        </Popover>
+      )}
+    </>
+  );
+}
+
+/** The @-mention search list — shared by every MentionField. */
+function MentionPopover({ query, anchorRect, onPick, onClose }) {
+  const results = getMentionCandidates(query);
+  return (
+    <Popover anchorRect={anchorRect} onClose={onClose} width={240}>
+      {results.length === 0 && <div style={{ fontSize: 13, color: C.mut, padding: "4px 6px" }}>No matches.</div>}
+      {results.map(r => (
+        <button key={r.kind + r.id} type="button" onClick={() => onPick(r)}
+          style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", padding: "7px 9px", background: "none", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+          onMouseEnter={e => e.currentTarget.style.background = C.s2}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <span style={{ fontSize: 14, color: C.txt, fontWeight: 600 }}>{r.label}</span>
+          <span style={{ fontSize: 11, color: C.faint, textTransform: "uppercase", letterSpacing: "0.06em" }}>{r.sub}</span>
+        </button>
+      ))}
+    </Popover>
+  );
+}
+
+/** Drop-in replacement for a plain <input>/<textarea> that opens the
+ * mention popover as soon as "@" is typed and inserts the chosen target
+ * as a `@[Label](kind:id)` token at the cursor. Forwards its ref to the
+ * underlying element so callers needing the DOM node (e.g. auto-resize)
+ * keep working unchanged. */
+const MentionField = React.forwardRef(function MentionField({ value, onChange, multiline, ...rest }, forwardedRef) {
+  const localRef = useRef(null);
+  const [mentionState, setMentionState] = useState(null); // {query, triggerPos, anchorRect}
+  const setRefs = (node) => {
+    localRef.current = node;
+    if (typeof forwardedRef === "function") forwardedRef(node);
+    else if (forwardedRef) forwardedRef.current = node;
+  };
+  const handleChange = (e) => {
+    const val = e.target.value;
+    onChange(val);
+    const pos = e.target.selectionStart;
+    const m = val.slice(0, pos).match(/@([^\s@]*)$/);
+    if (m) setMentionState({ query: m[1], triggerPos: pos - m[1].length - 1, anchorRect: e.target.getBoundingClientRect() });
+    else if (mentionState) setMentionState(null);
+  };
+  const insertMention = (item) => {
+    if (!mentionState) return;
+    const { triggerPos, query } = mentionState;
+    const before = value.slice(0, triggerPos);
+    const after = value.slice(triggerPos + 1 + query.length);
+    onChange(`${before}@[${item.label}](${item.kind}:${item.id}) ${after}`);
+    setMentionState(null);
+  };
+  const Tag = multiline ? "textarea" : "input";
+  return (
+    <>
+      <Tag ref={setRefs} value={value} onChange={handleChange} {...rest} />
+      {mentionState && <MentionPopover query={mentionState.query} anchorRect={mentionState.anchorRect} onPick={insertMention} onClose={() => setMentionState(null)} />}
+    </>
+  );
+});
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField };

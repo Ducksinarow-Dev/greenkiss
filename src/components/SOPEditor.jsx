@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   C, FONT_CAPS, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
-  getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp,
+  getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp, getAllHeadingTexts, getAllTypePrefixes,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, MentionField } from './shared.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 
 /* ─── Inline "+ New category" popover (#4) — editors no longer need to
@@ -40,17 +40,25 @@ function NewCategoryPopover({ onCreate, onClose }) {
 }
 
 const BLOCK_DEFS = [
-  { type: "heading", label: "Heading", icon: "title" },
+  { type: "heading", label: "Title & Description", icon: "title" },
   { type: "text", label: "Text", icon: "notes" },
+  { type: "list", label: "List", icon: "format_list_bulleted" },
   { type: "checklist", label: "Checklist", icon: "checklist" },
+  { type: "completion", label: "Completion", icon: "task_alt" },
   { type: "links", label: "Link Group", icon: "link" },
   { type: "image", label: "Image", icon: "image" },
 ];
 
+const BLOCK_WIDTHS = [33, 40, 50, 60, 100];
+/** Blocks saved before Phase 1 have no `width` — normalize to 100 on read. */
+const blockWidth = (b) => b?.width || 100;
+
 function newBlock(type) {
-  if (type === "heading") return { id: uid(), type: "heading", text: "" };
+  if (type === "heading") return { id: uid(), type: "heading", text: "", description: "" };
   if (type === "text") return { id: uid(), type: "text", text: "" };
+  if (type === "list") return { id: uid(), type: "list", style: "bulleted", withEntry: false, items: [] };
   if (type === "checklist") return { id: uid(), type: "checklist", title: "Checklist", items: [] };
+  if (type === "completion") return { id: uid(), type: "completion" };
   if (type === "links") return { id: uid(), type: "links", title: "Links", links: [] };
   if (type === "image") return { id: uid(), type: "image", src: "", caption: "" };
   return null;
@@ -58,14 +66,30 @@ function newBlock(type) {
 
 /* ─── Individual block editors ──────────────────────────────────── */
 
+/* Title & Description — heading text auto-suggests previously-used
+ * headlines from other SOPs/Forms via a native <datalist> (no library),
+ * so naming converges without a hardcoded list. Description is optional
+ * "info attached" under the title. */
 function HeadingBlockEditor({ block, onChange }) {
+  const listId = "gk-heading-suggestions";
   return (
-    <input value={block.text} onChange={e => onChange({ ...block, text: e.target.value })}
-      placeholder="Section heading…"
-      style={{ ...inp({ fontSize: 19, fontWeight: 800, padding: "10px 12px", border: `1.5px solid transparent`, background: "transparent" }) }}
-      onFocus={e => e.target.style.border = `1.5px solid ${C.bdr2}`}
-      onBlur={e => e.target.style.border = `1.5px solid transparent`}
-    />
+    <div>
+      <input value={block.text} onChange={e => onChange({ ...block, text: e.target.value })}
+        placeholder="Section heading…" list={listId}
+        style={{ ...inp({ fontSize: 19, fontWeight: 800, padding: "10px 12px", border: `1.5px solid transparent`, background: "transparent" }) }}
+        onFocus={e => e.target.style.border = `1.5px solid ${C.bdr2}`}
+        onBlur={e => e.target.style.border = `1.5px solid transparent`}
+      />
+      <datalist id={listId}>
+        {getAllHeadingTexts().map(t => <option key={t} value={t} />)}
+      </datalist>
+      <MentionField value={block.description || ""} onChange={description => onChange({ ...block, description })}
+        placeholder="Description (optional)… type @ to link something"
+        style={{ ...inp({ fontSize: 14, color: C.mut, padding: "6px 12px", border: `1.5px solid transparent`, background: "transparent" }) }}
+        onFocus={e => e.target.style.border = `1.5px solid ${C.bdr2}`}
+        onBlur={e => e.target.style.border = `1.5px solid transparent`}
+      />
+    </div>
   );
 }
 
@@ -75,11 +99,83 @@ function TextBlockEditor({ block, onChange }) {
     if (ref.current) { ref.current.style.height = "auto"; ref.current.style.height = ref.current.scrollHeight + "px"; }
   }, [block.text]);
   return (
-    <textarea ref={ref} value={block.text} onChange={e => onChange({ ...block, text: e.target.value })}
-      placeholder="Write the procedure here. Line breaks are preserved."
+    <MentionField ref={ref} multiline value={block.text} onChange={text => onChange({ ...block, text })}
+      placeholder="Write the procedure here. Line breaks are preserved. Type @ to link a SOP, form, contact, or playbook section."
       rows={3}
       style={{ ...inp({ fontSize: 15, lineHeight: 1.65, minHeight: 80 }) }}
     />
+  );
+}
+
+/* Plain/bulleted/numbered list, optionally with a trailing "entry" blank per
+ * line (e.g. "Orders waiting to ship: ___") — one flexible block covers
+ * both "Plain list" and "Numbered/bulleted list with note or number entry". */
+function ListBlockEditor({ block, onChange }) {
+  const items = block.items || [];
+  const setItems = (i) => onChange({ ...block, items: i });
+  const [draft, setDraft] = useState("");
+  const addItem = () => {
+    if (!draft.trim()) return;
+    setItems([...items, { id: uid(), text: draft.trim(), value: "" }]);
+    setDraft("");
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 2, border: `1.5px solid ${C.bdr}` }}>
+          {["bulleted", "numbered"].map(s => (
+            <button key={s} type="button" onClick={() => onChange({ ...block, style: s })} style={{
+              padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+              background: (block.style || "bulleted") === s ? C.sur : "transparent",
+              color: (block.style || "bulleted") === s ? C.txt : C.mut,
+            }}>{s === "bulleted" ? "Bulleted" : "Numbered"}</button>
+          ))}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: C.txt2, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!block.withEntry} onChange={e => onChange({ ...block, withEntry: e.target.checked })} />
+          Show entry field at end of each line
+        </label>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((it, idx) => (
+          <div key={it.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Icon name="drag_indicator" size={16} style={{ color: C.faint, cursor: "grab" }} />
+            <span style={{ fontSize: 13, color: C.faint, width: 18, flexShrink: 0, textAlign: "right" }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>
+            <MentionField value={it.text} onChange={text => setItems(items.map(x => x.id === it.id ? { ...x, text } : x))}
+              placeholder="List item… (@ to link)" style={{ ...inp({ fontSize: 14, padding: "7px 10px", flex: 1 }) }} />
+            {block.withEntry && (
+              <input value={it.value || ""} onChange={e => setItems(items.map(x => x.id === it.id ? { ...x, value: e.target.value } : x))}
+                placeholder="___" style={{ ...inp({ fontSize: 14, padding: "7px 10px", width: 90, flexShrink: 0 }) }} />
+            )}
+            <IconBtn icon="arrow_upward" title="Move up" onClick={() => { if (idx === 0) return; const n = [...items]; [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]]; setItems(n); }} />
+            <IconBtn icon="arrow_downward" title="Move down" onClick={() => { if (idx === items.length - 1) return; const n = [...items]; [n[idx + 1], n[idx]] = [n[idx], n[idx + 1]]; setItems(n); }} />
+            <IconBtn icon="close" danger title="Remove item" onClick={() => setItems(items.filter(x => x.id !== it.id))} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Add a list item…"
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }}
+          style={{ ...inp({ fontSize: 14, padding: "8px 10px" }) }} />
+        <OBtn onClick={addItem} style={{ padding: "8px 14px", flexShrink: 0 }}><Icon name="add" size={15} />Add</OBtn>
+      </div>
+    </div>
+  );
+}
+
+/* Completion block — fixed shape matching the source docs' "Completed By /
+ * Date / Notes" footer. Nothing to configure at template-authoring time;
+ * the real Completed-By/Date/Notes fields only exist inside a fill-out
+ * Instance (Phase 2), so the editor just previews the fixed layout. */
+function CompletionBlockEditor() {
+  return (
+    <div style={{ padding: "12px 4px", color: C.mut, fontSize: 13 }}>
+      <div style={{ fontWeight: 700, color: C.txt2, marginBottom: 8 }}>Completion</div>
+      <div>Completed By: <span style={{ color: C.faint }}>auto-filled from whoever submits</span></div>
+      <div>Date: <span style={{ color: C.faint }}>auto-filled with today's date</span></div>
+      <div>Notes: <span style={{ color: C.faint }}>freeform, filled in when submitted</span></div>
+      <div style={{ marginTop: 8, fontSize: 12 }}>Filled out and locked when staff complete a daily run — see the SOP viewer.</div>
+    </div>
   );
 }
 
@@ -190,9 +286,13 @@ function ChecklistBlockEditor({ block, onChange }) {
   );
 }
 
-/* ─── Block wrapper: drag handle + type icon + delete ───────────── */
+/* ─── Block wrapper: drag handle + type icon + width picker + delete ───
+   Width picker (33/40/50/60/100%) sets flexBasis on this block's outer
+   wrapper; the blocks list container is a flex-wrap row, so native CSS
+   handles auto-placement/wrapping — no packing algorithm needed. */
 function BlockRow({ block, index, onChange, onDelete, onDragStart, onDragOver, onDrop, isDragOver }) {
   const def = BLOCK_DEFS.find(d => d.type === block.type);
+  const width = blockWidth(block);
   return (
     <div
       draggable
@@ -203,16 +303,27 @@ function BlockRow({ block, index, onChange, onDelete, onDragStart, onDragOver, o
         display: "flex", gap: 10, alignItems: "flex-start", background: C.sur,
         border: `1.5px solid ${isDragOver ? C.moss : C.bdr}`, borderRadius: 12, padding: "14px 14px 14px 8px",
         boxShadow: isDragOver ? `0 0 0 2px ${C.mossSoft}` : "none", transition: "border-color .1s",
+        flex: `0 0 calc(${width}% - 12px)`, minWidth: 0, boxSizing: "border-box",
       }}
     >
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, paddingTop: 6, cursor: "grab", flexShrink: 0 }} title="Drag to reorder">
         <Icon name="drag_indicator" size={18} style={{ color: C.faint }} />
         <Icon name={def?.icon || "notes"} size={15} style={{ color: C.mut }} />
+        <select value={width} onChange={e => onChange({ ...block, width: Number(e.target.value) })}
+          title="Block width" onMouseDown={e => e.stopPropagation()}
+          style={{
+            marginTop: 4, fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`,
+            background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 40,
+          }}>
+          {BLOCK_WIDTHS.map(w => <option key={w} value={w}>{w}%</option>)}
+        </select>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         {block.type === "heading" && <HeadingBlockEditor block={block} onChange={onChange} />}
         {block.type === "text" && <TextBlockEditor block={block} onChange={onChange} />}
+        {block.type === "list" && <ListBlockEditor block={block} onChange={onChange} />}
         {block.type === "checklist" && <ChecklistBlockEditor block={block} onChange={onChange} />}
+        {block.type === "completion" && <CompletionBlockEditor block={block} onChange={onChange} />}
         {block.type === "links" && <LinksBlockEditor block={block} onChange={onChange} />}
         {block.type === "image" && <ImageBlockEditor block={block} onChange={onChange} />}
       </div>
@@ -247,45 +358,20 @@ function AddBlockMenu({ onAdd }) {
   );
 }
 
-/* ─── Main editor ────────────────────────────────────────────────── */
-function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
-  const categories = getCategories();
-  const [title, setTitle] = useState(sop.title || "");
-  const [categoryId, setCategoryId] = useState(sop.categoryId || "");
-  const [status, setStatus] = useState(sop.status || "draft");
-  const [blocks, setBlocks] = useState(sop.blocks || []);
+/* ─── Reusable block-list editor: drag reorder + add/delete, no title/
+   category/status chrome — shared by SOPEditor and the Operations
+   Playbook's per-section editor (Phase 5) so both ride the exact same
+   block system instead of two copies of this logic. */
+function BlocksEditor({ blocks, onChange, trailing }) {
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [showNewCat, setShowNewCat] = useState(false);
-  const saveTimer = useRef(null);
 
-  const persist = (nextBlocks, nextTitle, nextCat, nextStatus) => {
-    const changes = {
-      title: nextTitle ?? title, categoryId: nextCat ?? categoryId, status: nextStatus ?? status,
-      blocks: nextBlocks ?? blocks, updatedBy: getCurrentUser()?.name || "",
-    };
-    if (isNew) { addSOP({ ...sop, ...changes }); }
-    else { updateSOP(sop.id, changes); }
-    triggerSaved();
-  };
-
-  // Debounced autosave on any field change — never loses work on navigation.
-  useEffect(() => {
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => persist(), 500);
-    return () => clearTimeout(saveTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, categoryId, status, blocks]);
-
-  useEffect(() => () => { clearTimeout(saveTimer.current); persist(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const updateBlock = (id, next) => setBlocks(bs => bs.map(b => b.id === id ? next : b));
+  const updateBlock = (id, next) => onChange(blocks.map(b => b.id === id ? next : b));
   const deleteBlockAt = async (id) => {
     const ok = await confirmDelete("Delete this block? This can't be undone.");
-    if (ok) setBlocks(bs => bs.filter(b => b.id !== id));
+    if (ok) onChange(blocks.filter(b => b.id !== id));
   };
-  const addBlockType = (type) => { const b = newBlock(type); if (b) setBlocks(bs => [...bs, b]); };
+  const addBlockType = (type) => { const b = newBlock(type); if (b) onChange([...blocks, b]); };
 
   const onDragStart = (e, idx) => { dragIndex.current = idx; e.dataTransfer.effectAllowed = "move"; };
   const onDragOver = (e, idx) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setDragOverIdx(idx); };
@@ -293,15 +379,78 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
     e.preventDefault();
     const from = dragIndex.current;
     if (from === null || from === idx) { setDragOverIdx(null); return; }
-    setBlocks(bs => {
-      const next = [...bs];
-      const [moved] = next.splice(from, 1);
-      next.splice(idx, 0, moved);
-      return next;
-    });
+    const next = [...blocks];
+    const [moved] = next.splice(from, 1);
+    next.splice(idx, 0, moved);
+    onChange(next);
     dragIndex.current = null;
     setDragOverIdx(null);
   };
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 20 }}>
+        {blocks.map((b, i) => (
+          <BlockRow key={b.id} block={b} index={i}
+            onChange={next => updateBlock(b.id, next)}
+            onDelete={() => deleteBlockAt(b.id)}
+            onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}
+            isDragOver={dragOverIdx === i}
+          />
+        ))}
+        {blocks.length === 0 && (
+          <div style={{ flex: "0 0 100%", padding: "36px 20px", textAlign: "center", color: C.mut, fontSize: 14, border: `1.5px dashed ${C.bdr}`, borderRadius: 12 }}>
+            No content yet. Add your first block below.
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <AddBlockMenu onAdd={addBlockType} />
+        {trailing}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Main editor ────────────────────────────────────────────────── */
+function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
+  const categories = getCategories();
+  const [title, setTitle] = useState(sop.title || "");
+  const [categoryId, setCategoryId] = useState(sop.categoryId || "");
+  const [status, setStatus] = useState(sop.status || "draft");
+  const [code, setCode] = useState(sop.code || "");
+  const [typePrefix, setTypePrefix] = useState(sop.typePrefix || "");
+  const [blocks, setBlocks] = useState(sop.blocks || []);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showNewCat, setShowNewCat] = useState(false);
+  const saveTimer = useRef(null);
+
+  const persist = (nextBlocks, nextTitle, nextCat, nextStatus) => {
+    const changes = {
+      title: nextTitle ?? title, categoryId: nextCat ?? categoryId, status: nextStatus ?? status,
+      blocks: nextBlocks ?? blocks, code, typePrefix, updatedBy: getCurrentUser()?.name || "",
+    };
+    if (isNew) { addSOP({ ...sop, ...changes }); }
+    else { updateSOP(sop.id, changes); }
+    triggerSaved();
+  };
+  // The unmount-cleanup effect below only runs once (mount) and once
+  // (unmount) — its closure would otherwise forever call the MOUNT-time
+  // `persist` (closing over the SOP's original pre-edit state), reverting
+  // every session's edits on close. Routing through a ref that's updated
+  // every render means the cleanup always calls the latest `persist`.
+  const persistRef = useRef(persist);
+  persistRef.current = persist;
+
+  // Debounced autosave on any field change — never loses work on navigation.
+  useEffect(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => persist(), 500);
+    return () => clearTimeout(saveTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, categoryId, status, blocks, code, typePrefix]);
+
+  useEffect(() => () => { clearTimeout(saveTimer.current); persistRef.current(); }, []);
 
   const handleClose = () => { persist(); onClose(); onSaved && onSaved(); };
   const handleDelete = async () => {
@@ -313,7 +462,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
   };
   const handleDuplicate = () => {
     persist();
-    duplicateSOP({ ...sop, title, categoryId, status, blocks });
+    duplicateSOP({ ...sop, title, categoryId, status, blocks, code, typePrefix });
     triggerSaved();
     handleClose();
   };
@@ -323,6 +472,8 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
       setCategoryId(restored.categoryId || "");
       setStatus(restored.status || "draft");
       setBlocks(restored.blocks || []);
+      setCode(restored.code || "");
+      setTypePrefix(restored.typePrefix || "");
     }
     setShowHistory(false);
   };
@@ -338,6 +489,13 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         {!isNew && <IconBtn icon="delete" danger title="Delete SOP" onClick={handleDelete} />}
       </div>
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+        <input value={typePrefix} onChange={e => setTypePrefix(e.target.value)} placeholder="Type (SOP, WI, CL…)" list="gk-type-prefixes"
+          style={{ ...inp({ fontSize: 12, padding: "5px 9px", width: 130, fontFamily: "'IBM Plex Mono',monospace" }) }} />
+        <datalist id="gk-type-prefixes">{getAllTypePrefixes().map(p => <option key={p} value={p} />)}</datalist>
+        <input value={code} onChange={e => setCode(e.target.value)} placeholder="Code (e.g. SOP-OPS-001)"
+          style={{ ...inp({ fontSize: 12, padding: "5px 9px", width: 180, fontFamily: "'IBM Plex Mono',monospace" }) }} />
+      </div>
       <input value={title} onChange={e => setTitle(e.target.value)} placeholder="SOP title…"
         style={{ ...inp({ fontSize: 28, fontWeight: 800, padding: "8px 4px", border: "1.5px solid transparent", background: "transparent", marginBottom: 14 }) }}
         onFocus={e => e.target.style.border = `1.5px solid ${C.bdr2}`}
@@ -381,26 +539,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         )}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
-        {blocks.map((b, i) => (
-          <BlockRow key={b.id} block={b} index={i}
-            onChange={next => updateBlock(b.id, next)}
-            onDelete={() => deleteBlockAt(b.id)}
-            onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}
-            isDragOver={dragOverIdx === i}
-          />
-        ))}
-        {blocks.length === 0 && (
-          <div style={{ padding: "36px 20px", textAlign: "center", color: C.mut, fontSize: 14, border: `1.5px dashed ${C.bdr}`, borderRadius: 12 }}>
-            No content yet. Add your first block below.
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <AddBlockMenu onAdd={addBlockType} />
-        <Btn onClick={handleClose}>Done</Btn>
-      </div>
+      <BlocksEditor blocks={blocks} onChange={setBlocks} trailing={<Btn onClick={handleClose}>Done</Btn>} />
 
       {showHistory && <HistoryPanel sopId={sop.id} onClose={() => setShowHistory(false)} onRestored={handleRestored} />}
     </div>
@@ -408,3 +547,4 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
 }
 
 export default SOPEditor;
+export { BlocksEditor };

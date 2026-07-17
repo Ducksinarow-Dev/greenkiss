@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, getSOP } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
+import OperationsPlaybook from './components/OperationsPlaybook.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
@@ -26,6 +27,7 @@ function App() {
   const [sopFocus, setSopFocus] = useState(null); // {id, mode}
   const [projectFocus, setProjectFocus] = useState(null); // project id
   const [contentFocus, setContentFocus] = useState(null); // content item id
+  const [playbookFocus, setPlaybookFocus] = useState(null); // playbook section id
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
   // in place — it doesn't trigger React re-renders on its own. themeVersion is
@@ -56,17 +58,34 @@ function App() {
   }
   if (booting) return <BootScreen />;
 
-  const goToSop = (id) => { setSopFocus({ id, mode: "view" }); setSection("library"); };
+  // Routes to the SOP Library or the Forms section depending on the
+  // target document's own `kind` — so a mention/backlink click lands in
+  // the right nav section without the caller needing to know which.
+  const goToSop = (id) => {
+    const doc = getSOP(id);
+    setSopFocus({ id, mode: "view" });
+    setSection(doc && doc.kind === "form" ? "forms" : "library");
+  };
   const goToProject = (id) => { setProjectFocus(id); setSection("projects"); };
   const goToContent = (id) => { setContentFocus(id); setSection("calendar"); };
+  const goToPlaybookSection = (id) => { setPlaybookFocus(id); setSection("playbook"); };
+  // Shared by both SOPLibrary mounts (library/forms) as onNavigateOut — a
+  // mention pointing at the other kind or at a Playbook section.
+  const onNavigateOut = (kind, id) => { if (kind === "playbook") goToPlaybookSection(id); else goToSop(id); };
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
-      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") setContentFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
+      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") setContentFocus(null); if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
         {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} />}
         {section === "library" && (
-          <SOPLibrary user={user} focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} />
+          <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} />
+        )}
+        {section === "forms" && (
+          <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} />
+        )}
+        {section === "playbook" && (
+          <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} />
         )}
         {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}

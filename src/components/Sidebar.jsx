@@ -6,6 +6,8 @@ import gkLogo from '../assets/gk-logo.svg';
 const NAV_ITEMS = [
   { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
   { key: "library", label: "SOP Library", icon: "menu_book" },
+  { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
+  { key: "forms", label: "Forms", icon: "description" },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
   { key: "projects", label: "Projects", icon: "folder_special" },
   { key: "calendar", label: "Content Calendar", icon: "calendar_month" },

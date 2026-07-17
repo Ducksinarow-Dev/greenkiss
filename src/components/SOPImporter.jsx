@@ -52,34 +52,65 @@ function dataUriToFile(dataUri, filename) {
   return new File([arr], filename, { type: mime });
 }
 
-/** Walks mammoth's converted HTML into Block[]. h1-h4 -> heading, p -> text,
- * consecutive <li> within one <ul>/<ol> -> one text block ("• " lines),
- * <img> -> image block (src hydrated after, see hydrateImages). Links
- * inside paragraphs are flattened to plain text in v1.
+/** True if a <p> reads as a heading rather than body text: mammoth maps
+ * Word's Heading 1-4 paragraph styles to <h1-4>, but source docs exported
+ * from Pages (like the real Green Kiss docs) don't carry those styles —
+ * everything lands as plain <p>, with headings only distinguishable by
+ * formatting. A paragraph whose entire text is wrapped in one <strong>/<b>
+ * (i.e. the whole line is bold, not just a bolded word inside a sentence)
+ * reads as a heading — the same "font marks headings" signal the PDF path
+ * already uses via its short-line heuristic, just sourced from mammoth's
+ * HTML instead of raw font-size XML (a much smaller lift, see #5 notes). */
+function paragraphLooksLikeHeading(el) {
+  const text = el.textContent.trim();
+  if (!text || text.length > 80) return false;
+  const kids = Array.from(el.childNodes).filter(n => !(n.nodeType === 3 && !n.textContent.trim()));
+  return kids.length === 1 && kids[0].nodeType === 1 && /^(strong|b)$/i.test(kids[0].tagName);
+}
+
+/** Walks mammoth's converted HTML into Block[]. h1-h4 -> heading, whole-
+ * paragraph-bold -> heading too (see paragraphLooksLikeHeading), consecutive
+ * plain paragraphs merge into ONE text block (flushed on a heading/list/
+ * image/end of document) rather than one block per paragraph — the old
+ * per-paragraph behavior produced far more blocks than a real document
+ * needs. Consecutive <li> within one <ul>/<ol> -> one text block ("• "
+ * lines), <img> -> image block (src hydrated after, see hydrateImages).
+ * Links inside paragraphs are flattened to plain text in v1.
  * // ponytail: link-in-text is lost on import; if that matters later, walk
  * // <a> nodes here and emit a "links" block alongside the paragraph. */
 function parseDocxHtmlToBlocks(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const blocks = [];
+  let paraBuf = [];
+  const flushPara = () => {
+    if (paraBuf.length) { blocks.push({ id: uid(), type: "text", text: paraBuf.join("\n\n") }); paraBuf = []; }
+  };
   Array.from(doc.body.children).forEach(el => {
     const tag = el.tagName.toLowerCase();
     if (/^h[1-4]$/.test(tag)) {
+      flushPara();
       const text = el.textContent.trim();
       if (text) blocks.push({ id: uid(), type: "heading", text });
     } else if (tag === "ul" || tag === "ol") {
+      flushPara();
       const items = Array.from(el.querySelectorAll("li")).map(li => "• " + li.textContent.trim()).filter(l => l !== "• ");
       if (items.length) blocks.push({ id: uid(), type: "text", text: items.join("\n") });
     } else if (tag === "p") {
       const img = el.querySelector("img");
       if (img && img.src) {
+        flushPara();
         blocks.push({ id: uid(), type: "image", src: img.src, caption: "" });
+      } else if (paragraphLooksLikeHeading(el)) {
+        flushPara();
+        blocks.push({ id: uid(), type: "heading", text: el.textContent.trim() });
       } else {
         const text = el.textContent.trim();
-        if (text) blocks.push({ id: uid(), type: "text", text });
+        if (text) paraBuf.push(text);
       }
     }
     // Tables and anything else are skipped in v1 — rare in SOP-style docs.
   });
+  flushPara();
   return blocks;
 }
 
