@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, inp } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, inp } from '../globals.js';
 
 /* Design intent (interface-design skill):
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -351,6 +351,27 @@ const MentionField = React.forwardRef(function MentionField({ value, onChange, m
   );
 });
 
+/** Renders any stored link: gk: magnet links navigate internally (with a
+ * distinct glyph), everything else opens a new tab. `nav` is the magnet
+ * navigation object ({goToSop, goToTask, goToPlaybookSection}, all optional).
+ * Lived in SOPViewer until R4; moved here so TaskManager can use it too
+ * (SOPViewer imports TaskModal, so the reverse import would cycle). */
+function ItemLink({ url, children, nav }) {
+  if (isMagnet(url)) {
+    return (
+      <a href="#" onClick={e => { e.preventDefault(); openMagnet(url, nav); }}
+        style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Icon name="my_location" size={13} />{children}
+      </a>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noreferrer" style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <Icon name="open_in_new" size={13} />{children}
+    </a>
+  );
+}
+
 /** Shared link picker (R3 A½) — two modes in one popover: paste a web URL,
  * or search internal targets (SOPs/Forms by title+code, numbered blocks,
  * Playbook pages, Tasks by title/tag) which inserts a gk: magnet link.
@@ -406,4 +427,4 @@ function LinkPopover({ anchorRect, initial, onSet, onClose }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover };
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink };

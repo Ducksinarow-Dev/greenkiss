@@ -4,27 +4,10 @@ import {
   fmtDate, nowISO, inp, addTask, taskFromSop, sopHasTaskRoles, asListBlock, blockBg,
   getAcks, ackSop, isAckStale, triggerSaved, findBacklinks,
   isMagnet, openMagnet, copyMagnet, sanitizeHtml, mentionTokensToHtml,
+  getInstances, updateInstance, newSubmission, stampEditLog, todayLocalISO,
 } from '../globals.js';
-import { IconBtn, Btn, OBtn, Pill, Icon, MentionText } from './shared.jsx';
+import { IconBtn, Btn, OBtn, Pill, Icon, MentionText, SlideOver, ItemLink } from './shared.jsx';
 import { TaskModal } from './TaskManager.jsx';
-
-/** Renders any stored link: gk: magnet links navigate internally (with a
- * distinct glyph), everything else opens a new tab. */
-function ItemLink({ url, children, nav }) {
-  if (isMagnet(url)) {
-    return (
-      <a href="#" onClick={e => { e.preventDefault(); openMagnet(url, nav); }}
-        style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
-        <Icon name="my_location" size={13} />{children}
-      </a>
-    );
-  }
-  return (
-    <a href={url} target="_blank" rel="noreferrer" style={{ color: C.moss, fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <Icon name="open_in_new" size={13} />{children}
-    </a>
-  );
-}
 
 /* Viewer blocks manage their own session-only fill state (checkboxes, entry
    values, completion fields) — reset on reload. Real tracked execution now
@@ -59,10 +42,11 @@ function ListViewerBlock({ block, onNavigate, nav }) {
                     display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}>
                   {on && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                 </div>
-              ) : (
+              ) : block.style === "plain" ? null : (
                 <span style={{ fontSize: 15, color: C.faint, flexShrink: 0, minWidth: 16 }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>
               )}
-              <span style={{ fontSize: 15, color: on ? C.mut : C.txt2, textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1, flex: block.withEntry ? "0 0 auto" : 1 }}>{label(it)}</span>
+              {/* Plain + entry = the FRM-001 "Date Received: ______" slot shape: bold label, underlined blank */}
+              <span style={{ fontSize: 15, color: on ? C.mut : C.txt2, textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1, flex: block.withEntry ? "0 0 auto" : 1, fontWeight: block.style === "plain" && block.withEntry ? 700 : 400 }}>{label(it)}{block.style === "plain" && block.withEntry ? ":" : ""}</span>
               {block.withEntry && (
                 <input value={entries[it.id] ?? (it.value || "")} onChange={e => setEntries(p => ({ ...p, [it.id]: e.target.value }))}
                   style={{ flex: 1, minWidth: 60, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.bdr2}`, fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit", padding: "0 0 2px" }} />
@@ -284,7 +268,197 @@ function BacklinksList({ sop, onNavigate }) {
   );
 }
 
-function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenTasks, scrollToBlock, onScrolled }) {
+/* ─── Form fill mode (R4 C) ─────────────────────────────────────────
+   Renders a submission from its blocksSnapshot (template edits never
+   rewrite records). Fill state writes into instance.values, per-block
+   notes into instance.notes (available before AND after submitting).
+   Submitting auto-fills the Completion block and marks the record
+   submitted — it STAYS editable, but every post-submission save appends
+   a non-editable editLog entry showing who edited and when. */
+function FillNote({ note, onChange }) {
+  const [open, setOpen] = useState(!!note);
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)}
+        style={{ background: "none", border: "none", color: C.faint, fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 3, marginBottom: 10 }}>
+        <Icon name="sticky_note_2" size={13} />Add note
+      </button>
+    );
+  }
+  return (
+    <div style={{ margin: "2px 0 12px", display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <Icon name="sticky_note_2" size={14} style={{ color: C.clay, marginTop: 8 }} />
+      <textarea value={note || ""} onChange={e => onChange(e.target.value)} rows={2} placeholder="Note…"
+        style={{ ...inp({ fontSize: 13, lineHeight: 1.5, minHeight: 34, background: C.clay + "11" }) }} />
+    </div>
+  );
+}
+
+function FillListBlock({ block, value, onChange }) {
+  const v = value || { checks: {}, entries: {} };
+  const items = block.items || [];
+  const isSlot = block.style === "plain" && block.withEntry;
+  return (
+    <div style={{ margin: "0 0 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+      {items.map((it, idx) => {
+        const on = !!v.checks[it.id];
+        return (
+          <div key={it.id} style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
+            {block.checkboxes ? (
+              <div role="checkbox" aria-checked={on} tabIndex={0}
+                onClick={() => onChange({ ...v, checks: { ...v.checks, [it.id]: !on } })}
+                style={{ width: 19, height: 19, borderRadius: 6, flexShrink: 0, cursor: "pointer", alignSelf: "center",
+                  border: `1.5px solid ${on ? C.moss : C.bdr2}`, background: on ? C.moss : C.sur,
+                  display: "flex", alignItems: "center", justifyContent: "center", transition: "all .15s" }}>
+                {on && <svg width="11" height="11" viewBox="0 0 10 10"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </div>
+            ) : block.style === "plain" ? null : (
+              <span style={{ fontSize: 15, color: C.faint, flexShrink: 0, minWidth: 16 }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>
+            )}
+            <span style={{ fontSize: 15, color: on ? C.mut : C.txt2, textDecoration: on ? "line-through" : "none", opacity: on ? 0.55 : 1, flexShrink: 0, fontWeight: isSlot ? 700 : 400 }}>
+              {it.text}{isSlot ? ":" : ""}
+            </span>
+            {block.withEntry && (
+              <input value={v.entries[it.id] ?? ""} onChange={e => onChange({ ...v, entries: { ...v.entries, [it.id]: e.target.value } })}
+                style={{ flex: 1, minWidth: 60, background: "transparent", border: "none", borderBottom: `1.5px solid ${C.bdr2}`, fontSize: 15, color: C.txt, outline: "none", fontFamily: "inherit", padding: "0 0 2px" }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FillCompletionBlock({ value, onChange }) {
+  const v = value || {};
+  const row = { display: "flex", alignItems: "center", gap: 10, marginBottom: 8 };
+  const lbl2 = { fontSize: 14, fontWeight: 700, color: C.txt2, minWidth: 110 };
+  return (
+    <div style={{ margin: "8px 0 14px", padding: "16px 18px", background: C.s2, border: `1.5px solid ${C.bdr}`, borderRadius: 12 }}>
+      <div style={{ fontWeight: 700, color: C.txt, marginBottom: 12, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em", fontSize: 13 }}>Completion</div>
+      <div style={row}><span style={lbl2}>Completed By</span><input value={v.by || ""} onChange={e => onChange({ ...v, by: e.target.value })} placeholder="Auto-fills on submit" style={{ ...inp({ fontSize: 14, padding: "6px 10px", maxWidth: 260 }) }} /></div>
+      <div style={row}><span style={lbl2}>Date</span><input type="date" value={v.date || ""} onChange={e => onChange({ ...v, date: e.target.value })} style={{ ...inp({ fontSize: 14, padding: "6px 10px", width: "auto" }) }} /></div>
+      <div style={{ marginTop: 4 }}><span style={lbl2}>Notes</span>
+        <textarea value={v.notes || ""} onChange={e => onChange({ ...v, notes: e.target.value })} rows={3} style={{ ...inp({ fontSize: 14, lineHeight: 1.6, minHeight: 60, marginTop: 6 }) }} />
+      </div>
+    </div>
+  );
+}
+
+function FormFill({ sop, instance: initial, user, onClose, onNavigate }) {
+  const [inst, setInst] = useState(initial);
+  const nav = useMemo(() => ({
+    goToSop: (id, blockId) => onNavigate && onNavigate("sop", id, blockId),
+    goToTask: (id) => onNavigate && onNavigate("task", id),
+    goToPlaybookSection: (id) => onNavigate && onNavigate("playbook", id),
+  }), [onNavigate]);
+
+  // Every change persists immediately; post-submission changes stamp the
+  // non-editable edit log first (dedup: one entry per user per minute).
+  const patch = (changes) => {
+    const next = { ...inst, ...changes, editLog: stampEditLog(inst, user) };
+    setInst(next);
+    updateInstance(inst.id, { ...changes, editLog: next.editLog });
+  };
+  const setValue = (blockId, v) => patch({ values: { ...(inst.values || {}), [blockId]: v } });
+  const setNote = (blockId, text) => patch({ notes: { ...(inst.notes || {}), [blockId]: text } });
+
+  const submit = () => {
+    const me = user?.name || "";
+    // Auto-fill any completion blocks that weren't filled by hand.
+    const values = { ...(inst.values || {}) };
+    (inst.blocksSnapshot || []).forEach(b => {
+      if (b.type !== "completion") return;
+      const v = values[b.id] || {};
+      values[b.id] = { ...v, by: v.by || me, date: v.date || todayLocalISO() };
+    });
+    patch({ values, status: "submitted", completedBy: me, completedAt: nowISO() });
+    triggerSaved();
+  };
+
+  const submitted = inst.status === "submitted";
+  const blocks = (inst.blocksSnapshot || []).map(asListBlock);
+
+  return (
+    <div className="gk-fade-in" style={{ maxWidth: 1000, margin: "0 auto" }}>
+      <div className="gk-no-print" style={{ position: "sticky", top: 0, zIndex: 40, background: C.bg, display: "flex", alignItems: "center", gap: 10, padding: "10px 0 12px", marginBottom: 8, borderBottom: `1.5px solid ${C.bdr}` }}>
+        <IconBtn icon="arrow_back" title="Back" onClick={onClose} />
+        <div style={{ fontSize: 14, color: C.mut, fontWeight: 600 }}>
+          {sop.title || "Form"} — {fmtDate(inst.startedAt)}{inst.startedBy ? ` · started by ${inst.startedBy}` : ""}
+        </div>
+        <div style={{ flex: 1 }} />
+        <Pill color={submitted ? C.moss : C.clay}>{submitted ? "Submitted" : "In progress"}</Pill>
+        {!submitted && <Btn onClick={submit}><Icon name="task_alt" size={16} />Submit</Btn>}
+        <OBtn onClick={() => window.print()}><Icon name="print" size={16} />Print</OBtn>
+      </div>
+
+      <div className="gk-print-area" style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "36px 40px" }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: C.txt, margin: "0 0 4px", letterSpacing: -0.4 }}>{sop.title || "Untitled form"}</h1>
+        <div style={{ fontSize: 13, color: C.mut, marginBottom: 22 }}>
+          {submitted
+            ? `Submitted by ${inst.completedBy || "unknown"} · ${fmtDate(inst.completedAt)} — still editable; edits are logged below.`
+            : `Fill in below, then Submit. You can add a note to any block.`}
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0 24px" }}>
+          {blocks.map(b => {
+            const bg = blockBg(b.bg);
+            return (
+              <div key={b.id} style={{
+                flex: `0 0 calc(${b.width || 100}% - 24px)`, minWidth: 0,
+                ...(bg !== "transparent" ? { background: bg, borderRadius: 10, padding: "10px 14px", margin: "0 0 4px" } : {}),
+              }}>
+                {b.type === "list"
+                  ? <FillListBlock block={b} value={(inst.values || {})[b.id]} onChange={v => setValue(b.id, v)} />
+                  : b.type === "completion"
+                    ? <FillCompletionBlock value={(inst.values || {})[b.id]} onChange={v => setValue(b.id, v)} />
+                    : <ViewerBlock block={b} nav={nav} onNavigate={onNavigate} allBlocks={blocks} />}
+                {b.type !== "divider" && b.type !== "index" && (
+                  <div className="gk-no-print">
+                    <FillNote note={(inst.notes || {})[b.id]} onChange={t => setNote(b.id, t)} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {(inst.editLog || []).length > 0 && (
+          <div style={{ marginTop: 20, paddingTop: 14, borderTop: `1.5px solid ${C.bdr}` }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: 0.4, marginBottom: 6 }}>Edit history</div>
+            {(inst.editLog || []).map((e, i) => (
+              <div key={i} style={{ fontSize: 12.5, color: C.faint }}>Edited by {e.by || "unknown"} · {fmtDate(e.at)} {new Date(e.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Submissions list for one form — date/by/status rows, newest first. */
+function SubmissionsSlideOver({ sop, onOpen, onClose }) {
+  const subs = getInstances(sop.id);
+  return (
+    <SlideOver title={`Submissions (${subs.length})`} onClose={onClose}>
+      {subs.length === 0 && <div style={{ fontSize: 13.5, color: C.mut, padding: "8px 2px" }}>No submissions yet — "Fill out" creates the first one.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {subs.map(s => (
+          <button key={s.id} onClick={() => onOpen(s)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{fmtDate(s.startedAt)}</div>
+              <div style={{ fontSize: 12, color: C.mut }}>{s.status === "submitted" ? `Submitted by ${s.completedBy || s.startedBy || "unknown"}` : `Started by ${s.startedBy || "unknown"}`}</div>
+            </div>
+            <Pill color={s.status === "submitted" ? C.moss : C.clay}>{s.status === "submitted" ? "Submitted" : "In progress"}</Pill>
+          </button>
+        ))}
+      </div>
+    </SlideOver>
+  );
+}
+
+function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenTasks, scrollToBlock, onScrolled, openSubmissionId }) {
   const categories = getCategories();
   const cat = categories.find(c => c.id === sop.categoryId);
   const printedOn = fmtDate(nowISO());
@@ -315,15 +489,38 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
     else setRunGate(true);
   };
 
+  // Forms: "Fill out" starts a submission and switches to fill mode; a
+  // deep link (openSubmissionId, from the Forms browse page) opens one.
+  const [fillInst, setFillInst] = useState(null);
+  const [showSubs, setShowSubs] = useState(false);
+  useEffect(() => {
+    if (!openSubmissionId) return;
+    const s = getInstances(sop.id).find(x => x.id === openSubmissionId);
+    if (s) setFillInst(s);
+  }, [openSubmissionId, sop.id]);
+  const startFill = () => { setFillInst(newSubmission(sop, user)); triggerSaved(); };
+  const subCount = isForm ? getInstances(sop.id).length : 0;
+
   const blocks = sop.blocks || [];
 
+  if (fillInst) {
+    return <FormFill sop={sop} instance={fillInst} user={user} onClose={() => setFillInst(null)} onNavigate={onNavigate} />;
+  }
+
   return (
-    <div className="gk-fade-in" style={{ maxWidth: 820, margin: "0 auto" }}>
+    <div className="gk-fade-in" style={{ maxWidth: 1000, margin: "0 auto" }}>
       {/* Floating header — Edit / Run / Print stay reachable without scrolling up (#8). */}
       <div className="gk-no-print" style={{ position: "sticky", top: 0, zIndex: 40, background: C.bg, display: "flex", alignItems: "center", gap: 10, padding: "10px 0 12px", marginBottom: 8, borderBottom: `1.5px solid ${C.bdr}` }}>
         <IconBtn icon="arrow_back" title="Back to library" onClick={onClose} />
         <div style={{ flex: 1 }} />
-        <Btn onClick={startRun}><Icon name="play_circle" size={16} />{isForm ? "Fill out" : "Run SOP"}</Btn>
+        {isForm ? (
+          <>
+            <Btn onClick={startFill}><Icon name="edit_note" size={16} />Fill out</Btn>
+            <OBtn onClick={() => setShowSubs(true)}><Icon name="inventory" size={15} />Submissions ({subCount})</OBtn>
+          </>
+        ) : (
+          <Btn onClick={startRun}><Icon name="play_circle" size={16} />Run SOP</Btn>
+        )}
         {canEditSop && <OBtn onClick={onEdit}><Icon name="edit" size={16} />Edit</OBtn>}
         <OBtn onClick={() => window.print()}><Icon name="print" size={16} />Print</OBtn>
       </div>
@@ -394,6 +591,11 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
         />
       )}
 
+      {showSubs && (
+        <SubmissionsSlideOver sop={sop} onClose={() => setShowSubs(false)}
+          onOpen={s => { setShowSubs(false); setFillInst(s); }} />
+      )}
+
       {/* Default-none gate (R3 C): no blocks routed yet → force the one-time setup */}
       {runGate && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }} onClick={() => setRunGate(false)}>
@@ -417,4 +619,4 @@ function SOPViewer({ sop, user, canEditSop, onClose, onEdit, onNavigate, onOpenT
 }
 
 export default SOPViewer;
-export { ViewerBlock };
+export { ViewerBlock, FormFill };

@@ -14,6 +14,8 @@ const buildDate = new Date().toISOString().slice(0, 10);
 // dist/VERSION by scripts/release.sh for the api.php `version_info` action.
 export default defineConfig({
   plugins: [react()],
+  // Honor PORT when the launcher assigns one (falls back to vite's 5173).
+  server: { port: Number(process.env.PORT) || 5173 },
   define: {
     __GK_VERSION__: JSON.stringify(pkg.version),
     __GK_COMMIT__: JSON.stringify(commit),

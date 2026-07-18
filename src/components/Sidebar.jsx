@@ -3,14 +3,19 @@ import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnP
 import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
+/* Nav order per Hayden (R4): Dashboard ‖ work sections ‖ documentation
+   sections — `divider` entries render as thin separators. Admin is NOT in
+   this list; it's pinned at the bottom of the sidebar for admins. */
 const NAV_ITEMS = [
   { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
-  { key: "library", label: "SOP Library", icon: "menu_book" },
-  { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
-  { key: "forms", label: "Forms", icon: "description" },
+  { divider: true },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
   { key: "projects", label: "Projects", icon: "folder_special" },
   { key: "calendar", label: "Content Calendar", icon: "calendar_month" },
+  { divider: true },
+  { key: "library", label: "SOP Library", icon: "menu_book" },
+  { key: "forms", label: "Forms", icon: "description" },
+  { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
 ];
 
 // Baked in at build time by vite.config.js's `define` (see scripts/release.sh).
@@ -84,10 +89,28 @@ function ChangePinModal({ onClose }) {
   );
 }
 
+function NavButton({ it, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9,
+        border: "none", cursor: "pointer", textAlign: "left", width: "100%",
+        background: active ? C.mossSoft : "transparent",
+        color: active ? C.moss : C.txt2, fontWeight: active ? 600 : 500, fontSize: 13,
+        textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
+        transition: "all .15s",
+      }}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.s2; }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+    >
+      <Icon name={it.icon} size={20} style={{ color: active ? C.moss : C.faint }} />
+      {it.label}
+    </button>
+  );
+}
+
 function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
   const [showPinModal, setShowPinModal] = useState(false);
-  const items = [...NAV_ITEMS];
-  if (isAdmin(user)) items.push({ key: "admin", label: "Admin Panel", icon: "tune" });
   const theme = getTheme();
 
   return (
@@ -111,29 +134,20 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
 
       {/* Nav */}
       <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-        {items.map(it => {
-          const active = section === it.key;
-          return (
-            <button key={it.key} onClick={() => setSection(it.key)}
-              style={{
-                display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9,
-                border: "none", cursor: "pointer", textAlign: "left",
-                background: active ? C.mossSoft : "transparent",
-                color: active ? C.moss : C.txt2, fontWeight: active ? 600 : 500, fontSize: 13,
-                textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
-                transition: "all .15s",
-              }}
-              onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.s2; }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
-            >
-              <Icon name={it.icon} size={20} style={{ color: active ? C.moss : C.faint }} />
-              {it.label}
-            </button>
-          );
-        })}
+        {NAV_ITEMS.map((it, i) => it.divider
+          ? <div key={"div" + i} style={{ height: 1, background: C.bdr, margin: "7px 10px" }} />
+          : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} />
+        )}
       </nav>
 
       <div style={{ flex: 1 }} />
+
+      {/* Admin — pinned at the bottom, admins only (R4 nav order). */}
+      {isAdmin(user) && (
+        <div style={{ padding: "8px 12px", borderTop: `1.5px solid ${C.bdr}` }}>
+          <NavButton it={{ key: "admin", label: "Admin Panel", icon: "tune" }} active={section === "admin"} onClick={() => setSection("admin")} />
+        </div>
+      )}
 
       {/* Current user + logout */}
       <div style={{ padding: 14, borderTop: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 10 }}>

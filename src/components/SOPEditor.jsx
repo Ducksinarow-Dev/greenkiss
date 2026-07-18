@@ -203,6 +203,7 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
       {/* Formatting toolbar — Bold / Extra bold / Size / Color / Link / @internal */}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
         <RichToolbarBtn icon="format_bold" title="Bold" onClick={() => exec("bold")} />
+        <RichToolbarBtn icon="format_italic" title="Italic" onClick={() => exec("italic")} />
         <RichToolbarBtn label="XB" title="Extra bold" onClick={extraBold} />
         <RichToolbarBtn label="S" title="Small text" onClick={() => exec("fontSize", 2)} style={{ fontSize: 10 }} />
         <RichToolbarBtn label="M" title="Normal text" onClick={() => exec("fontSize", 3)} />
@@ -295,36 +296,40 @@ function ListBlockEditor({ block, onChange, onConvertToText }) {
     setItems([...items, { id: uid(), text: draft.trim(), value: "", url: "" }]);
     setDraft("");
   };
-  // All three controls share one aligned row (wrapping as whole units) —
-  // identical 28px control heights so nothing stair-steps (R3 #12).
   const toggle = (k, label) => (
-    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: C.txt2, cursor: "pointer", height: 28, whiteSpace: "nowrap" }}>
+    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: C.txt2, cursor: "pointer", height: 24, whiteSpace: "nowrap" }}>
       <input type="checkbox" checked={!!block[k]} onChange={e => onChange({ ...block, [k]: e.target.checked })} style={{ margin: 0 }} />
       {label}
     </label>
   );
   const revertToText = () => {
-    const text = items.map((it, i) => (block.style === "numbered" ? `${i + 1}. ` : "• ") + (it.text || "")).join("\n");
+    const text = items.map((it, i) => (block.style === "numbered" ? `${i + 1}. ` : block.style === "plain" ? "" : "• ") + (it.text || "")).join("\n");
     onConvertToText({ id: block.id, type: "text", text, width: block.width, bg: block.bg, num: block.num, taskRole: block.taskRole });
   };
+  /* Header layout (R4 F3): LEFT container = style control over "Convert to
+     text"; RIGHT container = the two toggles stacked — no more wrapping. */
   return (
     <div>
-      <div style={{ display: "flex", gap: "6px 16px", alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 2, border: `1.5px solid ${C.bdr}`, height: 28, boxSizing: "border-box" }}>
-          {["bulleted", "numbered"].map(s => (
-            <button key={s} type="button" onClick={() => onChange({ ...block, style: s })} style={{
-              padding: "0 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
-              background: (block.style || "bulleted") === s ? C.sur : "transparent",
-              color: (block.style || "bulleted") === s ? C.txt : C.mut,
-            }}>{s === "bulleted" ? "Bulleted" : "Numbered"}</button>
-          ))}
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 2, border: `1.5px solid ${C.bdr}`, height: 28, boxSizing: "border-box" }}>
+            {[["plain", "Plain"], ["bulleted", "Bulleted"], ["numbered", "Numbered"]].map(([s, label]) => (
+              <button key={s} type="button" onClick={() => onChange({ ...block, style: s })} style={{
+                padding: "0 12px", borderRadius: 6, border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                background: (block.style || "bulleted") === s ? C.sur : "transparent",
+                color: (block.style || "bulleted") === s ? C.txt : C.mut,
+              }}>{label}</button>
+            ))}
+          </div>
+          <button type="button" onClick={revertToText} title="Turn this list back into a plain text block"
+            style={{ background: "none", border: "none", color: C.mut, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
+            <Icon name="notes" size={14} />Convert to text
+          </button>
         </div>
-        {toggle("checkboxes", "Add checkboxes to beginning of each line")}
-        {toggle("withEntry", "Show entry field at end of each line")}
-        <button type="button" onClick={revertToText} title="Turn this list back into a plain text block"
-          style={{ background: "none", border: "none", color: C.mut, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 4, height: 28 }}>
-          <Icon name="notes" size={14} />Convert to text
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {toggle("checkboxes", "Add checkboxes to beginning of each line")}
+          {toggle("withEntry", "Show entry field at end of each line")}
+        </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {items.map((it, idx) => (
@@ -332,7 +337,9 @@ function ListBlockEditor({ block, onChange, onConvertToText }) {
             <Icon name="drag_indicator" size={16} style={{ color: C.faint, cursor: "grab", flexShrink: 0 }} />
             {block.checkboxes
               ? <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${C.bdr2}`, flexShrink: 0 }} />
-              : <span style={{ fontSize: 13, color: C.faint, width: 18, flexShrink: 0, textAlign: "right" }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>}
+              : block.style === "plain"
+                ? null
+                : <span style={{ fontSize: 13, color: C.faint, width: 18, flexShrink: 0, textAlign: "right" }}>{block.style === "numbered" ? `${idx + 1}.` : "•"}</span>}
             <MentionField value={it.text} onChange={text => setItems(items.map(x => x.id === it.id ? { ...x, text } : x))}
               placeholder="List item… (@ to link)" style={{ ...inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px", minWidth: 100, width: "auto" }) }} />
             {block.withEntry && (
@@ -465,7 +472,7 @@ function ImageBlockEditor({ block, onChange }) {
    held (onMouseDown) — because a permanently-draggable ancestor blocks mouse
    text-selection inside child inputs in Chromium (the "can't select, only
    arrow-key" bug). Reset on drag end / mouse up. */
-function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOver, onDrop, isDragOver, docMagnet }) {
+function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOver, onDrop, isDragOver, docMagnet, isForm }) {
   const block = asListBlock(raw); // legacy checklist → list, one edit path
   const def = BLOCK_DEFS.find(d => d.type === block.type) || { icon: "notes" };
   const width = blockWidth(block);
@@ -493,22 +500,22 @@ function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOv
         {/* number-at-will → feeds the index */}
         <input type="number" value={block.num ?? ""} title="Number (adds to index)" placeholder="#"
           onChange={e => onChange({ ...block, num: e.target.value === "" ? undefined : Number(e.target.value) })}
-          style={{ marginTop: 2, width: 40, fontSize: 10, padding: "2px 3px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, fontFamily: "inherit", textAlign: "center" }} />
+          style={{ marginTop: 2, width: 56, fontSize: 11, padding: "2px 3px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, fontFamily: "inherit", textAlign: "center" }} />
         <select value={width} onChange={e => onChange({ ...block, width: Number(e.target.value) })}
           title="Block width"
-          style={{ fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 40 }}>
+          style={{ fontSize: 11, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 56 }}>
           {BLOCK_WIDTHS.map(w => <option key={w} value={w}>{w}%</option>)}
         </select>
         <select value={block.bg || ""} onChange={e => onChange({ ...block, bg: e.target.value || undefined })}
           title="Background emphasis"
-          style={{ fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 40 }}>
+          style={{ fontSize: 11, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer", fontFamily: "inherit", width: 56 }}>
           {BLOCK_BGS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
         </select>
         {/* Run-SOP routing (R3 C): where this block goes when staff Run the SOP */}
-        {(block.type === "heading" || block.type === "text" || block.type === "list") && (
+        {!isForm && (block.type === "heading" || block.type === "text" || block.type === "list") && (
           <select value={block.taskRole || ""} onChange={e => onChange({ ...block, taskRole: e.target.value || undefined })}
             title="Task routing — what this block becomes when the SOP is run as a task"
-            style={{ fontSize: 10, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${block.taskRole ? C.moss : C.bdr}`, background: block.taskRole ? C.mossSoft : C.inset, color: block.taskRole ? C.moss : C.mut, cursor: "pointer", fontFamily: "inherit", width: 40 }}>
+            style={{ fontSize: 11, padding: "2px 1px", borderRadius: 5, border: `1.5px solid ${block.taskRole ? C.moss : C.bdr}`, background: block.taskRole ? C.mossSoft : C.inset, color: block.taskRole ? C.moss : C.mut, cursor: "pointer", fontFamily: "inherit", width: 56 }}>
             <option value="">Task</option>
             <option value="description">Desc</option>
             <option value="checklist">List</option>
@@ -517,7 +524,7 @@ function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOv
         {docMagnet && (
           <button type="button" title="Copy magnet link to this block (paste it in any link field)"
             onClick={() => copyMagnet(docMagnet.kind, docMagnet.id, block.id)}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 40, height: 20, borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer" }}>
+            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 56, height: 20, borderRadius: 5, border: `1.5px solid ${C.bdr}`, background: C.inset, color: C.mut, cursor: "pointer" }}>
             <Icon name="my_location" size={13} />
           </button>
         )}
@@ -538,7 +545,7 @@ function BlockRow({ block: raw, index, onChange, onDelete, onDragStart, onDragOv
 }
 
 /* ─── Add-block menu ─────────────────────────────────────────────── */
-function AddBlockMenu({ onAdd, openUp }) {
+function AddBlockMenu({ onAdd, openUp, isForm }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: "relative", display: "inline-block" }}>
@@ -549,7 +556,7 @@ function AddBlockMenu({ onAdd, openUp }) {
           ...(openUp ? { bottom: "calc(100% + 6px)" } : { top: "calc(100% + 6px)" }),
           borderRadius: 10, boxShadow: C.shadowMd, padding: 6, zIndex: 20, minWidth: 180,
         }} onMouseLeave={() => setOpen(false)}>
-          {BLOCK_DEFS.map(d => (
+          {BLOCK_DEFS.filter(d => !(isForm && d.type === "index")).map(d => (
             <button key={d.type} onClick={() => { onAdd(d.type); setOpen(false); }}
               style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "8px 10px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: C.txt, borderRadius: 7, textAlign: "left" }}
               onMouseEnter={e => e.currentTarget.style.background = C.s2}
@@ -568,7 +575,7 @@ function AddBlockMenu({ onAdd, openUp }) {
    category/status chrome — shared by SOPEditor and the Operations
    Playbook's per-section editor (Phase 5) so both ride the exact same
    block system instead of two copies of this logic. */
-function BlocksEditor({ blocks, onChange, trailing, docMagnet }) {
+function BlocksEditor({ blocks, onChange, trailing, docMagnet, isForm }) {
   const dragIndex = useRef(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 
@@ -601,7 +608,7 @@ function BlocksEditor({ blocks, onChange, trailing, docMagnet }) {
             onChange={next => updateBlock(b.id, next)}
             onDelete={() => deleteBlockAt(b.id)}
             onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}
-            isDragOver={dragOverIdx === i} docMagnet={docMagnet}
+            isDragOver={dragOverIdx === i} docMagnet={docMagnet} isForm={isForm}
           />
         ))}
         {blocks.length === 0 && (
@@ -617,7 +624,7 @@ function BlocksEditor({ blocks, onChange, trailing, docMagnet }) {
         background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12, padding: "10px 12px",
         boxShadow: C.shadowMd, width: "fit-content",
       }}>
-        <AddBlockMenu onAdd={addBlockType} openUp />
+        <AddBlockMenu onAdd={addBlockType} openUp isForm={isForm} />
         {trailing}
       </div>
     </div>
@@ -636,6 +643,8 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
   const [showHistory, setShowHistory] = useState(false);
   const [showNewCat, setShowNewCat] = useState(false);
   const saveTimer = useRef(null);
+  const isForm = sop.kind === "form";
+  const docWord = isForm ? "Form" : "SOP";
 
   const persist = (nextBlocks, nextTitle, nextCat, nextStatus) => {
     const changes = {
@@ -666,7 +675,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
 
   const handleClose = () => { persist(); onClose(); onSaved && onSaved(); };
   const handleDelete = async () => {
-    const ok = await confirmDelete(`Delete "${title || "this SOP"}"? This can't be undone.`);
+    const ok = await confirmDelete(`Delete "${title || (isForm ? "this form" : "this SOP")}"? This can't be undone.`);
     if (!ok) return;
     deleteSOP(sop.id);
     triggerSaved();
@@ -691,19 +700,19 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
   };
 
   return (
-    <div className="gk-fade-in" style={{ maxWidth: 820, margin: "0 auto" }}>
+    <div className="gk-fade-in" style={{ maxWidth: 1000, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <IconBtn icon="arrow_back" title="Back" onClick={handleClose} />
-        <div style={{ fontSize: 14, color: C.mut, fontWeight: 600 }}>{isNew ? "New SOP" : "Editing SOP"}</div>
+        <div style={{ fontSize: 14, color: C.mut, fontWeight: 600 }}>{isNew ? `New ${docWord}` : `Editing ${docWord}`}</div>
         <div style={{ flex: 1 }} />
         {!isNew && <IconBtn icon="history" title="Version history" onClick={() => setShowHistory(true)} />}
-        {!isNew && <IconBtn icon="content_copy" title="Duplicate SOP" onClick={handleDuplicate} />}
-        {!isNew && <IconBtn icon="delete" danger title="Delete SOP" onClick={handleDelete} />}
+        {!isNew && <IconBtn icon="content_copy" title={`Duplicate ${docWord}`} onClick={handleDuplicate} />}
+        {!isNew && <IconBtn icon="delete" danger title={`Delete ${docWord}`} onClick={handleDelete} />}
       </div>
 
       {/* Title on the left; version/code area to its right (#1). */}
       <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap" }}>
-        <input value={title} onChange={e => setTitle(e.target.value)} placeholder="SOP title…"
+        <input value={title} onChange={e => setTitle(e.target.value)} placeholder={`${docWord} title…`}
           style={{ ...inp({ fontSize: 28, fontWeight: 800, padding: "8px 4px", border: "1.5px solid transparent", background: "transparent", width: "auto", flex: "1 1 320px" }) }}
           onFocus={e => e.target.style.border = `1.5px solid ${C.bdr2}`}
           onBlur={e => e.target.style.border = "1.5px solid transparent"} />
@@ -755,7 +764,7 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
         )}
       </div>
 
-      <BlocksEditor blocks={blocks} onChange={setBlocks} docMagnet={{ kind: "sop", id: sop.id }} trailing={<Btn onClick={handleClose}>Done</Btn>} />
+      <BlocksEditor blocks={blocks} onChange={setBlocks} docMagnet={{ kind: "sop", id: sop.id }} isForm={isForm} trailing={<Btn onClick={handleClose}>Done</Btn>} />
 
       {showHistory && <HistoryPanel sopId={sop.id} onClose={() => setShowHistory(false)} onRestored={handleRestored} />}
     </div>

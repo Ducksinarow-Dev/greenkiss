@@ -5,14 +5,14 @@ import {
   fmtDateShort, fmtDate, nowISO, getCurrentUser, canEdit, isOverdue, CATEGORY_COLORS,
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskType, inp,
-  RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet,
+  RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet, addAlert,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink } from './shared.jsx';
 
 const emptyForm = () => ({
   title: "", description: "", status: "todo", priority: "medium", type: "task",
   assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [],
-  tagIds: [], recurrence: "none",
+  tagIds: [], recurrence: "none", links: [],
 });
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -20,7 +20,9 @@ const emptyForm = () => ({
    the due-date popover on task tiles, subtask tiles, and the task modal
    isn't required to use it (native input there is fine) but the popover
    flow needs a real calendar per the reference design notes. */
-function MiniCalendar({ value, onSelect }) {
+/** `dots`: {["YYYY-MM-DD"]: [color,…]} — small colored markers under a date
+ * (used by the Forms submission browser; absent everywhere else). */
+function MiniCalendar({ value, onSelect, dots }) {
   const initial = value ? new Date(value + "T00:00:00") : new Date();
   const [viewYear, setViewYear] = useState(initial.getFullYear());
   const [viewMonth, setViewMonth] = useState(initial.getMonth());
@@ -59,11 +61,20 @@ function MiniCalendar({ value, onSelect }) {
           return (
             <button key={i} type="button" onClick={() => onSelect(dateStr)}
               style={{
-                aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
+                aspectRatio: "1", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1,
                 borderRadius: 7, border: isToday && !isSel ? `1.5px solid ${C.moss}` : "1.5px solid transparent",
                 background: isSel ? C.moss : "transparent", color: isSel ? "#fff" : C.txt,
                 fontSize: 12, fontWeight: isSel ? 700 : 500, cursor: "pointer", fontFamily: "inherit",
-              }}>{d}</button>
+              }}>
+              {d}
+              {dots && dots[dateStr] && (
+                <span style={{ display: "flex", gap: 2 }}>
+                  {dots[dateStr].slice(0, 4).map((col, j) => (
+                    <span key={j} style={{ width: 4, height: 4, borderRadius: 99, background: isSel ? "#fff" : col }} />
+                  ))}
+                </span>
+              )}
+            </button>
           );
         })}
       </div>
@@ -288,7 +299,38 @@ function SubTaskRow({ sub, users, onChange, onRemove }) {
   );
 }
 
-function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onClose, isNew, wide }) {
+/** One row of the modal's Links section (R4 D2): label input + the shared
+ * web/internal LinkPopover behind a bordered "Link" button (same treatment
+ * as SOP list-item links, so magnet linking looks identical everywhere). */
+function TaskLinkRow({ link, nav, onChange, onRemove }) {
+  const [rect, setRect] = useState(null);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input value={link.label} onChange={e => onChange({ label: e.target.value })} placeholder="Label…"
+          style={inp({ fontSize: 13, padding: "7px 10px", flex: 1 })} />
+        <button type="button" title={link.url ? "Edit link" : "Add a link (web or internal magnet)"}
+          onClick={e => setRect(e.currentTarget.getBoundingClientRect())}
+          style={{
+            display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", borderRadius: 7, cursor: "pointer",
+            border: `1.5px solid ${link.url ? C.moss : C.bdr2}`, background: link.url ? C.mossSoft : C.sur,
+            color: link.url ? C.moss : C.txt2, fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, flexShrink: 0,
+          }}>
+          <Icon name="link" size={14} />{link.url ? "Linked" : "Link"}
+        </button>
+        <IconBtn icon="close" title="Remove link" onClick={onRemove} />
+        {rect && <LinkPopover anchorRect={rect} initial={link.url || ""} onSet={u => onChange({ url: u })} onClose={() => setRect(null)} />}
+      </div>
+      {link.url && (
+        <div style={{ fontSize: 12.5, paddingLeft: 2 }}>
+          <ItemLink url={link.url} nav={nav}>{link.label || link.url}</ItemLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onClose, isNew, wide, nav }) {
   const [form, setForm] = useState(initial);
   const [subInput, setSubInput] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -314,13 +356,30 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
     const has = (form.tagIds || []).includes(id);
     set("tagIds", has ? form.tagIds.filter(x => x !== id) : [...(form.tagIds || []), id]);
   };
+  const addLink = () => set("links", [...(form.links || []), { id: uid(), label: "", url: "" }]);
+  const changeLink = (id, changes) => set("links", (form.links || []).map(l => l.id === id ? { ...l, ...changes } : l));
+  const removeLink = (id) => set("links", (form.links || []).filter(l => l.id !== id));
+
+  // Send alert (R4 D5): flag this task for a staff member — same addAlert
+  // record the tile overflow action writes; lands on their dashboard strip
+  // and their next-login toast.
+  const [alertAnchor, setAlertAnchor] = useState(null);
+  const [alertSent, setAlertSent] = useState(null); // user name, for the confirmation blip
+  const me = getCurrentUser();
+  const alertTargets = users.filter(u => u.id !== me?.id);
+  const sendAlert = (userId) => {
+    addAlert(form.id, userId);
+    triggerSaved();
+    setAlertSent(users.find(u => u.id === userId)?.name || "them");
+    setAlertAnchor(null);
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
       onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
         background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: wide ? 720 : 560, maxHeight: "88vh", overflowY: "auto", padding: 28,
+        width: "100%", maxWidth: wide ? 720 : 680, maxHeight: "88vh", overflowY: "auto", padding: 28,
       }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? (isSopRun ? "Run SOP — new task" : "New Task") : "Edit Task"}</div>
@@ -337,20 +396,38 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={labelStyle}>Type</label>
-            <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, width: "fit-content" }}>
-              {TASK_TYPES.map(t => (
-                <button key={t.key} type="button" onClick={() => set("type", t.key)} style={{
-                  display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
-                  background: (form.type || "task") === t.key ? C.sur : "transparent",
-                  color: (form.type || "task") === t.key ? C.moss : C.mut,
-                  boxShadow: (form.type || "task") === t.key ? C.shadowSm : "none",
-                }}>
-                  <Icon name={t.icon} size={15} />{t.label}
-                </button>
-              ))}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <label style={labelStyle}>Type</label>
+              <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, width: "fit-content" }}>
+                {TASK_TYPES.map(t => (
+                  <button key={t.key} type="button" onClick={() => set("type", t.key)} style={{
+                    display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+                    fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                    background: (form.type || "task") === t.key ? C.sur : "transparent",
+                    color: (form.type || "task") === t.key ? C.moss : C.mut,
+                    boxShadow: (form.type || "task") === t.key ? C.shadowSm : "none",
+                  }}>
+                    <Icon name={t.icon} size={15} />{t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ flex: "0 1 300px", minWidth: 160 }}>
+              <label style={labelStyle}>Tags</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
+                {(tags || []).map(t => {
+                  const checked = (form.tagIds || []).includes(t.id);
+                  return (
+                    <label key={t.id} style={{ cursor: "pointer" }} onClick={() => toggleTag(t.id)}>
+                      <Pill color={t.color} style={{ opacity: checked ? 1 : 0.45, background: checked ? t.color + "18" : "transparent" }}>
+                        {checked && <Icon name="check" size={11} />}{t.name}
+                      </Pill>
+                    </label>
+                  );
+                })}
+                {(tags || []).length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No tags yet — create one from a task tile's tag icon.</div>}
+              </div>
             </div>
           </div>
           <div>
@@ -425,20 +502,15 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
 
           <div>
-            <label style={labelStyle}>Tags</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {(tags || []).map(t => {
-                const checked = (form.tagIds || []).includes(t.id);
-                return (
-                  <label key={t.id} style={{ cursor: "pointer" }} onClick={() => toggleTag(t.id)}>
-                    <Pill color={t.color} style={{ opacity: checked ? 1 : 0.45, background: checked ? t.color + "18" : "transparent" }}>
-                      {checked && <Icon name="check" size={11} />}{t.name}
-                    </Pill>
-                  </label>
-                );
-              })}
-              {(tags || []).length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No tags yet — create one from a task tile's tag icon.</div>}
-            </div>
+            <label style={labelStyle}>Links</label>
+            {(form.links || []).length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+                {(form.links || []).map(l => (
+                  <TaskLinkRow key={l.id} link={l} nav={nav} onChange={c => changeLink(l.id, c)} onRemove={() => removeLink(l.id)} />
+                ))}
+              </div>
+            )}
+            <OBtn onClick={addLink} style={{ padding: "6px 12px", fontSize: 12 }}><Icon name="add_link" size={15} />Add link</OBtn>
           </div>
 
           <div>
@@ -471,6 +543,28 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 24 }}>
           {isSopRun && !isNew && form.status !== "done" && !completing && (
             <OBtn onClick={() => setCompleting(true)}><Icon name="task_alt" size={15} />Complete run</OBtn>
+          )}
+          {!isNew && (alertSent ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, color: C.moss }}>
+              <Icon name="check_circle" size={15} />Alerted {alertSent}
+            </span>
+          ) : (
+            <OBtn onClick={e => setAlertAnchor(e.currentTarget.getBoundingClientRect())}>
+              <Icon name="campaign" size={15} />Send alert
+            </OBtn>
+          ))}
+          {alertAnchor && (
+            <Popover anchorRect={alertAnchor} onClose={() => setAlertAnchor(null)} width={210}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", color: C.faint, padding: "2px 6px 6px" }}>Alert who?</div>
+                {alertTargets.length === 0 && <div style={{ fontSize: 12, color: C.faint, padding: "4px 6px" }}>No other staff to alert.</div>}
+                {alertTargets.map(u => (
+                  <button key={u.id} type="button" onClick={() => sendAlert(u.id)} style={pickerRowStyle(u.id === form.assignedTo)}>
+                    <Avatar name={u.name} size={22} />{u.name}
+                  </button>
+                ))}
+              </div>
+            </Popover>
           )}
           <div style={{ flex: 1 }} />
           <OBtn onClick={onClose}>Cancel</OBtn>
@@ -645,7 +739,7 @@ function TaskOverflowMenu({ task, users, projects, templates, allTasks, currentU
   );
 }
 
-function TaskCard({ task, users, sops, projects, tags, templates, allTasks, currentUser, onOpen, onDragStart, onDragOver, isDragOver, onQuickToggle, onOpenSop, onPatchTask, onAction }) {
+function TaskCard({ task, users, sops, projects, tags, templates, allTasks, currentUser, onOpen, onDragStart, onDragOver, isDragOver, onQuickToggle, onOpenSop, onPatchTask, onAction, nav }) {
   const sop = sops.find(s => s.id === task.relatedSopId);
   const project = (projects || []).find(p => p.id === task.projectId);
   const subTasks = task.subTasks || [];
@@ -732,6 +826,13 @@ function TaskCard({ task, users, sops, projects, tags, templates, allTasks, curr
               style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: C.moss, marginTop: 3, cursor: "pointer", width: "fit-content" }}
               title="Open related SOP">
               <Icon name="menu_book" size={13} />{sop.title || "Untitled SOP"}
+            </div>
+          )}
+          {(task.links || []).some(l => l.url) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "3px 12px", marginTop: 3, fontSize: 12 }} onClick={e => e.stopPropagation()}>
+              {(task.links || []).filter(l => l.url).map(l => (
+                <ItemLink key={l.id} url={l.url} nav={nav}>{l.label || l.url}</ItemLink>
+              ))}
             </div>
           )}
         </div>
@@ -822,9 +923,16 @@ function TaskDoneSlideOver({ doneTasks, archivedTasks, cardProps, onClose }) {
   );
 }
 
-function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
+const TASKS_VIEW_KEY = "gkTasksView";
+const getTasksView = () => { try { return localStorage.getItem(TASKS_VIEW_KEY) || "board"; } catch { return "board"; } };
+const setTasksView = (v) => { try { localStorage.setItem(TASKS_VIEW_KEY, v); } catch { /* private mode */ } };
+
+function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
+  const [view, setView] = useState(getTasksView); // Board / List (R4 D1), persisted per-browser
+  const changeView = (v) => { setView(v); setTasksView(v); };
+  const [hideProjectTasks, setHideProjectTasks] = useState(false); // R4 D6
 
   // Magnet deep-link (gk:task:<id>): open that task's modal on arrival.
   useEffect(() => {
@@ -853,6 +961,7 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
 
   const visibleTasks = allTasks.filter(t => !t.archived);
   const filtered = visibleTasks.filter(t => {
+    if (hideProjectTasks && t.projectId) return false;
     if (filterAssignee && t.assignedTo !== filterAssignee) return false;
     if (filterPriority && t.priority !== filterPriority) return false;
     if (filterProject && t.projectId !== filterProject) return false;
@@ -861,7 +970,13 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
     return true;
   });
   const sorted = sortTasksForUser(filtered, user?.id || "");
-  const byStatus = (s) => sorted.filter(t => t.status === s);
+  // R4 D7: cluster tasks by project within each column/section — a stable
+  // sort by project name after the favourite/priority ordering, so clusters
+  // are alphabetical and the usual order survives inside each cluster.
+  // No-project tasks ("" sorts first) stay at the top.
+  const projName = (id) => (id && projects.find(p => p.id === id)?.name) || "";
+  const clustered = [...sorted].sort((a, b) => projName(a.projectId).localeCompare(projName(b.projectId)));
+  const byStatus = (s) => clustered.filter(t => t.status === s);
 
   const openNew = () => setModal({ task: { ...emptyForm(), assignedTo: user?.id || "" }, isNew: true });
   const openEdit = (task) => setModal({ task: { ...task }, isNew: false });
@@ -905,12 +1020,67 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
   const doneTasks = byStatus("done");
   const archivedTasks = allTasks.filter(t => t.archived);
 
-  const cardProps = { users, sops, projects, tags, templates, allTasks, currentUser: user, onOpen: openEdit, onOpenSop, onPatchTask: patchTask, onAction: taskAction, onQuickToggle: quickToggle };
+  // Magnet-link navigation for task links (R4 D2): SOP/playbook targets
+  // bubble up to App; a task magnet just opens that task's modal here.
+  const nav = {
+    goToSop: (id, blockId) => onOpenSop && onOpenSop(id, blockId),
+    goToTask: (id) => { const t = allTasks.find(x => x.id === id); if (t) openEdit(t); },
+    goToPlaybookSection: (id) => onNavigateOut && onNavigateOut("playbook", id),
+  };
+
+  const cardProps = { users, sops, projects, tags, templates, allTasks, currentUser: user, onOpen: openEdit, onOpenSop, onPatchTask: patchTask, onAction: taskAction, onQuickToggle: quickToggle, nav };
+
+  // Shared by board columns and list sections: same cards, plus a slim
+  // project-name label above each project cluster (R4 D7). The label spans
+  // the full row in the list view's grid (gridColumn is inert in flex).
+  const renderCards = (items) => items.map((t, i) => {
+    const prev = items[i - 1];
+    const project = t.projectId ? projects.find(p => p.id === t.projectId) : null;
+    const showLabel = project && (!prev || prev.projectId !== t.projectId);
+    return (
+      <React.Fragment key={t.id}>
+        {showLabel && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 5, gridColumn: "1 / -1", marginTop: i === 0 ? 0 : 3,
+            fontSize: 10.5, fontWeight: 700, color: project.color || C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
+          }}>
+            <Icon name="folder" size={12} />{project.name || "Untitled project"}
+          </div>
+        )}
+        <TaskCard task={t} {...cardProps}
+          onOpen={() => openEdit(t)}
+          onDragStart={onDragStart} onDragOver={onDragOverCard} isDragOver={dragOverItem === t.id}
+          onQuickToggle={() => quickToggle(t)} onPatchTask={patch => patchTask(t, patch)}
+          onAction={(action, extra) => taskAction(t, action, extra)} />
+      </React.Fragment>
+    );
+  });
+
+  const columnHeader = (s, count) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+      <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
+      <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
+      <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{count}</span>
+    </div>
+  );
 
   return (
     <div className="gk-fade-in">
       <SectionHeader title="Task Manager" sub={`${openCount} open task${openCount === 1 ? "" : "s"}`}
         right={<>
+          <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
+            {[{ key: "board", icon: "view_kanban", label: "Board" }, { key: "list", icon: "view_list", label: "List" }].map(v => (
+              <button key={v.key} type="button" onClick={() => changeView(v.key)} title={`${v.label} view`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
+                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+                  background: view === v.key ? C.sur : "transparent", color: view === v.key ? C.moss : C.mut,
+                  boxShadow: view === v.key ? C.shadowSm : "none",
+                }}>
+                <Icon name={v.icon} size={16} />{v.label}
+              </button>
+            ))}
+          </div>
           <OBtn onClick={() => setShowDone(true)}><Icon name="task_alt" size={16} />Done ({doneTasks.length})</OBtn>
           {editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>}
         </>} />
@@ -943,11 +1113,41 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
             <button key={p.key} onClick={() => setFilterPriority(filterPriority === p.key ? "" : p.key)} style={priorityFilterStyle(filterPriority === p.key, p.col)}>{p.label}</button>
           ))}
         </div>
+        <button onClick={() => setHideProjectTasks(h => !h)} title="Hide tasks that belong to a project"
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+            border: `1.5px solid ${hideProjectTasks ? C.moss : C.bdr}`, background: hideProjectTasks ? C.mossSoft : C.sur,
+            color: hideProjectTasks ? C.moss : C.txt2, fontSize: 12, fontWeight: hideProjectTasks ? 600 : 500,
+          }}>
+          <Icon name={hideProjectTasks ? "folder_off" : "folder"} size={16} />
+          {hideProjectTasks ? "Hiding project tasks" : "Hide project tasks"}
+        </button>
       </div>
 
       {visibleTasks.length === 0 ? (
         <EmptyState icon="checklist" title="No tasks yet" sub="Create the first task to get the shift moving."
           action={editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>} />
+      ) : view === "list" ? (
+        // R4 D1 — list view: vertical sections per status, same cards laid
+        // out in a fluid grid. Sections stay live drop targets like columns.
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 8 }}>
+          {TASK_BOARD_STATUSES.map(s => {
+            const items = byStatus(s.key);
+            return (
+              <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
+                style={{ background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 14 }}>
+                {columnHeader(s, items.length)}
+                {items.length === 0 ? (
+                  <div style={{ padding: "6px 0 2px", fontSize: 13, color: C.faint }}>No tasks</div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 9, alignItems: "start" }}>
+                    {renderCards(items)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
           {TASK_BOARD_STATUSES.map(s => {
@@ -973,19 +1173,9 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
             return (
               <div key={s.key} onDragOver={e => e.preventDefault()} onDrop={e => onDropColumn(e, s.key)}
                 style={{ flex: "1 1 280px", minWidth: 260, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12, minHeight: 160 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
-                  <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
-                  <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
-                  <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{items.length}</span>
-                </div>
+                {columnHeader(s, items.length)}
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  {items.map(t => (
-                    <TaskCard key={t.id} task={t} {...cardProps}
-                      onOpen={() => openEdit(t)}
-                      onDragStart={onDragStart} onDragOver={onDragOverCard} isDragOver={dragOverItem === t.id}
-                      onQuickToggle={() => quickToggle(t)} onPatchTask={patch => patchTask(t, patch)}
-                      onAction={(action, extra) => taskAction(t, action, extra)} />
-                  ))}
+                  {renderCards(items)}
                   {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>No tasks</div>}
                 </div>
               </div>
@@ -996,7 +1186,7 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus }) {
 
       {modal && (
         <TaskModal initial={modal.task} isNew={modal.isNew} users={users} sops={sops} projects={projects} tags={tags}
-          onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
+          nav={nav} onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
       )}
 
       {showDone && (
@@ -1016,4 +1206,4 @@ function priorityFilterStyle(active, color) {
 }
 
 export default TaskManager;
-export { TaskCard, TaskModal, emptyForm, labelStyle, priorityFilterStyle };
+export { TaskCard, TaskModal, MiniCalendar, emptyForm, labelStyle, priorityFilterStyle };

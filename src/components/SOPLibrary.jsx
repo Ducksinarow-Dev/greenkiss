@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
-  seedStandardSections, triggerSaved, inp,
+  seedStandardSections, triggerSaved, inp, getAllInstances, formColor, fmtDate,
 } from '../globals.js';
 import { Btn, OBtn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
+import { MiniCalendar } from './TaskManager.jsx';
 import SOPViewer from './SOPViewer.jsx';
 import SOPEditor from './SOPEditor.jsx';
 import ImportSopButton from './SOPImporter.jsx';
@@ -58,13 +59,93 @@ function SOPCard({ sop, category, onOpen }) {
  * is called when a mention/backlink points somewhere this library can't show
  * in place (a document of the other kind, or a Playbook section) so the
  * host (App.jsx) can switch nav sections. */
-function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind = "sop", onNavigateOut, onOpenTasks }) {
+/* ─── View Filled Forms (R4 C+) ─────────────────────────────────────
+   Browse every submission: month calendar on the left with per-form
+   colored dots on dates that have submissions; clicking a date lists that
+   day's submissions on the right. "Show all forms" swaps to a flat
+   newest-first list. Clicking any row opens that submission. */
+function SubmissionRow({ sub, form, onOpen }) {
+  return (
+    <button onClick={onOpen}
+      style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", textAlign: "left", width: "100%" }}>
+      <span style={{ width: 10, height: 10, borderRadius: 99, background: formColor(sub.docId), flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{form?.title || "Deleted form"}</div>
+        <div style={{ fontSize: 12, color: C.mut }}>
+          {fmtDate(sub.startedAt)} · {sub.status === "submitted" ? `submitted by ${sub.completedBy || sub.startedBy || "unknown"}` : `started by ${sub.startedBy || "unknown"}`}
+        </div>
+      </div>
+      <Pill color={sub.status === "submitted" ? C.moss : C.clay}>{sub.status === "submitted" ? "Submitted" : "In progress"}</Pill>
+    </button>
+  );
+}
+
+function FormBrowse({ forms, onOpenSubmission }) {
+  const subs = getAllInstances().filter(i => i.docKind === "form")
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+  const [showAll, setShowAll] = useState(false);
+  const [selDate, setSelDate] = useState(null);
+  const formOf = (sub) => forms.find(f => f.id === sub.docId);
+
+  // per-form colored dots, one set per date (deduped by form)
+  const dots = {};
+  subs.forEach(s => {
+    if (!s.date) return;
+    const col = formColor(s.docId);
+    dots[s.date] = dots[s.date] || [];
+    if (!dots[s.date].includes(col)) dots[s.date].push(col);
+  });
+
+  const dayList = selDate ? subs.filter(s => s.date === selDate) : [];
+
+  if (subs.length === 0) {
+    return <EmptyState icon="inventory" title="No filled forms yet" sub={'Open a form and hit "Fill out" — submissions collect here.'} />;
+  }
+  return (
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <OBtn onClick={() => setShowAll(a => !a)}>
+          <Icon name={showAll ? "calendar_month" : "list"} size={15} />{showAll ? "Back to calendar" : `Show all forms (${subs.length})`}
+        </OBtn>
+      </div>
+      {showAll ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 640 }}>
+          {subs.map(s => <SubmissionRow key={s.id} sub={s} form={formOf(s)} onOpen={() => onOpenSubmission(s)} />)}
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 28, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ flex: "0 0 300px", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: 16 }}>
+            <MiniCalendar value={selDate} onSelect={setSelDate} dots={dots} />
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+              {forms.filter(f => subs.some(s => s.docId === f.id)).map(f => (
+                <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: C.mut }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 99, background: formColor(f.id), flexShrink: 0 }} />{f.title || "Untitled"}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: "1 1 320px", minWidth: 280 }}>
+            {!selDate && <div style={{ fontSize: 14, color: C.mut, paddingTop: 8 }}>Pick a date with dots to see that day's submissions.</div>}
+            {selDate && dayList.length === 0 && <div style={{ fontSize: 14, color: C.mut, paddingTop: 8 }}>No submissions on {selDate}.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {dayList.map(s => <SubmissionRow key={s.id} sub={s} form={formOf(s)} onOpen={() => onOpenSubmission(s)} />)}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SOPLibrary({ user, focusId, focusMode, focusBlockId, focusSubId, onClearFocus, kind = "sop", onNavigateOut, onOpenTasks }) {
   const [refresh, setRefresh] = useState(0);
   const [activeCat, setActiveCat] = useState("all");
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState(null);
   const [mode, setMode] = useState("view"); // "view" | "edit"
   const [scrollBlk, setScrollBlk] = useState(null); // magnet deep-anchor (blk id)
+  const [browse, setBrowse] = useState(false);   // Forms: "View filled forms" mode
+  const [subId, setSubId] = useState(null);      // submission to open in the viewer
   const [creating, setCreating] = useState(null);
   const [sort, setSort] = useState("updated");
   const [showArchived, setShowArchived] = useState(false);
@@ -77,8 +158,8 @@ function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind
   // Deep-link: a Task Manager "Related SOP" link or a magnet can request a
   // specific SOP open (optionally scrolled to one block).
   useEffect(() => {
-    if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); setScrollBlk(focusBlockId || null); onClearFocus && onClearFocus(); }
-  }, [focusId, focusMode, focusBlockId, onClearFocus]);
+    if (focusId) { setOpenId(focusId); setMode(focusMode || "view"); setScrollBlk(focusBlockId || null); setSubId(focusSubId || null); onClearFocus && onClearFocus(); }
+  }, [focusId, focusMode, focusBlockId, focusSubId, onClearFocus]);
 
   // A mention/backlink/magnet click: same-kind documents open in place;
   // anything else (the other kind, Playbook, a task) bubbles up to App.jsx.
@@ -121,7 +202,7 @@ function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind
   }
 
   if (openSop && mode === "view") {
-    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => setOpenId(null)} onEdit={() => setMode("edit")} onNavigate={handleNavigate} onOpenTasks={onOpenTasks} scrollToBlock={scrollBlk} onScrolled={() => setScrollBlk(null)} />;
+    return <SOPViewer sop={openSop} user={user} canEditSop={canEdit(user)} onClose={() => { setOpenId(null); setSubId(null); }} onEdit={() => setMode("edit")} onNavigate={handleNavigate} onOpenTasks={onOpenTasks} scrollToBlock={scrollBlk} onScrolled={() => setScrollBlk(null)} openSubmissionId={subId} />;
   }
 
   const newDoc = () => defSOP(activeCat !== "all" && activeCat !== "none" ? activeCat : "", kind);
@@ -131,18 +212,32 @@ function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind
       <SectionHeader
         title={isForm ? "Forms" : "SOP Library"}
         sub={`${sops.length} ${isForm ? "form" : "procedure"}${sops.length === 1 ? "" : "s"}`}
-        right={canEdit(user) && (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <OBtn onClick={() => { const n = seedStandardSections(); if (n) triggerSaved(); bump(); }} title="Add the 12 standard Green Kiss sections as categories, if missing">
-              <Icon name="playlist_add" size={16} />Load standard sections
-            </OBtn>
-            <ImportSopButton onImported={({ title, blocks }) => setCreating({ ...newDoc(), title, blocks })} />
-            <Btn onClick={() => setCreating(newDoc())}>
-              <Icon name="add" size={17} />New {isForm ? "Form" : "SOP"}
-            </Btn>
+        right={(
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            {isForm && (
+              <OBtn onClick={() => setBrowse(b => !b)} style={browse ? { borderColor: C.moss, color: C.moss, background: C.mossSoft } : undefined}>
+                <Icon name={browse ? "grid_view" : "inventory"} size={15} />{browse ? "Back to forms" : "View filled forms"}
+              </OBtn>
+            )}
+            {canEdit(user) && (
+              <>
+                <OBtn onClick={() => { const n = seedStandardSections(); if (n) triggerSaved(); bump(); }} title="Add the 12 standard Green Kiss sections as categories, if missing">
+                  <Icon name="playlist_add" size={16} />Load standard sections
+                </OBtn>
+                <ImportSopButton onImported={({ title, blocks }) => setCreating({ ...newDoc(), title, blocks })} />
+                <Btn onClick={() => setCreating(newDoc())}>
+                  <Icon name="add" size={17} />New {isForm ? "Form" : "SOP"}
+                </Btn>
+              </>
+            )}
           </div>
         )}
       />
+
+      {isForm && browse ? (
+        <FormBrowse forms={allSops} onOpenSubmission={s => { setSubId(s.id); setOpenId(s.docId); setMode("view"); }} />
+      ) : (
+      <>
 
       <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative", flex: "1 1 260px", maxWidth: 380 }}>
@@ -208,6 +303,8 @@ function SOPLibrary({ user, focusId, focusMode, focusBlockId, onClearFocus, kind
               onOpen={() => { setOpenId(s.id); setMode("view"); }} />
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

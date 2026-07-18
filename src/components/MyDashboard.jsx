@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   C, FONT_CAPS, getTheme, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
   getContentItems, updateContentItem, getCampaigns, contentChannelMeta, getTags,
-  getAlerts, deleteAlert, fmtDate,
+  getAlerts, deleteAlert, fmtDate, getAllInstances, formColor,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
 import { Icon, IconBtn } from './shared.jsx';
@@ -12,16 +12,16 @@ import gkLogo from '../assets/gk-logo.svg';
 
 /* Design intent: this is the first thing staff see after logging in —
    mid-shift, glancing between customers. It reads like a hand-written
-   morning list, not a BI dashboard: four quiet groups (Overdue, Today,
-   This Week, Later), a rose header only where something is actually
-   overdue, and a light "my projects" shelf underneath. Nothing here
-   aggregates the team — it's always scoped to the one person looking. */
+   morning list, not a BI dashboard: two quiet groups (Today's Tasks =
+   overdue + due today, Assigned Tasks = everything else open), a rose
+   header only where something is actually overdue, then "my projects"
+   and "my forms" shelves underneath. Nothing here aggregates the team —
+   it's always scoped to the one person looking. */
 
-const GROUPS = [
-  { key: "overdue", label: "Overdue", accent: true },
-  { key: "today", label: "Due Today" },
-  { key: "week", label: "This Week" },
-  { key: "later", label: "Later / No Date" },
+// R4 E — display sections built from the classify() buckets.
+const DASH_SECTIONS = [
+  { key: "today", label: "Today's Tasks", buckets: ["overdue", "today"], icon: "today" },
+  { key: "assigned", label: "Assigned Tasks", buckets: ["week", "later"] },
 ];
 
 function classify(dueDate, done) {
@@ -70,13 +70,15 @@ function ItemRow({ item, onToggle, onOpen }) {
 function ItemGroup({ group, items, onToggle, onOpen }) {
   if (items.length === 0) return null;
   const accent = group.accent;
+  const color = accent ? C.red : (group.key === "today" ? C.moss : C.txt2);
+  const icon = accent ? "error" : group.icon;
   return (
     <div>
       <div style={{
         fontSize: 12, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
-        color: accent ? C.red : C.txt2, marginBottom: 9, display: "flex", alignItems: "center", gap: 6,
+        color, marginBottom: 9, display: "flex", alignItems: "center", gap: 6,
       }}>
-        {accent && <Icon name="error" size={14} />}
+        {icon && <Icon name={icon} size={14} />}
         {group.label} <span style={{ color: C.faint, fontWeight: 500 }}>({items.length})</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -125,7 +127,7 @@ function AlertsStrip({ alerts, tasks, users, onDismiss, onOpenTask }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent }) {
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -184,8 +186,13 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
 
   const allItems = [...myTaskItems, ...mySubtaskItems, ...myContentItems];
 
-  const byGroup = (key) => allItems.filter(i => i.group === key)
+  const bySection = (sec) => allItems.filter(i => sec.buckets.includes(i.group))
     .sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+
+  // R4 E — in-progress form submissions I started, linking into fill mode.
+  const myForms = getAllInstances()
+    .filter(i => i.docKind === "form" && i.status === "in_progress" && i.startedBy === user.name)
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
 
   const toggleItem = (item) => {
     if (item.kind === "task") {
@@ -249,14 +256,16 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 26, marginBottom: 34 }}>
-          {GROUPS.map(g => (
-            <ItemGroup key={g.key} group={g} items={byGroup(g.key)} onToggle={toggleItem} onOpen={openItem} />
-          ))}
+          {DASH_SECTIONS.map(sec => {
+            const items = bySection(sec);
+            const accent = sec.key === "today" && items.some(i => i.group === "overdue");
+            return <ItemGroup key={sec.key} group={{ ...sec, accent }} items={items} onToggle={toggleItem} onOpen={openItem} />;
+          })}
         </div>
       )}
 
       {myProjects.length > 0 && (
-        <div>
+        <div style={{ marginBottom: 34 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>My Projects</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
             {myProjects.map(p => (
@@ -266,8 +275,41 @@ function MyDashboard({ user, onOpenProject, onOpenContent }) {
         </div>
       )}
 
+      {myForms.length > 0 && (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>My Forms <span style={{ color: C.faint, fontWeight: 500 }}>— in progress</span></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxWidth: 640 }}>
+            {myForms.map(f => {
+              const doc = sops.find(s => s.id === f.docId);
+              return (
+                <div key={f.id} onClick={() => onOpenSubmission && onOpenSubmission(f.docId, f.id)} role="button" tabIndex={0}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSubmission && onOpenSubmission(f.docId, f.id); } }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10,
+                    background: C.sur, border: `1.5px solid ${C.bdr}`, cursor: "pointer", transition: "border-color .15s",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
+                  <span style={{ width: 10, height: 10, borderRadius: 99, background: formColor(f.docId), flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc?.title || "Deleted form"}</div>
+                    <div style={{ fontSize: 12, color: C.mut, marginTop: 1 }}>Started {fmtDate(f.startedAt)}</div>
+                  </div>
+                  <Icon name="edit_note" size={17} style={{ color: C.mut, flexShrink: 0 }} title="Continue filling out" />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {modal && (
         <TaskModal initial={modal.task} isNew={false} users={users} sops={sops} projects={projects} tags={getTags()}
+          nav={{
+            goToSop: (id, blockId) => onNavigateOut && onNavigateOut("sop", id, blockId),
+            goToTask: (id) => { const t = tasks.find(x => x.id === id); if (t) setModal({ task: { ...t }, isNew: false }); },
+            goToPlaybookSection: (id) => onNavigateOut && onNavigateOut("playbook", id),
+          }}
           onSave={saveModal} onDelete={deleteModal} onClose={() => setModal(null)} />
       )}
     </div>

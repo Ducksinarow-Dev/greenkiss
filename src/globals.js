@@ -34,7 +34,7 @@
  * @typedef {{id:string,type:"links",title?:string,links:LinkItem[]}} LinksBlock
  * @typedef {{id:string,type:"image",src:string,caption:string}} ImageBlock
  * @typedef {{id:string,text:string,value?:string,url?:string}} ListItem
- * @typedef {{id:string,type:"list",style:"bulleted"|"numbered",withEntry?:boolean,checkboxes?:boolean,items:ListItem[]}} ListBlock
+ * @typedef {{id:string,type:"list",style:"plain"|"bulleted"|"numbered",withEntry?:boolean,checkboxes?:boolean,items:ListItem[]}} ListBlock plain+withEntry renders as a bold-label "Date Received: ___" form slot
  * @typedef {{id:string,type:"completion"}} CompletionBlock
  * @typedef {{id:string,type:"index"}} IndexBlock
  * @typedef {{id:string,type:"checklist",title:string,items:ChecklistItem[]}} ChecklistBlock legacy — normalized to a checkbox ListBlock on read (asListBlock)
@@ -109,6 +109,7 @@
  * @property {string[]} [tagIds] (#8)
  * @property {Recurrence} [recurrence] (#8) defaults to "none" when absent
  * @property {string[]} [favouritedBy] user ids who've starred this task (#9)
+ * @property {{id:string, label:string, url:string}[]} [links] (R4 D2) web or gk: magnet links
  * @property {boolean} [archived] (#9) hidden from board + dashboard when true
  * @property {string} createdAt
  * @property {number} [order]
@@ -898,9 +899,9 @@ const defSOP = (categoryId = "", kind = "sop") => ({
   kind,
   code: "",
   typePrefix: "",
-  // New docs open with an index block at the top (auto-builds a TOC from
-  // headings + numbered blocks as content is added; deletable if unwanted).
-  blocks: [{ id: uid(), type: "index" }],
+  // New SOPs open with an index block at the top (auto-builds a TOC from
+  // headings + numbered blocks; deletable). Forms don't need indexes (R4).
+  blocks: kind === "form" ? [] : [{ id: uid(), type: "index" }],
   createdAt: nowISO(),
   updatedAt: nowISO(),
   updatedBy: getCurrentUser()?.name || "",
@@ -1089,6 +1090,37 @@ const todayLocalISO = () => {
 const getTodayInstance = (docId) => {
   const today = todayLocalISO();
   return getInstances(docId).find(i => i.date === today) || null;
+};
+
+/* Form submissions (R4): a submission is an instance of a form — dated,
+   attributed, snapshotting the template so later template edits never
+   rewrite records. `values[blockId]` holds per-block fill state, `notes`
+   per-block freeform notes (addable before AND after submitting), and
+   `editLog` the non-editable post-submission change history. */
+function newSubmission(sop, user) {
+  return addInstance({
+    docId: sop.id, docKind: "form", date: todayLocalISO(),
+    blocksSnapshot: JSON.parse(JSON.stringify(sop.blocks || [])),
+    startedBy: user?.name || "", startedAt: nowISO(),
+    status: "in_progress", values: {}, notes: {}, editLog: [],
+  });
+}
+/** Appends an edit-log entry when a SUBMITTED record is changed — deduped
+ * so one editing session (same user, same minute) is one log line. */
+function stampEditLog(inst, user) {
+  if (inst.status !== "submitted") return inst.editLog || [];
+  const log = inst.editLog || [];
+  const by = user?.name || "";
+  const at = nowISO();
+  const last = log[log.length - 1];
+  if (last && last.by === by && at.slice(0, 16) === (last.at || "").slice(0, 16)) return log;
+  return [...log, { by, at }];
+}
+/** Stable per-form color for the submissions calendar dots. */
+const formColor = (formId) => {
+  let h = 0;
+  for (const ch of String(formId)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 };
 
 /* ─── INTERNAL LINKING — mentions + backlinks (Phase 3) ───────────────
@@ -1668,7 +1700,7 @@ function convertTaskToSubtask(task, targetTask) {
 }
 const emptyTaskShape = () => ({
   title: "", description: "", status: "todo", priority: "medium", type: "task",
-  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [], tagIds: [], recurrence: "none",
+  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [], tagIds: [], recurrence: "none", links: [],
 });
 
 /** Favourited-by-this-user tasks sort first, then priority (urgent→low),
@@ -2045,6 +2077,7 @@ export {
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, deleteInstance, getTodayInstance, todayLocalISO,
+  newSubmission, stampEditLog, formColor,
   parseMentionText, getMentionCandidates, findBacklinks,
   getPlaybook, savePlaybook, seedPlaybookIfEmpty,
   getRevisions, getRevision, restoreRevision,
