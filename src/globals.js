@@ -1329,6 +1329,84 @@ function addPlaybookRev(label = "") {
   db.setSync("playbookRevs", [entry, ...revs].slice(0, 20));
 }
 
+/* ─── IMAGE REPOSITORY ────────────────────────────────────────────────
+   Alphabetical directory of vendor image repositories (recreates
+   team.thegreenkiss.com). One kv doc {blocks:[…]}, generic kv path, no
+   backend changes — same shape as the playbook. Each block is either a
+   brand "title" (text + external link) or a free "text" note; every block
+   carries a `letter` used to group A–Z. `letterOf` defaults an unset
+   letter to the title's first letter (non-A–Z falls in the "#" group). */
+const getImageRepo = () => db.getSync("imagerepo") || null;
+const saveImageRepo = (doc) => db.setSync("imagerepo", doc);
+const letterOf = (b) => {
+  if (b && b.letter) return b.letter;
+  const c = ((b && b.text) || "").trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(c) ? c : "#";
+};
+
+/* Seed = the real vendor list migrated from the live site. Sub-collections
+   (a vendor with more than one gallery) become their own "Vendor — Name"
+   title rows under the same letter, honoring the page's "only title-with-
+   link + text" block model. Editable/deletable after seeding. */
+function seedImageRepoIfEmpty() {
+  if (getImageRepo()) return false;
+  const rows = [
+    ["A", "All Good", "https://www.dropbox.com/scl/fo/dt1s0fy7b1b53q9g5fsb6/AOX9ooia67yjZ8hM_jTn33o"],
+    ["B", "Bathorium", "https://drive.google.com/drive/folders/1-zt_tmi587p17-yJK7VXhbK3tw8nrvtn"],
+    ["B", "Bathorium — Whole Gallery", "https://drive.google.com/drive/u/0/folders/1Brl6-Oao1i9x6y83_hUc-WzIjLn21uVj"],
+    ["B", "Bathorium — Product Imagery", "https://drive.google.com/drive/u/0/folders/1q9Ql3tvMZ1xw9gSlBQq7zACWthwI8sea"],
+    ["B", "Blue Lizard Sunscreen", "https://www.dropbox.com/scl/fo/e5lgk3hlfhevzca56wuqt/AJj2jkRS-G8asZG5WTWc1N0"],
+    ["C", "Cardideology", "https://www.dropbox.com/scl/fo/f6ckfx7u14zp9h124vm0q/AHFqtwXPc5Kg0XeYhErVeyE"],
+    ["C", "Chelsea King", "https://www.dropbox.com/scl/fo/u3ny7o4664dwt96b4328m/AC025zF98bnueEocWRtLiGE"],
+    ["C", "Clear Choice", "https://www.dropbox.com/scl/fo/53rlcbpf43qn9izv3ryfy/ADEx2yyl2Yt8Lb4Qr8zEUNg"],
+    ["C", "Come Clean", "https://www.dropbox.com/scl/fo/vc538ddmq35s0cl4le41q/AMab6Dr1cUDF5ghaVBN8LeQ"],
+    ["C", "CV Skinlabs", "https://www.dropbox.com/scl/fo/fmhjv62b3k7ix1fb9ja4n/AJVlkZIJO_zBGCxgEXldn7U"],
+    ["D", "DermaE", "https://www.dropbox.com/scl/fo/x5b1i99xb51dhpd9hpc7t/AI5pZsBvtAROamvzNoXNWfI"],
+    ["F", "Fitglow", "https://www.dropbox.com/scl/fo/seyh36ryknhtpxd5pbcx9/ACXqmxNAKNyP9lBjegKlp98"],
+    ["G", "Glow Jar", "https://drive.google.com/drive/folders/1qbK3AZFLxsNu5hHfo2iwu0HS45dYV1Tw"],
+    ["G", "Glow Jar — Second Image Collection", "https://photos.google.com/share/AF1QipNwvJr3JhmTZfumwwiHnW5vpfe9S0UmAE1nS_0tg3Mq"],
+    ["G", "GJB Lifestyle Images", "https://photos.app.goo.gl/bKvajrwEzSJ3Erjr9"],
+    ["G", "GJB E-comm Images", "https://photos.app.goo.gl/ouknFmXsiukANWBN6"],
+    ["H", "Helena Lane", "https://www.dropbox.com/scl/fo/xlmgpqwigg325yelyx0k0/AK6u7_DyL3xPuN1YpHuTBz0"],
+    ["H", "High-End Hippie", "https://photos.google.com/share/AF1QipMwdEqGPBuWCfsC0LlRUhv1YpsYo5BTsFt72-FGFCEV"],
+    ["H", "High-End Hippie — Second Image Collection", "https://photos.google.com/share/AF1QipOMGIgum4hNPU6Ka7OmXyjYpf0JYxoH1odlX1_MfFQN"],
+    ["H", "Honey Candles", "https://www.dropbox.com/scl/fo/19jptapd5vic2ft6bz958/AGyZChC69bby9st76i8s7wQ"],
+    ["H", "Honey Candles — Seasonal Lifestyle", "https://www.dropbox.com/scl/fo/iitul2r5m6hconp5zfm5p/AFjztkA_6ZJerZx-14_Kh68"],
+    ["H", "Huna", "https://www.dropbox.com/scl/fo/ep42foord7vf9j2zqogkw/AAlhogYTfVsStNm-Zjeqk6U"],
+    ["H", "Hygge", "https://drive.google.com/drive/folders/1lwqQQganb79NYr_epppXkaL4BFXDxXql"],
+    ["I", "Indie Lee", "https://www.dropbox.com/scl/fo/56u8vma2nwe5g5nahr2lt/AK5qmjgrhrI6JPC0YrDPqeI"],
+    ["I", "Innersense", "https://www.dropbox.com/scl/fo/pczv71lsn3wc3cnm07nxb/ANiNSYqHmym3soxke34sKEk"],
+    ["J", "Joni", "https://drive.google.com/drive/folders/1tAgII3srN0kEbemmspezQy9M1-wpBEOl"],
+    ["J", "Josh Rosebrook", "https://joshrosebrookwholesale.com/pages/assets-education"],
+    ["J", "JustSun", "https://www.dropbox.com/scl/fo/wrni064tye7yr121se3v9/ADgmLeiGSR2mMTg3fTdWgww"],
+    ["K", "Kaia", "https://www.dropbox.com/scl/fo/ca63x9ot2svutznxcdaur/AAojR_ArwagD8bGR1VPkk4g"],
+    ["K", "Karite", "https://drive.google.com/drive/folders/18riUlYNgKNETqV49NL03p2r-V7QOWI87"],
+    ["L", "LaSpa", "https://drive.google.com/drive/folders/1btjsnV-9Sxf6WCM6dsMv4vyWO2oQ_Naw"],
+    ["L", "Lavoh", "https://drive.google.com/drive/folders/1z6PnwtP_IVzW8cNHrA6j06SIF071oOaY"],
+    ["M", "Mad Hippie", "https://www.dropbox.com/scl/fo/py3culbfbcuupnn20kfjz/AJHUJMIVnpDEUx6IXD2KuFE"],
+    ["M", "MIFA", "https://www.dropbox.com/scl/fo/7t0owpfamlx6blzcz9v07/AJmu0rxRe-x3o2-p8aLI35o"],
+    ["M", "Mulberry Skincare", "https://www.dropbox.com/scl/fo/gkkwhzc46e5lundbozvkd/AKXKJ5d47rU3TlnQfSntjVI"],
+    ["M", "Mushroom Envy", "https://www.dropbox.com/scl/fo/sf5pigiw5qhlb9fzy0u8f/ADGMT5HeMkj8NgITVkzntio"],
+    ["M", "My Daughter Fragrances", "https://www.dropbox.com/scl/fo/kpg9z9ouj515qn6pytuyk/AIq2iL4xPUj6tLk_Xpeza8I"],
+    ["N", "Nala", "https://drive.google.com/drive/u/0/folders/12ZqZ7wXnraxrtZ42EHi1Xq1zRNjz7l9w"],
+    ["O", "Orgaid", "https://www.dropbox.com/scl/fo/vmnd2t6c4ftnyhocx6xku/AEM2aClsgMrtRVzlw9yLDb4"],
+    ["P", "100% Pure", "https://toolbox.puritycosmetics.com/partners/login.php"],
+    ["P", "Plume", "https://www.dropbox.com/scl/fo/zqvldwi6eddoiha25it2y/AO8Q0ESJ2dsGl6DBOwYODSs"],
+    ["S", "Sappho New Paradigm", "https://www.dropbox.com/scl/fo/iqqx5njpv3np7s2uwari3/APbxPXfWCmH0dc-eHVMPoDQ"],
+    ["S", "Skwalwen Botanicals", "https://photos.google.com/share/AF1QipMB0yCR4kic223D_c10HwipZniAxDGBujhrEjVHXpr-"],
+    ["S", "Smudge Sisters", "https://www.dropbox.com/scl/fo/oym2qe10luklya688a401/AEuO_hvmTXdSf8TME8l7Moo"],
+    ["S", "Sunna Tan", "https://sunnapro.com/en-ca/pages/free-marketing"],
+    ["S", "Suntegrity", "https://www.dropbox.com/sh/ri44wbanq73bivo/AAChbO9IFZ_FfFw7rTtzqXnga"],
+    ["T", "The Bathologist", "https://drive.google.com/drive/folders/16v7XfAvI0Kf48udSCDPwGpzEx_xSXBlJ"],
+    ["T", "Tok Beauty", "https://www.dropbox.com/scl/fo/584buuvvc68vmwblczksl/ACgVvA959kfQLeXrhnaP4ME"],
+    ["U", "Urban Spa", "https://www.dropbox.com/scl/fo/o98k5672xn3diz4tohrhr/ABd-uQkFSBtMrT8KjBD1m7U"],
+    ["V", "Viva", "https://drive.google.com/drive/folders/164GeLX_SnjlrKdSSF8myAJBHklJJgMn1"],
+    ["W", "Wyld Skincare", "https://drive.google.com/drive/folders/1UhiGIeghtxUucdxB3EUKW84ZlNCqg_DS"],
+  ];
+  saveImageRepo({ blocks: rows.map(([letter, text, url]) => ({ id: uid(), type: "title", text, url, letter })) });
+  return true;
+}
+
 const _mk = (title, blocks) => ({ id: uid(), title, blocks });
 const _txt = (t) => ({ id: uid(), type: "text", text: t });
 const _head = (t, d = "") => ({ id: uid(), type: "heading", text: t, description: d });
@@ -2080,6 +2158,7 @@ export {
   newSubmission, stampEditLog, formColor,
   parseMentionText, getMentionCandidates, findBacklinks,
   getPlaybook, savePlaybook, seedPlaybookIfEmpty,
+  getImageRepo, saveImageRepo, seedImageRepoIfEmpty, letterOf,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,

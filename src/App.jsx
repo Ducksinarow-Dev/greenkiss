@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
 import OperationsPlaybook from './components/OperationsPlaybook.jsx';
+import ImageRepository from './components/ImageRepository.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
@@ -93,6 +94,7 @@ function App() {
         {section === "forms" && (
           <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} focusSubId={sopFocus?.subId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
+        {section === "imagerepo" && <ImageRepository user={user} />}
         {section === "playbook" && (
           <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} onNavigateOut={onNavigateOut} />
         )}

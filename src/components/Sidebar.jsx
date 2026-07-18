@@ -15,6 +15,8 @@ const NAV_ITEMS = [
   { divider: true },
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "forms", label: "Forms", icon: "description" },
+  { key: "imagerepo", label: "Image Repository", icon: "perm_media" },
+  { divider: true },
   { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
 ];
 

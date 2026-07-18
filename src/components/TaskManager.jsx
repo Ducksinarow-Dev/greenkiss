@@ -870,6 +870,7 @@ function TaskCard({ task, users, sops, projects, tags, templates, allTasks, curr
             <div style={{ display: "flex", gap: 6 }}>
               <input autoFocus value={subInput} onChange={e => setSubInput(e.target.value)} placeholder="New subtask…"
                 onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitAddSub(); } if (e.key === "Escape") setAddingSub(false); }}
+                onBlur={submitAddSub}
                 style={inp({ fontSize: 13, padding: "6px 9px" })} />
               <Btn onClick={submitAddSub} style={{ padding: "6px 12px", fontSize: 12 }}>Add</Btn>
             </div>
