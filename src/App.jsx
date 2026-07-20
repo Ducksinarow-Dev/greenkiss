@@ -6,6 +6,7 @@ import MyDashboard from './components/MyDashboard.jsx';
 import SOPLibrary from './components/SOPLibrary.jsx';
 import OperationsPlaybook from './components/OperationsPlaybook.jsx';
 import ImageRepository from './components/ImageRepository.jsx';
+import ToolsPromptsRepository from './components/ToolsPromptsRepository.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
@@ -95,12 +96,13 @@ function App() {
           <SOPLibrary user={user} kind="form" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} focusSubId={sopFocus?.subId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}
         {section === "imagerepo" && <ImageRepository user={user} />}
+        {section === "toolsprompts" && <ToolsPromptsRepository user={user} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "playbook" && (
           <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} onNavigateOut={onNavigateOut} />
         )}
         {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} onNavigateOut={onNavigateOut} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
-        {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} onClearFocus={() => setContentFocus(null)} />}
+        {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} onClearFocus={() => setContentFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />

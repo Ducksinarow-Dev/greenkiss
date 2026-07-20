@@ -1407,6 +1407,37 @@ function seedImageRepoIfEmpty() {
   return true;
 }
 
+/* ─── TOOLS & PROMPTS REPOSITORY ──────────────────────────────────────
+   Flat list of team tools and reusable prompts. One generic kv doc
+   {items:[{id,type:"tool"|"prompt",title,body,url,tags,createdAt}]} —
+   same zero-backend pattern as the image repo / playbook. */
+const getToolsPrompts = () => db.getSync("toolsPrompts") || { items: [] };
+const saveToolsPrompts = (doc) => db.setSync("toolsPrompts", doc);
+
+/* ─── OMNISEND (email metrics) ────────────────────────────────────────
+   The API key lives server-side; these just proxy through api.php so it
+   never reaches the client. Both throw on failure (callers await + toast). */
+async function fetchOmnisendCampaigns() {
+  if (!REMOTE_MODE) return []; // ponytail: dev has no server proxy; UI falls back to manual fields
+  const res = await apiCall("omnisend_campaigns_list", { method: "GET" });
+  return res.campaigns || [];
+}
+async function fetchOmnisendCampaignStats(id) {
+  const res = await apiCall("omnisend_campaign_stats", { method: "GET", query: { id } });
+  return res.stats || null; // {opens,clicks,revenue}
+}
+
+/* ─── GOOGLE CALENDAR ICS SUBSCRIBE FEED ──────────────────────────────
+   Each staffer gets one stable token; they add the feed URL once in
+   Google Calendar (From URL) and it auto-refreshes. */
+async function getIcsSubscribeUrl() {
+  if (!REMOTE_MODE) return ""; // dev has no persistent server feed
+  const res = await apiCall("ics_token_get", { method: "GET" });
+  if (!res.token) return "";
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/${API_BASE}?action=calendar_feed&token=${encodeURIComponent(res.token)}`;
+}
+
 const _mk = (title, blocks) => ({ id: uid(), title, blocks });
 const _txt = (t) => ({ id: uid(), type: "text", text: t });
 const _head = (t, d = "") => ({ id: uid(), type: "heading", text: t, description: d });
@@ -1967,7 +1998,7 @@ const deleteCampaign = (id) => {
 };
 const defCampaign = () => ({
   id: uid(), name: "", description: "", startDate: "", endDate: "",
-  status: "planning", color: C.moss, createdAt: nowISO(),
+  status: "planning", color: C.moss, assigneeIds: [], createdAt: nowISO(),
 });
 
 /* ─── CONTENT ITEM STORAGE ───────────────────────────────────────── */
@@ -2001,6 +2032,8 @@ const defContentItem = (channel = "gbp") => ({
   targetKeyword: "", url: "",
   subjectLine: "", previewText: "",
   caption: "", hashtags: "",
+  metrics: { likes: "", shares: "", clicks: "", saves: "", sales: "" },
+  omnisendCampaignId: "", omnisendStats: null, // email only; {opens,clicks,revenue,fetchedAt}
   createdAt: nowISO(), updatedAt: nowISO(),
 });
 
@@ -2159,6 +2192,8 @@ export {
   parseMentionText, getMentionCandidates, findBacklinks,
   getPlaybook, savePlaybook, seedPlaybookIfEmpty,
   getImageRepo, saveImageRepo, seedImageRepoIfEmpty, letterOf,
+  getToolsPrompts, saveToolsPrompts,
+  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,

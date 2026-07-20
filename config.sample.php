@@ -37,3 +37,9 @@ define('CPANEL_HOST', 'mi3-tr2.supercp.com'); // cPanel access hostname for :208
 define('CPANEL_USERNAME', 'hubthegreenkiss');
 define('CPANEL_API_TOKEN', 'PASTE_A_REAL_TOKEN_HERE'); // cPanel → Security → Manage API Tokens
 define('CPANEL_REPO_PATH', '/home/hubthegreenkiss/repositories/greenkiss');
+
+// ── Omnisend (Content Calendar → email metrics) ─────────────────────────
+// API key from Omnisend → Store settings → Integrations & API → API keys.
+// Leave as the placeholder and the email-metrics buttons return a clear
+// "not configured" error instead of a fatal. Key stays server-side only.
+define('OMNISEND_API_KEY', 'PASTE_A_REAL_OMNISEND_API_KEY_HERE');

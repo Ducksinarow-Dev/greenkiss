@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved } from '../globals.js';
+import React, { useState, useEffect } from 'react';
+import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved, triggerToast, getIcsSubscribeUrl } from '../globals.js';
 import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { key: "library", label: "SOP Library", icon: "menu_book" },
   { key: "forms", label: "Forms", icon: "description" },
   { key: "imagerepo", label: "Image Repository", icon: "perm_media" },
+  { key: "toolsprompts", label: "Tools & Prompts", icon: "auto_awesome" },
   { divider: true },
   { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
 ];
@@ -91,6 +92,54 @@ function ChangePinModal({ onClose }) {
   );
 }
 
+function CalendarSyncModal({ onClose }) {
+  const [url, setUrl] = useState("");
+  const [state, setState] = useState("loading"); // loading | ready | unavailable
+  useEffect(() => {
+    let alive = true;
+    getIcsSubscribeUrl()
+      .then(u => { if (alive) { setUrl(u); setState(u ? "ready" : "unavailable"); } })
+      .catch(() => { if (alive) setState("unavailable"); });
+    return () => { alive = false; };
+  }, []);
+  const copy = () => {
+    try { navigator.clipboard.writeText(url); triggerToast("Calendar link copied"); } catch {}
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 600, padding: 20 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
+        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
+        width: "100%", maxWidth: 440, padding: 26, display: "flex", flexDirection: "column", gap: 14,
+      }}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>Sync to Google Calendar</div>
+          <IconBtn icon="close" title="Close" onClick={onClose} />
+        </div>
+        {state === "loading" && <div style={{ fontSize: 13, color: C.mut }}>Preparing your calendar link…</div>}
+        {state === "unavailable" && (
+          <div style={{ fontSize: 13, color: C.mut, lineHeight: 1.6 }}>
+            Calendar sync is only available on the live site (it needs the server to generate your feed). It won't work in local development.
+          </div>
+        )}
+        {state === "ready" && (
+          <>
+            <div style={{ fontSize: 13, color: C.mut, lineHeight: 1.6 }}>
+              Content items assigned to you (or on a campaign you're on) show up in Google Calendar. Add this once:
+              Google Calendar → <b>Other calendars</b> + → <b>From URL</b> → paste the link below.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input readOnly value={url} onFocus={e => e.target.select()}
+                style={{ flex: 1, minWidth: 0, background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9, padding: "9px 11px", fontSize: 12, color: C.txt, outline: "none", fontFamily: "'IBM Plex Mono',monospace" }} />
+              <Btn type="button" onClick={copy}><Icon name="content_copy" size={16} />Copy</Btn>
+            </div>
+            <div style={{ fontSize: 12, color: C.faint }}>Keep this link private — anyone with it can see your assigned content.</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NavButton({ it, active, onClick }) {
   return (
     <button onClick={onClick}
@@ -113,6 +162,7 @@ function NavButton({ it, active, onClick }) {
 
 function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showCalSync, setShowCalSync] = useState(false);
   const theme = getTheme();
 
   return (
@@ -159,6 +209,13 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</div>
           <div style={{ fontSize: 11, color: C.mut, textTransform: "capitalize" }}>{user?.role}</div>
         </button>
+        <button onClick={() => setShowCalSync(true)} title="Sync to Google Calendar"
+          style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}
+          onMouseEnter={e => e.currentTarget.style.background = C.s2}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <Icon name="event_available" size={19} />
+        </button>
         <button onClick={onToggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
           style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}
           onMouseEnter={e => e.currentTarget.style.background = C.s2}
@@ -181,6 +238,7 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
       </div>
 
       {showPinModal && <ChangePinModal onClose={() => setShowPinModal(false)} />}
+      {showCalSync && <CalendarSyncModal onClose={() => setShowCalSync(false)} />}
     </div>
   );
 }

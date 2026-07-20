@@ -47,6 +47,9 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 ### Admin / Ops
 - ~~#13: Rollback to previous release~~ — shipped 2026-07-16, see top of file.
 
+### Content Calendar
+- **#21: Shopify target-sales calculator** — link to Shopify to calculate target sales numbers for day/week/month (added Jul 20 2026 during the Content Calendar expansion). Needs a Shopify custom-app **Admin API access token** (not yet created) created in Shopify admin → Apps → Develop apps when this is picked up; the key must stay server-side (proxy through `api.php`, same pattern as the new `omnisend_*` actions). Out of scope for the expansion pass — that pass covers campaign/email/GBP/metrics/calendar-sync/tools-prompts, with sales metrics entered manually (Omnisend live for email only).
+
 ### AI features — DEFERRED (Hayden, Jul 16 2026: revisit after staff have used the tool and real search/automation needs are clearer)
 - **#11: AI search agent across the whole app** — natural-language search over SOPs/tasks/projects/content.
 - **#12: AI action agent** — natural-language prompts to create/assign/reassign SOPs and tasks, pull from a project or campaign, and generate a presentation-style summary with imagery and links.
