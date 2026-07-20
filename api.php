@@ -60,6 +60,10 @@
  *   GET   release_list                  - admin; local build snapshots (version, commit, date)
  *   POST  release_rollback {name}       - admin; restores a snapshot's files over the live build,
  *                                          snapshotting the current build first so it's itself undoable
+ *   GET   ics_token_get                 - any user; stable per-user token for their calendar feed
+ *   GET   calendar_feed    ?token=      - UNAUTHENTICATED; text/calendar feed of the user's dated content
+ *   GET   omnisend_campaigns_list       - editor/admin; proxied Omnisend campaign list (key stays server-side)
+ *   GET   omnisend_campaign_stats ?id=  - editor/admin; proxied Omnisend stats {opens,clicks,revenue}
  */
 
 header('Content-Type: application/json');
@@ -682,6 +686,95 @@ switch ($action) {
         respond(200, ['ok' => true, 'lastDeploy' => $lastDeploy]);
         break;
 
+    case 'ics_token_get':
+        // Any authenticated user — a stable per-user token for their Google
+        // Calendar subscribe feed. Stored in one kv map {userId: token}.
+        $user = requireAuth($pdo, $body);
+        $tokens = kvGet($pdo, 'icsTokens') ?: [];
+        if (empty($tokens[$user['id']])) {
+            $tokens[$user['id']] = bin2hex(random_bytes(20));
+            kvSet($pdo, 'icsTokens', $tokens);
+        }
+        respond(200, ['token' => $tokens[$user['id']]]);
+        break;
+
+    case 'calendar_feed':
+        // UNAUTHENTICATED on purpose — Google fetches this URL with no headers.
+        // The random token IS the credential; it maps back to one user.
+        $token = (string)($_GET['token'] ?? '');
+        $tokens = kvGet($pdo, 'icsTokens') ?: [];
+        $userId = array_search($token, $tokens, true);
+        if ($token === '' || $userId === false) {
+            http_response_code(404);
+            header('Content-Type: text/plain');
+            echo 'Invalid calendar token';
+            exit;
+        }
+        $items = kvGet($pdo, 'content') ?: [];
+        $campaigns = kvGet($pdo, 'campaigns') ?: [];
+        $campStaff = [];
+        foreach ($campaigns as $c) { $campStaff[$c['id'] ?? ''] = $c['assigneeIds'] ?? []; }
+        $lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Green Kiss//Content Calendar//EN', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Green Kiss Content'];
+        $stamp = gmdate('Ymd\THis\Z');
+        foreach ($items as $it) {
+            $date = $it['publishDate'] ?? '';
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
+            $mine = (($it['assigneeId'] ?? '') === $userId)
+                || in_array($userId, $campStaff[$it['campaignId'] ?? ''] ?? [], true);
+            if (!$mine) continue;
+            $dt = str_replace('-', '', $date);
+            $dtEnd = str_replace('-', '', gmdate('Y-m-d', strtotime($date . ' +1 day')));
+            $summary = icsEscape(($it['title'] ?? 'Untitled') . ' — ' . ($it['channel'] ?? ''));
+            $lines[] = 'BEGIN:VEVENT';
+            $lines[] = 'UID:gk-' . ($it['id'] ?? uniqid()) . '@thegreenkiss';
+            $lines[] = 'DTSTAMP:' . $stamp;
+            $lines[] = 'DTSTART;VALUE=DATE:' . $dt;
+            $lines[] = 'DTEND;VALUE=DATE:' . $dtEnd;
+            $lines[] = 'SUMMARY:' . $summary;
+            if (!empty($it['body'])) $lines[] = 'DESCRIPTION:' . icsEscape($it['body']);
+            $lines[] = 'END:VEVENT';
+        }
+        $lines[] = 'END:VCALENDAR';
+        header('Content-Type: text/calendar; charset=utf-8');
+        header('Content-Disposition: inline; filename="greenkiss.ics"');
+        echo implode("\r\n", $lines);
+        exit;
+
+    case 'omnisend_campaigns_list':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $res = omnisendApiCall('/campaigns');
+        if (!$res['ok']) respond(502, ['error' => $res['error']]);
+        $out = [];
+        foreach (($res['data']['campaigns'] ?? []) as $c) {
+            $out[] = [
+                'id' => $c['campaignID'] ?? ($c['id'] ?? ''),
+                'name' => $c['name'] ?? 'Untitled',
+                'status' => $c['status'] ?? '',
+                'sentAt' => $c['sendAt'] ?? ($c['startDate'] ?? ''),
+            ];
+        }
+        respond(200, ['campaigns' => $out]);
+        break;
+
+    case 'omnisend_campaign_stats':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = basename((string)($_GET['id'] ?? ''));
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        $res = omnisendApiCall('/campaigns/' . rawurlencode($id));
+        if (!$res['ok']) respond(502, ['error' => $res['error']]);
+        // Field names vary by Omnisend plan/version — read defensively. The
+        // proxy is the only place that knows Omnisend's shape.
+        $c = $res['data'] ?? [];
+        $stats = $c['stats'] ?? $c;
+        respond(200, ['stats' => [
+            'opens' => $stats['opened'] ?? ($stats['opens'] ?? 0),
+            'clicks' => $stats['clicked'] ?? ($stats['clicks'] ?? 0),
+            'revenue' => $stats['revenue'] ?? ($stats['sales'] ?? 0),
+        ]]);
+        break;
+
     default:
         respond(404, ['error' => 'Unknown action']);
 }
@@ -804,6 +897,39 @@ function cpanelApiCall($url, $params, $authHeader) {
         // without bloating every successful response.
         'rawExcerpt' => $data === null ? substr((string)$raw, 0, 2000) : null,
     ];
+}
+
+// RFC 5545 text escaping for ICS SUMMARY/DESCRIPTION values.
+function icsEscape($s) {
+    $s = str_replace(['\\', "\n", "\r", ',', ';'], ['\\\\', '\\n', '', '\\,', '\\;'], (string)$s);
+    return $s;
+}
+
+// Minimal curl wrapper for Omnisend's v3 API (X-API-KEY header). Returns
+// {ok, data, error}. Key stays server-side — never returned to the client.
+function omnisendApiCall($path) {
+    if (!defined('OMNISEND_API_KEY') || OMNISEND_API_KEY === '' || strpos(OMNISEND_API_KEY, 'PASTE_') === 0) {
+        return ['ok' => false, 'error' => 'Omnisend is not configured yet. Add OMNISEND_API_KEY to config.php.'];
+    }
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => 'https://api.omnisend.com/v3' . $path,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['X-API-KEY: ' . OMNISEND_API_KEY, 'Content-Type: application/json'],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch) ?: null;
+    curl_close($ch);
+    if ($curlError) return ['ok' => false, 'error' => 'Omnisend request failed: ' . $curlError];
+    $data = $raw !== false ? json_decode($raw, true) : null;
+    if ($httpCode < 200 || $httpCode >= 300) {
+        return ['ok' => false, 'error' => 'Omnisend returned HTTP ' . $httpCode . (is_array($data) && isset($data['error']) ? ' — ' . $data['error'] : '')];
+    }
+    return ['ok' => true, 'data' => is_array($data) ? $data : []];
 }
 
 function saveRevision($pdo, $sopId, $snapshot, $savedBy) {
