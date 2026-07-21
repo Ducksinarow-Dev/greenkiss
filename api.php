@@ -734,6 +734,22 @@ switch ($action) {
             if (!empty($it['body'])) $lines[] = 'DESCRIPTION:' . icsEscape($it['body']);
             $lines[] = 'END:VEVENT';
         }
+        // Multi-day campaign bands — one all-day span per campaign the user is staffed on.
+        foreach ($campaigns as $c) {
+            if (!in_array($userId, $c['assigneeIds'] ?? [], true)) continue;
+            $cs = $c['startDate'] ?? ''; $ce = $c['endDate'] ?? '';
+            if ($cs === '') $cs = $ce;
+            if ($ce === '') $ce = $cs;
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $cs)) continue;
+            $lines[] = 'BEGIN:VEVENT';
+            $lines[] = 'UID:gk-camp-' . ($c['id'] ?? uniqid()) . '@thegreenkiss';
+            $lines[] = 'DTSTAMP:' . $stamp;
+            $lines[] = 'DTSTART;VALUE=DATE:' . str_replace('-', '', $cs);
+            $lines[] = 'DTEND;VALUE=DATE:' . str_replace('-', '', gmdate('Y-m-d', strtotime($ce . ' +1 day')));
+            $lines[] = 'SUMMARY:' . icsEscape(($c['name'] ?? 'Campaign') . ' (campaign)');
+            if (!empty($c['description'])) $lines[] = 'DESCRIPTION:' . icsEscape($c['description']);
+            $lines[] = 'END:VEVENT';
+        }
         $lines[] = 'END:VCALENDAR';
         header('Content-Type: text/calendar; charset=utf-8');
         header('Content-Disposition: inline; filename="greenkiss.ics"');
