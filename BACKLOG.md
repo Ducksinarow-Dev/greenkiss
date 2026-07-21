@@ -46,6 +46,7 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 
 ### Admin / Ops
 - ~~#13: Rollback to previous release~~ — shipped 2026-07-16, see top of file.
+- **#22: Admin page 2-column layout** (added Jul 21 2026) — arrange the Admin Panel cards in a two-across grid: **Users** (50%) beside **Software Update** (50%), then **Categories** (50%) beside **Backups** (50%). `src/components/AdminPanel.jsx`.
 
 ### Content Calendar
 - **#21: Shopify target-sales calculator** — link to Shopify to calculate target sales numbers for day/week/month (added Jul 20 2026 during the Content Calendar expansion). Needs a Shopify custom-app **Admin API access token** (not yet created) created in Shopify admin → Apps → Develop apps when this is picked up; the key must stay server-side (proxy through `api.php`, same pattern as the new `omnisend_*` actions). Out of scope for the expansion pass — that pass covers campaign/email/GBP/metrics/calendar-sync/tools-prompts, with sales metrics entered manually (Omnisend live for email only).

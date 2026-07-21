@@ -83,14 +83,58 @@ function ContentChip({ item, campaign, onClick }) {
 }
 
 /* ─── CALENDAR VIEW ──────────────────────────────────────────────────── */
-function CalendarView({ items, campaigns, monthKey, setMonthKey, onOpenItem, onNewAt }) {
-  const { y, m, days } = monthMeta(monthKey);
-  const byDay = {};
-  items.forEach(i => {
-    if (!i.publishDate) return;
-    (byDay[i.publishDate] = byDay[i.publishDate] || []).push(i);
+/* A campaign draws as a horizontal band spanning its date range, stacked in
+   lanes below the day number — same "rail = campaign" color vocabulary as the
+   chips, just stretched across days. Content-item chips flow underneath.
+   ponytail: MAX_LANES visible bands per week; rare overflow shows a "+n" note. */
+const CELL_PAD = 6, DNUM_H = 19, BAND_H = 16, BAND_GAP = 3, MAX_LANES = 3;
+
+/** Lay a week's overlapping campaigns into non-overlapping lanes.
+ * @param {(null|{d:number,ds:string})[]} cells 7 cells @param {Campaign[]} bandCampaigns */
+function weekBands(cells, bandCampaigns) {
+  const dated = cells.filter(Boolean).map(c => c.ds);
+  if (dated.length === 0) return { lanes: [], overflow: 0 };
+  const wStart = dated[0], wEnd = dated[dated.length - 1];
+  const colOf = (ds) => cells.findIndex(c => c && c.ds === ds);
+  const segs = [];
+  bandCampaigns.forEach(c => {
+    const s = c.startDate || c.endDate, e = c.endDate || c.startDate;
+    if (!s || s > wEnd || e < wStart) return; // no date, or no overlap this week
+    const startCol = colOf(s < wStart ? wStart : s);
+    const endCol = colOf(e > wEnd ? wEnd : e);
+    if (startCol < 0 || endCol < 0) return;
+    segs.push({ campaign: c, startCol, endCol, openLeft: s < wStart, openRight: e > wEnd });
   });
+  segs.sort((a, b) => a.startCol - b.startCol || a.endCol - b.endCol);
+  const laneEnds = [];
+  let overflow = 0;
+  segs.forEach(seg => {
+    let lane = laneEnds.findIndex(end => end < seg.startCol);
+    if (lane === -1) lane = laneEnds.length;
+    if (lane >= MAX_LANES) { overflow++; return; }
+    laneEnds[lane] = seg.endCol;
+    seg.lane = lane;
+  });
+  return { lanes: segs.filter(s => s.lane !== undefined), overflow };
+}
+
+function CalendarView({ items, campaigns, bandCampaigns, monthKey, setMonthKey, onOpenItem, onNewAt, onFilterCampaign }) {
+  const { y, m, daysInMonth, days } = monthMeta(monthKey);
+  const byDay = {};
+  items.forEach(i => { if (i.publishDate) (byDay[i.publishDate] = byDay[i.publishDate] || []).push(i); });
   const today = todayStr();
+
+  const weeks = [];
+  for (let i = 0; i < days.length; i += 7) {
+    weeks.push(days.slice(i, i + 7).map(d => d === null ? null : { d, ds: dayStr(y, m, d) }));
+  }
+  const lastW = weeks[weeks.length - 1];
+  while (lastW && lastW.length < 7) lastW.push(null); // keep 7 columns
+
+  const monthStart = dayStr(y, m, 1), monthEnd = dayStr(y, m, daysInMonth);
+  const anyItemThisMonth = Object.keys(byDay).some(ds => ds >= monthStart && ds <= monthEnd);
+  const anyBand = bandCampaigns.some(c => { const s = c.startDate || c.endDate, e = c.endDate || c.startDate; return s && s <= monthEnd && e >= monthStart; });
+  const monthEmpty = !anyItemThisMonth && !anyBand;
 
   return (
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
@@ -104,32 +148,135 @@ function CalendarView({ items, campaigns, monthKey, setMonthKey, onOpenItem, onN
           <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{d}</div>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
-        {days.map((d, i) => {
-          if (d === null) return <div key={"e" + i} style={{ minHeight: 92, borderRight: `1px solid ${C.bdr}`, borderBottom: `1px solid ${C.bdr}`, background: C.bg }} />;
-          const ds = dayStr(y, m, d);
-          const dayItems = byDay[ds] || [];
-          const isToday = ds === today;
+      <div style={{ position: "relative" }}>
+        {weeks.map((cells, wi) => {
+          const { lanes, overflow } = weekBands(cells, bandCampaigns);
+          const laneCount = lanes.reduce((mx, s) => Math.max(mx, s.lane + 1), 0);
+          const bandAreaH = laneCount * (BAND_H + BAND_GAP);
           return (
-            <div key={ds} onClick={() => onNewAt(ds)}
-              style={{
-                minHeight: 92, padding: "6px 5px", borderRight: `1px solid ${C.bdr}`, borderBottom: `1px solid ${C.bdr}`,
-                cursor: "pointer", position: "relative", background: isToday ? C.dew : C.sur,
-              }}>
-              <div style={{
-                fontSize: 11, fontWeight: isToday ? 800 : 500, color: isToday ? C.moss : C.mut,
-                fontFamily: "'IBM Plex Mono',monospace", marginBottom: 4,
-              }}>{d}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {dayItems.slice(0, 3).map(it => (
-                  <ContentChip key={it.id} item={it} campaign={campaigns.find(c => c.id === it.campaignId)}
-                    onClick={(e) => { e && e.stopPropagation && e.stopPropagation(); onOpenItem(it); }} />
-                ))}
-                {dayItems.length > 3 && <div style={{ fontSize: 10, color: C.faint, paddingLeft: 4 }}>+{dayItems.length - 3} more</div>}
+            <div key={wi} style={{ position: "relative" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+                {cells.map((cell, ci) => {
+                  if (!cell) return <div key={"e" + ci} style={{ minHeight: 92, borderRight: ci < 6 ? `1px solid ${C.bdr}` : "none", borderBottom: `1px solid ${C.bdr}`, background: C.bg }} />;
+                  const dayItems = byDay[cell.ds] || [];
+                  const isToday = cell.ds === today;
+                  return (
+                    <div key={cell.ds} onClick={() => onNewAt(cell.ds)}
+                      style={{
+                        minHeight: 92, padding: `${CELL_PAD}px 5px`, borderRight: ci < 6 ? `1px solid ${C.bdr}` : "none", borderBottom: `1px solid ${C.bdr}`,
+                        cursor: "pointer", position: "relative", background: isToday ? C.dew : C.sur,
+                      }}>
+                      <div style={{
+                        fontSize: 11, fontWeight: isToday ? 800 : 500, color: isToday ? C.moss : C.mut,
+                        fontFamily: "'IBM Plex Mono',monospace", height: DNUM_H - 4, marginBottom: 4,
+                      }}>{cell.d}</div>
+                      {bandAreaH > 0 && <div style={{ height: bandAreaH }} aria-hidden="true" />}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {dayItems.slice(0, 3).map(it => (
+                          <ContentChip key={it.id} item={it} campaign={campaigns.find(c => c.id === it.campaignId)}
+                            onClick={(e) => { e && e.stopPropagation && e.stopPropagation(); onOpenItem(it); }} />
+                        ))}
+                        {dayItems.length > 3 && <div style={{ fontSize: 10, color: C.faint, paddingLeft: 4 }}>+{dayItems.length - 3} more</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+                {lanes.map((seg, si) => {
+                  const leftPct = seg.startCol / 7 * 100;
+                  const widthPct = (seg.endCol - seg.startCol + 1) / 7 * 100;
+                  const insetL = seg.openLeft ? 0 : 3, insetR = seg.openRight ? 0 : 3;
+                  const color = seg.campaign.color || C.moss;
+                  return (
+                    <div key={si} title={`${seg.campaign.name || "Untitled campaign"} — filter to this campaign`}
+                      onClick={(e) => { e.stopPropagation(); onFilterCampaign && onFilterCampaign(seg.campaign.id); }}
+                      style={{
+                        position: "absolute", pointerEvents: "auto", cursor: "pointer",
+                        top: CELL_PAD + DNUM_H + seg.lane * (BAND_H + BAND_GAP), height: BAND_H,
+                        left: `calc(${leftPct}% + ${insetL}px)`, width: `calc(${widthPct}% - ${insetL + insetR}px)`,
+                        background: color + "22", border: `1px solid ${color}`,
+                        borderLeft: seg.openLeft ? "none" : `1px solid ${color}`, borderRight: seg.openRight ? "none" : `1px solid ${color}`,
+                        borderRadius: `${insetL ? 5 : 0}px ${insetR ? 5 : 0}px ${insetR ? 5 : 0}px ${insetL ? 5 : 0}px`,
+                        display: "flex", alignItems: "center", padding: "0 6px", overflow: "hidden",
+                        fontSize: 10, fontWeight: 700, color: C.txt, whiteSpace: "nowrap",
+                      }}>
+                      <Icon name="campaign" size={11} style={{ color, marginRight: 4, flexShrink: 0 }} />
+                      {seg.campaign.name || "Untitled campaign"}
+                    </div>
+                  );
+                })}
+                {overflow > 0 && (
+                  <div style={{ position: "absolute", right: 6, top: CELL_PAD + DNUM_H + (MAX_LANES - 1) * (BAND_H + BAND_GAP), fontSize: 9, fontWeight: 700, color: C.faint }}>+{overflow}</div>
+                )}
               </div>
             </div>
           );
         })}
+        {monthEmpty && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", padding: 20 }}>
+            <div style={{ textAlign: "center" }}>
+              <Icon name="event_available" size={26} style={{ color: C.faint, marginBottom: 6 }} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.mut }}>Nothing scheduled this month</div>
+              <div style={{ fontSize: 12, color: C.faint }}>Click any day to add content.</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── CONTENT ITEM RAIL (beside the calendar) ─────────────────────────────
+   Every filtered item as a scannable row — INCLUDING undated ones, grouped
+   under "Unscheduled", so a just-created item with no publish date never
+   silently vanishes from view. */
+function ItemRail({ items, campaigns, onOpenItem }) {
+  const dated = items.filter(i => i.publishDate).sort((a, b) => a.publishDate.localeCompare(b.publishDate));
+  const undated = items.filter(i => !i.publishDate);
+  const row = (it) => {
+    const ch = contentChannelMeta[it.channel] || CONTENT_CHANNELS[0];
+    const sm = contentStatusMeta[it.status] || CONTENT_STATUSES[0];
+    const campaign = campaigns.find(c => c.id === it.campaignId);
+    const overdue = isOverdue(it.publishDate, it.status === "published");
+    return (
+      <div key={it.id} onClick={() => onOpenItem(it)} role="button" tabIndex={0}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenItem(it); } }}
+        style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 12px", cursor: "pointer", borderTop: `1px solid ${C.bdr}` }}
+        onMouseEnter={e => e.currentTarget.style.background = C.s2}
+        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        <div style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: campaign?.color || C.faint, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name={ch.icon} size={13} style={{ color: C.txt2, flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "Untitled"}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 3 }}>
+            <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: overdue ? C.red : C.faint, fontWeight: overdue ? 700 : 400 }}>
+              {it.publishDate ? fmtDateShort(it.publishDate) : "Unscheduled"}
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: C.mut }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: sm.col }} />{sm.label}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: 640 }}>
+      <div style={{ padding: "13px 14px", borderBottom: `1.5px solid ${C.bdr}`, fontSize: 12, fontWeight: 700, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", flexShrink: 0 }}>
+        Content items <span style={{ color: C.faint }}>({items.length})</span>
+      </div>
+      <div style={{ overflowY: "auto" }}>
+        {items.length === 0 && <div style={{ padding: "22px 14px", textAlign: "center", fontSize: 13, color: C.faint }}>No content items match the current filters.</div>}
+        {dated.map(row)}
+        {undated.length > 0 && (
+          <>
+            <div style={{ padding: "8px 14px 6px", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", background: C.bg, borderTop: `1px solid ${C.bdr}` }}>Unscheduled</div>
+            {undated.map(row)}
+          </>
+        )}
       </div>
     </div>
   );
@@ -822,10 +969,31 @@ function ContentCalendar({ user, focusItemId, onClearFocus, onOpenSop, onNavigat
   const filterByCampaign = (id) => { setFilterCampaign(id); setTab("calendar"); };
 
   const upcoming = allItems.filter(i => i.status !== "published" && i.publishDate >= todayStr()).length;
+  const activeCampaign = filterCampaign ? campaigns.find(c => c.id === filterCampaign) : null;
 
   return (
     <div className="gk-fade-in">
-      <SectionHeader title="Content Calendar" sub={`${allItems.length} content item${allItems.length === 1 ? "" : "s"} · ${upcoming} upcoming`}
+      <SectionHeader
+        title={
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            Content Calendar
+            {activeCampaign && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 8, textTransform: "none",
+                fontFamily: "'Manrope',sans-serif", letterSpacing: "normal", fontSize: 14, fontWeight: 600,
+                color: C.moss, background: C.mossSoft, border: `1.5px solid ${C.moss}55`, borderRadius: 99, padding: "4px 6px 4px 12px",
+              }}>
+                <span style={{ width: 9, height: 9, borderRadius: 99, background: activeCampaign.color || C.moss }} />
+                {activeCampaign.name || "Untitled campaign"}
+                <button type="button" title="Clear campaign filter" onClick={() => setFilterCampaign("")}
+                  style={{ display: "inline-flex", border: "none", background: "none", cursor: "pointer", color: C.moss, padding: 2, borderRadius: 99 }}>
+                  <Icon name="close" size={15} />
+                </button>
+              </span>
+            )}
+          </span>
+        }
+        sub={`${allItems.length} content item${allItems.length === 1 ? "" : "s"} · ${upcoming} upcoming`}
         right={editable && <Btn onClick={() => openNew()}><Icon name="add" size={17} />New Content</Btn>} />
 
       <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
@@ -863,8 +1031,16 @@ function ContentCalendar({ user, focusItemId, onClearFocus, onOpenSop, onNavigat
       )}
 
       {tab === "calendar" && (
-        <CalendarView items={items} campaigns={campaigns} monthKey={monthKey} setMonthKey={setMonthKey}
-          onOpenItem={openEdit} onNewAt={editable ? openNew : () => {}} />
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 520px", minWidth: 0 }}>
+            <CalendarView items={items} campaigns={campaigns} bandCampaigns={activeCampaign ? [activeCampaign] : campaigns}
+              monthKey={monthKey} setMonthKey={setMonthKey} onOpenItem={openEdit}
+              onNewAt={editable ? openNew : () => {}} onFilterCampaign={filterByCampaign} />
+          </div>
+          <div style={{ flex: "1 1 280px", minWidth: 250, maxWidth: 360 }}>
+            <ItemRail items={items} campaigns={campaigns} onOpenItem={openEdit} />
+          </div>
+        </div>
       )}
       {tab === "list" && <ListView items={items} users={users} campaigns={campaigns} onOpenItem={openEdit} />}
       {tab === "campaigns" && (

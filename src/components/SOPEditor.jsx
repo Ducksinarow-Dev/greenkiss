@@ -194,6 +194,16 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
     sync();
     setMentionRect(null);
   };
+  // ⌘/Ctrl+B/I/U on the live selection — preventDefault so the browser
+  // doesn't also toggle, and sync() so a collapsed-caret toggle still persists.
+  const onKeyDown = (e) => {
+    if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+    const cmd = { b: "bold", i: "italic", u: "underline" }[e.key.toLowerCase()];
+    if (!cmd) return;
+    e.preventDefault();
+    document.execCommand(cmd, false);
+    sync();
+  };
 
   const canConvert = looksLikeList(block.text);
   const COLORS = [C.txt, C.moss, C.red, C.clay];
@@ -202,8 +212,9 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
     <div>
       {/* Formatting toolbar — Bold / Extra bold / Size / Color / Link / @internal */}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
-        <RichToolbarBtn icon="format_bold" title="Bold" onClick={() => exec("bold")} />
-        <RichToolbarBtn icon="format_italic" title="Italic" onClick={() => exec("italic")} />
+        <RichToolbarBtn icon="format_bold" title="Bold (⌘B)" onClick={() => exec("bold")} />
+        <RichToolbarBtn icon="format_italic" title="Italic (⌘I)" onClick={() => exec("italic")} />
+        <RichToolbarBtn icon="format_underlined" title="Underline (⌘U)" onClick={() => exec("underline")} />
         <RichToolbarBtn label="XB" title="Extra bold" onClick={extraBold} />
         <RichToolbarBtn label="S" title="Small text" onClick={() => exec("fontSize", 2)} style={{ fontSize: 10 }} />
         <RichToolbarBtn label="M" title="Normal text" onClick={() => exec("fontSize", 3)} />
@@ -217,7 +228,7 @@ function TextBlockEditor({ block, onChange, onConvertToList }) {
       </div>
 
       <div ref={ref} contentEditable suppressContentEditableWarning
-        onInput={sync} onBlur={sync} onMouseUp={saveSel} onKeyUp={saveSel}
+        onInput={sync} onBlur={sync} onMouseUp={saveSel} onKeyUp={saveSel} onKeyDown={onKeyDown}
         data-placeholder="Write the procedure here…"
         style={{ ...inp({ fontSize: 15, lineHeight: 1.6, minHeight: 80 }), whiteSpace: "pre-wrap", overflowWrap: "break-word" }}
       />

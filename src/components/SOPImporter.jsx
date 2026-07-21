@@ -52,65 +52,122 @@ function dataUriToFile(dataUri, filename) {
   return new File([arr], filename, { type: mime });
 }
 
+/* ─── Shared list/heading detection (used by both docx + pdf paths) ─── */
+
+const CHECK_RE = /^\s*(?:[-*•]\s*)?(\[[ xX]?\]|☐|☑|✅|✔|▢|◻|☑️)\s*(.*)$/;
+const NUM_RE = /^\s*(?:\d{1,3}|[a-z]|[ivx]{1,4})[.)]\s+(.*\S.*)$/i;
+const BULLET_RE = /^\s*[•◦‣·○●▪▸►*·–—-]\s+(.*\S.*)$/;
+
+/** Classifies one line as a list item, or null if it's prose. Recognizes
+ * checkbox (`[ ]`, `☐`), numbered/lettered (`1.`, `a)`, `iv.`), and bullet
+ * (`•`, `-`, `*`, …) markers, returning the marker-stripped text plus flags
+ * so the run can be assembled into the right kind of real `list` block. */
+function parseListLine(raw) {
+  const line = (raw || "").replace(/\u00A0/g, " ");
+  let m = line.match(CHECK_RE);
+  if (m && m[2].trim()) return { text: m[2].trim(), checkbox: true, checked: /[xX☑✅✔]/.test(m[1]) };
+  m = line.match(NUM_RE);
+  if (m) return { text: m[1].trim(), ordered: true };
+  m = line.match(BULLET_RE);
+  if (m) return { text: m[1].trim() };
+  return null;
+}
+
+/** Builds a real `list` block from a run of parseListLine results. Any
+ * checkbox in the run makes it a checkbox list; otherwise all-numbered ->
+ * numbered, else bulleted. Matches the ListBlock shape in globals.js so it
+ * lands in the editor as an editable list, not "• "-prefixed prose. */
+function makeListBlock(items, styleHint) {
+  const checkboxes = items.some(i => i.checkbox);
+  const numbered = !checkboxes && (styleHint === "numbered" || items.every(i => i.ordered));
+  return {
+    id: uid(), type: "list",
+    style: numbered ? "numbered" : "bulleted",
+    checkboxes, withEntry: false,
+    items: items.map(i => ({ id: uid(), text: i.text, value: "", url: i.url || "" })),
+  };
+}
+
+/** True if a short line reads as a section heading by its formatting alone.
+ * `size`/`median` (PDF only) flag a line rendered noticeably larger than body
+ * text — the real "find the sections" signal. With no size info (docx plain
+ * text), falls back to ALL-CAPS or a trailing-colon label. */
+function textLooksLikeHeading(text, { size = 0, median = 0 } = {}) {
+  if (!text || text.length > 90) return false;
+  if (parseListLine(text)) return false; // a numbered/bulleted line is a list item, not a heading
+  if (median && size >= median * 1.2) return true;
+  const letters = text.replace(/[^A-Za-z]/g, "");
+  if (text.length < 70 && letters.length >= 3 && text === text.toUpperCase()) return true; // ALL CAPS
+  if (text.length < 70 && /:$/.test(text) && !/[.?!]/.test(text.slice(0, -1))) return true; // "Section:" label
+  return false;
+}
+
 /** True if a <p> reads as a heading rather than body text: mammoth maps
- * Word's Heading 1-4 paragraph styles to <h1-4>, but source docs exported
+ * Word's Heading 1-6 paragraph styles to <h1-6>, but source docs exported
  * from Pages (like the real Green Kiss docs) don't carry those styles —
  * everything lands as plain <p>, with headings only distinguishable by
  * formatting. A paragraph whose entire text is wrapped in one <strong>/<b>
- * (i.e. the whole line is bold, not just a bolded word inside a sentence)
- * reads as a heading — the same "font marks headings" signal the PDF path
- * already uses via its short-line heuristic, just sourced from mammoth's
- * HTML instead of raw font-size XML (a much smaller lift, see #5 notes). */
+ * (whole line bold, not a bolded word mid-sentence), or that reads ALL-CAPS
+ * / as a trailing-colon label (textLooksLikeHeading), is treated as a
+ * heading. Links inside paragraphs are preserved onto list items (item.url)
+ * but flattened to plain text inside prose in v1. */
 function paragraphLooksLikeHeading(el) {
   const text = el.textContent.trim();
-  if (!text || text.length > 80) return false;
+  if (!text || text.length > 90) return false;
   const kids = Array.from(el.childNodes).filter(n => !(n.nodeType === 3 && !n.textContent.trim()));
-  return kids.length === 1 && kids[0].nodeType === 1 && /^(strong|b)$/i.test(kids[0].tagName);
+  const wholeBold = kids.length === 1 && kids[0].nodeType === 1 && /^(strong|b)$/i.test(kids[0].tagName);
+  return wholeBold || textLooksLikeHeading(text);
 }
 
-/** Walks mammoth's converted HTML into Block[]. h1-h4 -> heading, whole-
- * paragraph-bold -> heading too (see paragraphLooksLikeHeading), consecutive
- * plain paragraphs merge into ONE text block (flushed on a heading/list/
- * image/end of document) rather than one block per paragraph — the old
- * per-paragraph behavior produced far more blocks than a real document
- * needs. Consecutive <li> within one <ul>/<ol> -> one text block ("• "
- * lines), <img> -> image block (src hydrated after, see hydrateImages).
- * Links inside paragraphs are flattened to plain text in v1.
- * // ponytail: link-in-text is lost on import; if that matters later, walk
- * // <a> nodes here and emit a "links" block alongside the paragraph. */
+/** Walks mammoth's converted HTML into Block[]. h1-h6 -> heading, whole-
+ * paragraph-bold / ALL-CAPS / trailing-colon -> heading (paragraphLooksLikeHeading),
+ * consecutive plain paragraphs merge into ONE text block. <ul>/<ol> AND runs
+ * of plain paragraphs that are really bullet/numbered/checkbox lines (common
+ * in Pages exports that don't use real list markup) become real `list` blocks
+ * (see makeListBlock), preserving per-item links. <img> -> image block. */
 function parseDocxHtmlToBlocks(html) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const blocks = [];
   let paraBuf = [];
+  let listBuf = [];
   const flushPara = () => {
     if (paraBuf.length) { blocks.push({ id: uid(), type: "text", text: paraBuf.join("\n\n") }); paraBuf = []; }
   };
+  const flushList = () => {
+    if (listBuf.length) { blocks.push(makeListBlock(listBuf)); listBuf = []; }
+  };
+  const flushAll = () => { flushList(); flushPara(); };
+
   Array.from(doc.body.children).forEach(el => {
     const tag = el.tagName.toLowerCase();
-    if (/^h[1-4]$/.test(tag)) {
-      flushPara();
+    if (/^h[1-6]$/.test(tag)) {
+      flushAll();
       const text = el.textContent.trim();
       if (text) blocks.push({ id: uid(), type: "heading", text });
     } else if (tag === "ul" || tag === "ol") {
-      flushPara();
-      const items = Array.from(el.querySelectorAll("li")).map(li => "• " + li.textContent.trim()).filter(l => l !== "• ");
-      if (items.length) blocks.push({ id: uid(), type: "text", text: items.join("\n") });
+      flushAll();
+      const ordered = tag === "ol";
+      const items = Array.from(el.children).filter(li => li.tagName.toLowerCase() === "li").map(li => {
+        const raw = li.textContent.trim();
+        const parsed = parseListLine(raw) || {};
+        const a = li.querySelector("a[href]");
+        return { text: parsed.text || raw, ordered, checkbox: parsed.checkbox, checked: parsed.checked, url: a ? a.getAttribute("href") : "" };
+      }).filter(it => it.text);
+      if (items.length) blocks.push(makeListBlock(items, ordered ? "numbered" : "bulleted"));
     } else if (tag === "p") {
       const img = el.querySelector("img");
-      if (img && img.src) {
-        flushPara();
-        blocks.push({ id: uid(), type: "image", src: img.src, caption: "" });
-      } else if (paragraphLooksLikeHeading(el)) {
-        flushPara();
-        blocks.push({ id: uid(), type: "heading", text: el.textContent.trim() });
-      } else {
-        const text = el.textContent.trim();
-        if (text) paraBuf.push(text);
-      }
+      if (img && img.src) { flushAll(); blocks.push({ id: uid(), type: "image", src: img.src, caption: "" }); return; }
+      const text = el.textContent.trim();
+      if (!text) return;
+      const li = parseListLine(text);
+      if (li) { flushPara(); listBuf.push(li); return; }
+      flushList();
+      if (paragraphLooksLikeHeading(el)) blocks.push({ id: uid(), type: "heading", text });
+      else paraBuf.push(text);
     }
     // Tables and anything else are skipped in v1 — rare in SOP-style docs.
   });
-  flushPara();
+  flushAll();
   return blocks;
 }
 
@@ -139,19 +196,19 @@ async function importDocx(file) {
 }
 
 /** Groups pdf.js text-content items (individual runs, not lines) into lines
- * by y-coordinate, then applies the heading heuristic: a short line
- * (<60 chars) that doesn't end in sentence punctuation, followed by a
- * longer line, reads as a heading. Everything else merges into
- * blank-line-separated paragraph blocks.
- * // ponytail: naive heuristic, will mis-tag the odd short sentence as a
- * // heading on dense PDFs — good enough for SOP-style docs (title-cased
- * // short headers over prose); revisit with font-size metadata from
- * // pdf.js (item.transform scale) if that ever proves too noisy. */
+ * by y-coordinate, capturing each line's font size (largest glyph height on
+ * the line). Sections are found by font size: a line rendered notably larger
+ * than the body-text median reads as a heading (textLooksLikeHeading) — far
+ * more reliable than the old "short line followed by a longer one" guess.
+ * Bullet/numbered/checkbox runs become real `list` blocks (makeListBlock);
+ * everything else merges into paragraph blocks.
+ * // ponytail: no image extraction from PDFs — pdf.js can pull embedded images
+ * // via page.getOperatorList() image ops if that's ever needed. */
 async function parsePdfToBlocks(file) {
   const pdfjsLib = await ensurePdfJs();
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  const lines = [];
+  const lines = []; // {text, size} — size 0 marks a page/paragraph break
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
@@ -163,26 +220,39 @@ async function parsePdfToBlocks(file) {
     });
     const ys = Array.from(byY.keys()).sort((a, b) => b - a); // PDF y increases upward
     ys.forEach(y => {
-      const text = byY.get(y).sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str).join("").trim();
-      if (text) lines.push(text);
+      const runs = byY.get(y).sort((a, b) => a.transform[4] - b.transform[4]);
+      const text = runs.map(i => i.str).join("").trim();
+      if (!text) return;
+      const size = Math.max(...runs.map(i => i.height || Math.abs(i.transform[3]) || 0));
+      lines.push({ text, size });
     });
-    lines.push(""); // page break reads as a paragraph break
+    lines.push({ text: "", size: 0 }); // page break reads as a paragraph break
   }
+
+  // Body-text median font size — the baseline headings stand out from.
+  const sizes = lines.filter(l => l.text && l.size).map(l => l.size).sort((a, b) => a - b);
+  const median = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 0;
 
   const blocks = [];
   let paraBuf = [];
+  let listBuf = [];
   const flushPara = () => {
     if (paraBuf.length) { blocks.push({ id: uid(), type: "text", text: paraBuf.join("\n") }); paraBuf = []; }
   };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) { flushPara(); continue; }
-    const next = lines[i + 1] || "";
-    const looksHeading = line.length < 60 && !/[.!?:,]$/.test(line) && next.length > line.length;
-    if (looksHeading) { flushPara(); blocks.push({ id: uid(), type: "heading", text: line }); }
-    else paraBuf.push(line);
+  const flushList = () => {
+    if (listBuf.length) { blocks.push(makeListBlock(listBuf)); listBuf = []; }
+  };
+  const flushAll = () => { flushList(); flushPara(); };
+
+  for (const { text, size } of lines) {
+    if (!text) { flushAll(); continue; }
+    const li = parseListLine(text);
+    if (li) { flushPara(); listBuf.push(li); continue; }
+    flushList();
+    if (textLooksLikeHeading(text, { size, median })) { flushPara(); blocks.push({ id: uid(), type: "heading", text }); }
+    else paraBuf.push(text);
   }
-  flushPara();
+  flushAll();
   return blocks;
 }
 
@@ -190,8 +260,6 @@ async function importPdf(file) {
   const blocks = await parsePdfToBlocks(file);
   if (!blocks.length) throw new Error("Couldn't extract any text from that PDF.");
   return blocks;
-  // ponytail: no image extraction from PDFs in v1 — pdf.js can pull embedded
-  // images via page.getOperatorList() image ops if that's ever needed.
 }
 
 /** Import button — editor/admin only, rendered next to "New SOP". Hands
