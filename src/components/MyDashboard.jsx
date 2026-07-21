@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import {
-  C, FONT_CAPS, getTheme, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
-  getContentItems, updateContentItem, getCampaigns, contentChannelMeta, getTags,
+  C, FONT_CAPS, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
+  getContentItems, updateContentItem, getCampaigns, campaignStatusMeta, contentChannelMeta, getTags,
   getAlerts, deleteAlert, fmtDate, getAllInstances, formColor,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
 import { Icon, IconBtn } from './shared.jsx';
 import { TaskModal } from './TaskManager.jsx';
 import { ProjectCard } from './Projects.jsx';
-import gkLogo from '../assets/gk-logo.svg';
 
 /* Design intent: this is the first thing staff see after logging in —
    mid-shift, glancing between customers. It reads like a hand-written
@@ -127,6 +126,41 @@ function AlertsStrip({ alerts, tasks, users, onDismiss, onOpenTask }) {
   );
 }
 
+const SecTitle = ({ children }) => (
+  <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>{children}</div>
+);
+
+/** Small per-column empty state — the dashboard is now split into columns,
+ * so each one carries its own quiet "nothing here yet" instead of one big card. */
+const DashEmpty = ({ icon, title, sub }) => (
+  <div style={{ padding: "28px 20px", textAlign: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12 }}>
+    <Icon name={icon} size={22} style={{ color: C.faint, marginBottom: 8 }} />
+    <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 4 }}>{title}</div>
+    <div style={{ fontSize: 13, color: C.mut }}>{sub}</div>
+  </div>
+);
+
+/** Compact campaign card for the dashboard's Upcoming Campaigns column. */
+function DashCampaignCard({ campaign }) {
+  const sm = campaignStatusMeta[campaign.status] || { label: campaign.status, col: C.mut };
+  return (
+    <div style={{ display: "flex", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 11, overflow: "hidden" }}>
+      <div style={{ width: 5, background: campaign.color || C.moss, flexShrink: 0 }} />
+      <div style={{ padding: "11px 13px", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{campaign.name || "Untitled campaign"}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: sm.col, background: sm.col + "1F", padding: "2px 8px", borderRadius: 99 }}>{sm.label}</span>
+          {(campaign.startDate || campaign.endDate) && (
+            <span style={{ fontSize: 11, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
+              {campaign.startDate ? fmtDateShort(campaign.startDate) : "…"} – {campaign.endDate ? fmtDateShort(campaign.endDate) : "…"}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
@@ -227,6 +261,15 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onN
   const myProjects = projects.filter(p => p.leadId === user.id || (p.memberIds || []).includes(user.id));
   const totalOpen = allItems.length;
 
+  // Upcoming campaigns (team-wide) — not done, and not already ended.
+  const t0 = new Date();
+  const todayLocal = `${t0.getFullYear()}-${String(t0.getMonth() + 1).padStart(2, "0")}-${String(t0.getDate()).padStart(2, "0")}`;
+  const upcomingCampaigns = campaigns
+    .filter(c => c.status !== "done")
+    .filter(c => { const e = c.endDate || c.startDate; return !e || e >= todayLocal; })
+    .sort((a, b) => (a.startDate || "9999").localeCompare(b.startDate || "9999"))
+    .slice(0, 6);
+
   const today = new Date();
   const dateStr = today.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const greetHour = today.getHours();
@@ -241,67 +284,79 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onN
 
       <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
 
-      {totalOpen === 0 ? (
-        <div style={{
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          padding: "72px 24px", textAlign: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14,
-        }}>
-          <img src={gkLogo} alt="" aria-hidden="true" style={
-            getTheme() === "dark"
-              ? { width: 44, height: 44, marginBottom: 18, filter: "invert(1)", mixBlendMode: "screen", opacity: 0.5 }
-              : { width: 44, height: 44, marginBottom: 18, mixBlendMode: "multiply", opacity: 0.5 }
-          } />
-          <div style={{ fontSize: 17, fontWeight: 700, color: C.txt, marginBottom: 6 }}>Nothing on your plate</div>
-          <div style={{ fontSize: 14, color: C.mut, maxWidth: 360 }}>Tasks and sub-tasks assigned to you will show up here, grouped by when they're due.</div>
+      {/* Top row — Tasks 50% | Projects 50% */}
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 22 }}>
+        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
+          <SecTitle>Tasks</SecTitle>
+          {totalOpen === 0 ? (
+            <DashEmpty icon="task_alt" title="Nothing due" sub="Tasks and sub-tasks assigned to you show up here, grouped by when they're due." />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+              {DASH_SECTIONS.map(sec => {
+                const items = bySection(sec);
+                const accent = sec.key === "today" && items.some(i => i.group === "overdue");
+                return <ItemGroup key={sec.key} group={{ ...sec, accent }} items={items} onToggle={toggleItem} onOpen={openItem} />;
+              })}
+            </div>
+          )}
         </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 26, marginBottom: 34 }}>
-          {DASH_SECTIONS.map(sec => {
-            const items = bySection(sec);
-            const accent = sec.key === "today" && items.some(i => i.group === "overdue");
-            return <ItemGroup key={sec.key} group={{ ...sec, accent }} items={items} onToggle={toggleItem} onOpen={openItem} />;
-          })}
+        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
+          <SecTitle>My Projects</SecTitle>
+          {myProjects.length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+              {myProjects.map(p => (
+                <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpenProject && onOpenProject(p.id)} />
+              ))}
+            </div>
+          ) : (
+            <DashEmpty icon="folder_open" title="No projects" sub="Projects you lead or belong to appear here." />
+          )}
         </div>
-      )}
+      </div>
 
-      {myProjects.length > 0 && (
-        <div style={{ marginBottom: 34 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>My Projects</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-            {myProjects.map(p => (
-              <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpenProject && onOpenProject(p.id)} />
-            ))}
-          </div>
+      {/* Bottom row — Upcoming Campaigns 50% | My Forms fills the other half */}
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
+          <SecTitle>Upcoming Campaigns</SecTitle>
+          {upcomingCampaigns.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {upcomingCampaigns.map(c => <DashCampaignCard key={c.id} campaign={c} />)}
+            </div>
+          ) : (
+            <DashEmpty icon="campaign" title="No upcoming campaigns" sub="Campaigns with a current or future date range show here." />
+          )}
         </div>
-      )}
-
-      {myForms.length > 0 && (
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>My Forms <span style={{ color: C.faint, fontWeight: 500 }}>— in progress</span></div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7, maxWidth: 640 }}>
-            {myForms.map(f => {
-              const doc = sops.find(s => s.id === f.docId);
-              return (
-                <div key={f.id} onClick={() => onOpenSubmission && onOpenSubmission(f.docId, f.id)} role="button" tabIndex={0}
-                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSubmission && onOpenSubmission(f.docId, f.id); } }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10,
-                    background: C.sur, border: `1.5px solid ${C.bdr}`, cursor: "pointer", transition: "border-color .15s",
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
-                  <span style={{ width: 10, height: 10, borderRadius: 99, background: formColor(f.docId), flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc?.title || "Deleted form"}</div>
-                    <div style={{ fontSize: 12, color: C.mut, marginTop: 1 }}>Started {fmtDate(f.startedAt)}</div>
+        {myForms.length > 0 ? (
+          <div style={{ flex: "1 1 340px", minWidth: 0 }}>
+            <SecTitle>My Forms <span style={{ color: C.faint, fontWeight: 500 }}>— in progress</span></SecTitle>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {myForms.map(f => {
+                const doc = sops.find(s => s.id === f.docId);
+                return (
+                  <div key={f.id} onClick={() => onOpenSubmission && onOpenSubmission(f.docId, f.id)} role="button" tabIndex={0}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSubmission && onOpenSubmission(f.docId, f.id); } }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10,
+                      background: C.sur, border: `1.5px solid ${C.bdr}`, cursor: "pointer", transition: "border-color .15s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
+                    <span style={{ width: 10, height: 10, borderRadius: 99, background: formColor(f.docId), flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc?.title || "Deleted form"}</div>
+                      <div style={{ fontSize: 12, color: C.mut, marginTop: 1 }}>Started {fmtDate(f.startedAt)}</div>
+                    </div>
+                    <Icon name="edit_note" size={17} style={{ color: C.mut, flexShrink: 0 }} title="Continue filling out" />
                   </div>
-                  <Icon name="edit_note" size={17} style={{ color: C.mut, flexShrink: 0 }} title="Continue filling out" />
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          /* keep Upcoming Campaigns at ~50% when there are no forms to fill the row */
+          <div style={{ flex: "1 1 340px", minWidth: 0 }} aria-hidden="true" />
+        )}
+      </div>
 
       {modal && (
         <TaskModal initial={modal.task} isNew={false} users={users} sops={sops} projects={projects} tags={getTags()}
