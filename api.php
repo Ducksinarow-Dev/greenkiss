@@ -757,38 +757,42 @@ switch ($action) {
         exit;
 
     case 'omnisend_campaigns_list':
+        // Field shape confirmed 2026-07-21 against a live response (see
+        // omnisendApiCall's header comment for the auth fix that unblocked
+        // this). {id,name,status,type,channel,sendingSettings{scheduledAt},
+        // createdAt,startedAt?,endedAt?} — startedAt/endedAt only exist once
+        // a send has actually kicked off. Drafts ARE included by default,
+        // no status filter needed. Limited to email since that's the only
+        // channel content items link to.
         $user = requireAuth($pdo, $body);
         requireRole($user, ['editor', 'admin']);
-        $res = omnisendApiCall('/campaigns');
+        $res = omnisendApiCall('/campaigns?limit=100&channel=email');
         if (!$res['ok']) respond(502, ['error' => $res['error']]);
         $out = [];
         foreach (($res['data']['campaigns'] ?? []) as $c) {
+            $date = $c['startedAt'] ?? ($c['sendingSettings']['scheduledAt'] ?? ($c['createdAt'] ?? ''));
             $out[] = [
-                'id' => $c['campaignID'] ?? ($c['id'] ?? ''),
+                'id' => $c['id'] ?? '',
                 'name' => $c['name'] ?? 'Untitled',
                 'status' => $c['status'] ?? '',
-                'sentAt' => $c['sendAt'] ?? ($c['startDate'] ?? ''),
+                'sentAt' => $date,
             ];
         }
         respond(200, ['campaigns' => $out]);
         break;
 
     case 'omnisend_campaign_stats':
+        // ponytail: NOT wired up. Omnisend doesn't expose opens/clicks/revenue
+        // on GET /campaigns/{id} — that lives behind a separate Analytics API
+        // (POST /analytics/statistics or /analytics/reports) that takes a
+        // dimensions/metrics/date-range query body whose exact shape isn't in
+        // the public docs. Returning a clear error rather than guessing the
+        // query and risking silently-wrong revenue numbers. To finish this:
+        // get one real request/response pair (e.g. from Omnisend's own UI
+        // network tab on a campaign report page) and map real field names.
         $user = requireAuth($pdo, $body);
         requireRole($user, ['editor', 'admin']);
-        $id = basename((string)($_GET['id'] ?? ''));
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        $res = omnisendApiCall('/campaigns/' . rawurlencode($id));
-        if (!$res['ok']) respond(502, ['error' => $res['error']]);
-        // Field names vary by Omnisend plan/version — read defensively. The
-        // proxy is the only place that knows Omnisend's shape.
-        $c = $res['data'] ?? [];
-        $stats = $c['stats'] ?? $c;
-        respond(200, ['stats' => [
-            'opens' => $stats['opened'] ?? ($stats['opens'] ?? 0),
-            'clicks' => $stats['clicked'] ?? ($stats['clicks'] ?? 0),
-            'revenue' => $stats['revenue'] ?? ($stats['sales'] ?? 0),
-        ]]);
+        respond(501, ['error' => 'Live stats aren\'t wired up yet — check this campaign\'s report directly in Omnisend for now.']);
         break;
 
     default:
@@ -921,17 +925,27 @@ function icsEscape($s) {
     return $s;
 }
 
-// Minimal curl wrapper for Omnisend's v3 API (X-API-KEY header). Returns
-// {ok, data, error}. Key stays server-side — never returned to the client.
+// Minimal curl wrapper for Omnisend's current dated API (api-docs.omnisend.com,
+// version 2026-03-15) — NOT the old /v3 path, which used a bare X-API-KEY
+// header; that scheme is no longer accepted (confirmed 2026-07-21 after a
+// live request returned "API key or access token not provided"). Current
+// auth is `Authorization: Omnisend-API-Key <key>` + a required Omnisend-Version
+// header. Returns {ok, data, error}. Key stays server-side — never returned
+// to the client.
 function omnisendApiCall($path) {
     if (!defined('OMNISEND_API_KEY') || OMNISEND_API_KEY === '' || strpos(OMNISEND_API_KEY, 'PASTE_') === 0) {
         return ['ok' => false, 'error' => 'Omnisend is not configured yet. Add OMNISEND_API_KEY to config.php.'];
     }
     $ch = curl_init();
     curl_setopt_array($ch, [
-        CURLOPT_URL => 'https://api.omnisend.com/v3' . $path,
+        CURLOPT_URL => 'https://api.omnisend.com/api' . $path,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => ['X-API-KEY: ' . OMNISEND_API_KEY, 'Content-Type: application/json'],
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Omnisend-API-Key ' . OMNISEND_API_KEY,
+            'Omnisend-Version: 2026-03-15',
+            'Accept: application/json',
+            'Content-Type: application/json',
+        ],
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_TIMEOUT => 30,
