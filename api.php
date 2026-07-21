@@ -782,17 +782,30 @@ switch ($action) {
         break;
 
     case 'omnisend_campaign_stats':
-        // ponytail: NOT wired up. Omnisend doesn't expose opens/clicks/revenue
-        // on GET /campaigns/{id} — that lives behind a separate Analytics API
-        // (POST /analytics/statistics or /analytics/reports) that takes a
-        // dimensions/metrics/date-range query body whose exact shape isn't in
-        // the public docs. Returning a clear error rather than guessing the
-        // query and risking silently-wrong revenue numbers. To finish this:
-        // get one real request/response pair (e.g. from Omnisend's own UI
-        // network tab on a campaign report page) and map real field names.
+        // Per-campaign opens/clicks/revenue live ONLY in Omnisend's Analytics
+        // reports API (never on the campaign object). Query shape below was
+        // reverse-engineered against a live account 2026-07-21: filter by
+        // messageID = the campaign's id; a "custom" range needs full ISO-8601
+        // timestamps (bare YYYY-MM-DD is rejected). From a fixed early date →
+        // now so a campaign's all-time stats are complete regardless of age.
         $user = requireAuth($pdo, $body);
         requireRole($user, ['editor', 'admin']);
-        respond(501, ['error' => 'Live stats aren\'t wired up yet — check this campaign\'s report directly in Omnisend for now.']);
+        $id = (string)($_GET['id'] ?? '');
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        $payload = ['queries' => [[
+            'alias' => 'c',
+            'metrics' => [['name' => 'openedUnique'], ['name' => 'clickedUnique'], ['name' => 'attributedRevenue']],
+            'dateRange' => ['interval' => 'custom', 'from' => '2015-01-01T00:00:00Z', 'to' => gmdate('Y-m-d\TH:i:s\Z')],
+            'filters' => [['name' => 'messageID', 'operator' => 'in', 'values' => [$id]]],
+        ]]];
+        $res = omnisendApiCall('/analytics/reports', 'POST', $payload);
+        if (!$res['ok']) respond(502, ['error' => $res['error']]);
+        $row = $res['data']['reports'][0]['rows'][0] ?? [];
+        respond(200, ['stats' => [
+            'opens' => $row['openedUnique'] ?? 0,
+            'clicks' => $row['clickedUnique'] ?? 0,
+            'revenue' => $row['attributedRevenue'] ?? 0,
+        ]]);
         break;
 
     default:
@@ -932,12 +945,12 @@ function icsEscape($s) {
 // auth is `Authorization: Omnisend-API-Key <key>` + a required Omnisend-Version
 // header. Returns {ok, data, error}. Key stays server-side — never returned
 // to the client.
-function omnisendApiCall($path) {
+function omnisendApiCall($path, $method = 'GET', $reqBody = null) {
     if (!defined('OMNISEND_API_KEY') || OMNISEND_API_KEY === '' || strpos(OMNISEND_API_KEY, 'PASTE_') === 0) {
         return ['ok' => false, 'error' => 'Omnisend is not configured yet. Add OMNISEND_API_KEY to config.php.'];
     }
     $ch = curl_init();
-    curl_setopt_array($ch, [
+    $opts = [
         CURLOPT_URL => 'https://api.omnisend.com/api' . $path,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
@@ -949,7 +962,12 @@ function omnisendApiCall($path) {
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_TIMEOUT => 30,
-    ]);
+    ];
+    if ($method === 'POST') {
+        $opts[CURLOPT_POST] = true;
+        $opts[CURLOPT_POSTFIELDS] = json_encode($reqBody);
+    }
+    curl_setopt_array($ch, $opts);
     $raw = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch) ?: null;
