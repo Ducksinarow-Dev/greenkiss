@@ -45,12 +45,20 @@ define('CPANEL_REPO_PATH', '/home/hubthegreenkiss/repositories/greenkiss');
 define('OMNISEND_API_KEY', 'PASTE_A_REAL_OMNISEND_API_KEY_HERE');
 
 // ── Shopify (Store Update → sales vs targets) ───────────────────────────
-// Create a custom app in Shopify admin → Settings → Apps and sales channels
-// → Develop apps → Create an app → Admin API scopes: enable read_orders (and
-// read the shop) → Install → reveal the Admin API access token. Domain is the
-// permanent *.myshopify.com one (Settings → Domains), e.g. thegreenkiss.myshopify.com.
+// Legacy "custom apps" (the copy-a-static-token flow) were retired 2026-01-01,
+// so this uses a Dev Dashboard app with the client_credentials grant instead:
+// Shopify admin → Settings → Apps and sales channels → Develop apps → "Build
+// apps in Dev Dashboard" → Create app → give it the Admin API scope read_orders
+// → install it on this store → Settings → copy the Client ID and Client secret.
+// The server exchanges these for a short-lived token on each request; nothing
+// is copied by hand and no token expires on us. Domain is the permanent
+// *.myshopify.com one (Settings → Domains), e.g. thegreenkiss.myshopify.com.
 // Leave placeholders and the Store Update gauges show a clear "connect Shopify"
-// state instead of a fatal. Token stays server-side only.
+// state. Credentials stay server-side only.
 define('SHOPIFY_STORE_DOMAIN', 'PASTE_YOUR_STORE.myshopify.com');
-define('SHOPIFY_ADMIN_TOKEN', 'PASTE_A_REAL_SHOPIFY_ADMIN_API_TOKEN_HERE');
+define('SHOPIFY_CLIENT_ID', 'PASTE_YOUR_SHOPIFY_CLIENT_ID_HERE');
+define('SHOPIFY_CLIENT_SECRET', 'PASTE_YOUR_SHOPIFY_CLIENT_SECRET_HERE');
 define('SHOPIFY_API_VERSION', '2025-07'); // bump to a newer stable version as Shopify releases them
+// Optional: only used if the app can't read shop.json for the store's timezone
+// (day boundaries for "today"/"month-to-date"). IANA name, e.g. America/Vancouver.
+// define('SHOPIFY_TIMEZONE', 'America/Vancouver');

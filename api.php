@@ -817,20 +817,26 @@ switch ($action) {
         // orders are available by default — fine for today + MTD.
         $user = requireAuth($pdo, $body);
         requireRole($user, ['editor', 'admin']);
-        $shopRes = shopifyApiCall('/shop.json');
-        if (!$shopRes['ok']) respond(502, ['error' => $shopRes['error']]);
-        $tz = $shopRes['data']['shop']['iana_timezone'] ?? 'UTC';
-        try { $zone = new DateTimeZone($tz); } catch (Exception $e) { $zone = new DateTimeZone('UTC'); }
+        $tok = shopifyAccessToken();
+        if (!$tok['ok']) respond(502, ['error' => $tok['error']]);
+        $token = $tok['token'];
+        // Shop timezone/currency for correct day boundaries. If the app's scopes
+        // don't let it read the shop, fall back to SHOPIFY_TIMEZONE (or UTC).
+        $shopRes = shopifyApiCall('/shop.json', $token);
+        $tz = ($shopRes['ok'] ? ($shopRes['data']['shop']['iana_timezone'] ?? null) : null)
+            ?: (defined('SHOPIFY_TIMEZONE') && SHOPIFY_TIMEZONE ? SHOPIFY_TIMEZONE : 'UTC');
+        $currency = $shopRes['ok'] ? ($shopRes['data']['shop']['currency'] ?? '') : '';
+        try { $zone = new DateTimeZone($tz); } catch (Exception $e) { $zone = new DateTimeZone('UTC'); $tz = 'UTC'; }
         $now = new DateTime('now', $zone);
         $dayStart = (clone $now)->setTime(0, 0, 0);
         $monthStart = new DateTime($now->format('Y-m-01 00:00:00'), $zone);
-        $today = shopifySumSales($dayStart->format('c'));
-        $mtd = shopifySumSales($monthStart->format('c'));
+        $today = shopifySumSales($dayStart->format('c'), $token);
+        $mtd = shopifySumSales($monthStart->format('c'), $token);
         if ($today === null || $mtd === null) respond(502, ['error' => 'Shopify request failed while summing orders.']);
         respond(200, ['sales' => [
             'today' => $today,
             'monthToDate' => $mtd,
-            'currency' => $shopRes['data']['shop']['currency'] ?? '',
+            'currency' => $currency,
             'timezone' => $tz,
             'asOf' => $now->format('c'),
         ]]);
@@ -1008,18 +1014,53 @@ function omnisendApiCall($path, $method = 'GET', $reqBody = null) {
     return ['ok' => true, 'data' => is_array($data) ? $data : []];
 }
 
-// Shopify Admin REST API wrapper. Custom-app auth via X-Shopify-Access-Token.
-// Accepts a relative path ("/orders.json?...") or an absolute URL (used to
-// follow the Link-header "next" cursor for pagination). Returns
-// {ok, data, error, nextUrl}. Token/domain stay server-side.
-// ponytail: REST is Shopify's "legacy" API but still supported for custom
-// apps; upgrade path is the GraphQL Admin API (or ShopifyQL for aggregates)
-// only if Shopify ever drops REST for custom apps.
-function shopifyApiCall($pathOrUrl) {
+// Exchanges the Dev Dashboard app's Client ID/secret for a short-lived Admin
+// API token via the client_credentials grant. Legacy copy-a-static-token
+// custom apps were retired 2026-01-01, so this is the single-store flow now.
+// The token lasts ~24h; we fetch fresh per Store Update request.
+// ponytail: no caching — the extra POST is negligible at dashboard-refresh
+// volume; cache to a server-side file (NOT kv_store, which the client can read
+// via kv_all) if it ever matters. Returns {ok, token, error}.
+function shopifyAccessToken() {
     if (!defined('SHOPIFY_STORE_DOMAIN') || SHOPIFY_STORE_DOMAIN === '' || strpos(SHOPIFY_STORE_DOMAIN, 'PASTE_') === 0
-        || !defined('SHOPIFY_ADMIN_TOKEN') || SHOPIFY_ADMIN_TOKEN === '' || strpos(SHOPIFY_ADMIN_TOKEN, 'PASTE_') === 0) {
-        return ['ok' => false, 'error' => 'Shopify is not configured yet. Add SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN to config.php.'];
+        || !defined('SHOPIFY_CLIENT_ID') || SHOPIFY_CLIENT_ID === '' || strpos(SHOPIFY_CLIENT_ID, 'PASTE_') === 0
+        || !defined('SHOPIFY_CLIENT_SECRET') || SHOPIFY_CLIENT_SECRET === '' || strpos(SHOPIFY_CLIENT_SECRET, 'PASTE_') === 0) {
+        return ['ok' => false, 'error' => 'Shopify is not configured yet. Add SHOPIFY_STORE_DOMAIN, SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET to config.php.'];
     }
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => 'https://' . SHOPIFY_STORE_DOMAIN . '/admin/oauth/access_token',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query([
+            'grant_type' => 'client_credentials',
+            'client_id' => SHOPIFY_CLIENT_ID,
+            'client_secret' => SHOPIFY_CLIENT_SECRET,
+        ]),
+        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $raw = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch) ?: null;
+    curl_close($ch);
+    if ($err) return ['ok' => false, 'error' => 'Shopify auth failed: ' . $err];
+    $data = $raw !== false ? json_decode($raw, true) : null;
+    if ($code < 200 || $code >= 300 || empty($data['access_token'])) {
+        return ['ok' => false, 'error' => 'Shopify token request returned HTTP ' . $code . (is_array($data) && isset($data['error_description']) ? ' — ' . $data['error_description'] : '')];
+    }
+    return ['ok' => true, 'token' => $data['access_token']];
+}
+
+// Shopify Admin REST API wrapper. Auth via a client_credentials access token
+// (see shopifyAccessToken). Accepts a relative path ("/orders.json?...") or an
+// absolute URL (used to follow the Link-header "next" cursor for pagination).
+// Returns {ok, data, error, nextUrl}.
+// ponytail: REST is Shopify's "legacy" API but still supported; upgrade path is
+// the GraphQL Admin API (or ShopifyQL for aggregates) only if REST is dropped.
+function shopifyApiCall($pathOrUrl, $token) {
     $ver = (defined('SHOPIFY_API_VERSION') && SHOPIFY_API_VERSION) ? SHOPIFY_API_VERSION : '2025-07';
     $url = strpos($pathOrUrl, 'http') === 0 ? $pathOrUrl : ('https://' . SHOPIFY_STORE_DOMAIN . '/admin/api/' . $ver . $pathOrUrl);
     $respHeaders = [];
@@ -1027,7 +1068,7 @@ function shopifyApiCall($pathOrUrl) {
     curl_setopt_array($ch, [
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER => ['X-Shopify-Access-Token: ' . SHOPIFY_ADMIN_TOKEN, 'Accept: application/json'],
+        CURLOPT_HTTPHEADER => ['X-Shopify-Access-Token: ' . $token, 'Accept: application/json'],
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_TIMEOUT => 30,
@@ -1054,12 +1095,12 @@ function shopifyApiCall($pathOrUrl) {
 // Returns a float, or null if any page request fails.
 // ponytail: 40-page cap (~10k orders) bounds runtime — a single shop day/month
 // won't approach that; raise if it ever does.
-function shopifySumSales($minIso) {
+function shopifySumSales($minIso, $token) {
     $sum = 0.0;
     $next = '/orders.json?status=any&limit=250&fields=total_price,cancelled_at&created_at_min=' . rawurlencode($minIso);
     $pages = 0;
     while ($next && $pages < 40) {
-        $res = shopifyApiCall($next);
+        $res = shopifyApiCall($next, $token);
         if (!$res['ok']) return null;
         foreach (($res['data']['orders'] ?? []) as $o) {
             if (!empty($o['cancelled_at'])) continue;
