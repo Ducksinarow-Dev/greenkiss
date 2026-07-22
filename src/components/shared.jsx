@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, inp } from '../globals.js';
 
-/* Design intent (interface-design skill):
+/* Design intent:
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
    procedure or updating a task between customers.
    Feel: the real Green Kiss retail identity — a minimalist natural-beauty
