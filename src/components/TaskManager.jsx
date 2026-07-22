@@ -6,14 +6,9 @@ import {
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskType, inp,
   RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet, addAlert,
+  emptyTaskShape as emptyForm,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink } from './shared.jsx';
-
-const emptyForm = () => ({
-  title: "", description: "", status: "todo", priority: "medium", type: "task",
-  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [],
-  tagIds: [], recurrence: "none", links: [],
-});
 
 /* ─────────────────────────────────────────────────────────────────────
    #8 — Compact month-grid date picker (no external library). Shared by
