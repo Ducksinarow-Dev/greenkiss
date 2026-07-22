@@ -383,8 +383,12 @@ switch ($action) {
 
     case 'ack_save':
         $user = requireAuth($pdo, $body); // any authenticated user may write acks
-        $sopId = $body['sopId'] ?? '';
-        $userId = $body['userId'] ?? '';
+        // Cast to string: these become array keys below ($acks[$sopId][$userId]),
+        // and a non-scalar (e.g. a malformed/array-shaped JSON body) would fatal
+        // with "Cannot access offset of type array on array" instead of a clean
+        // 400 — verified via `php -r '$a=[]; $a[["x"]]=1;'`.
+        $sopId = (string)($body['sopId'] ?? '');
+        $userId = (string)($body['userId'] ?? '');
         if ($sopId === '' || $userId === '') respond(400, ['error' => 'Missing sopId/userId']);
         $at = $body['at'] ?? gmdate('c');
         $version = $body['version'] ?? '';
@@ -559,7 +563,7 @@ switch ($action) {
     case 'backup_download':
         $user = requireAuth($pdo, $body);
         requireRole($user, ['admin']);
-        $name = basename($_GET['file'] ?? '');
+        $name = basename((string)($_GET['file'] ?? ''));
         if (!preg_match('/^gk_[0-9_]+\.json\.gz$/', $name)) respond(400, ['error' => 'Invalid filename']);
         $path = ensureBackupsDir() . '/' . $name;
         if (!file_exists($path)) respond(404, ['error' => 'Not found']);
@@ -572,7 +576,7 @@ switch ($action) {
     case 'backup_restore':
         $user = requireAuth($pdo, $body);
         requireRole($user, ['admin']);
-        $name = basename($body['file'] ?? '');
+        $name = basename((string)($body['file'] ?? ''));
         if (!preg_match('/^gk_[0-9_]+\.json\.gz$/', $name)) respond(400, ['error' => 'Invalid filename']);
         $path = ensureBackupsDir() . '/' . $name;
         if (!file_exists($path)) respond(404, ['error' => 'Not found']);
@@ -666,7 +670,7 @@ switch ($action) {
     case 'release_rollback':
         $user = requireAuth($pdo, $body);
         requireRole($user, ['admin']);
-        $name = basename($body['name'] ?? '');
+        $name = basename((string)($body['name'] ?? ''));
         if ($name === '') respond(400, ['error' => 'Missing name']);
         maybeAutoBackup($pdo);
         // Snapshot the current (about-to-be-replaced) build first, so this
