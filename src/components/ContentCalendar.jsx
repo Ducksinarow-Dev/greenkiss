@@ -534,7 +534,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
     try {
       const src = await processAndStoreImage(file);
       set("images", [...(form.images || []), { id: uid(), src, caption: "" }]);
-    } catch { /* upload failure is surfaced by the global offline indicator */ }
+    } catch (err) { triggerToast(err.message || "Couldn't upload image"); }
     setUploading(false);
   };
   const removeImage = (id) => set("images", (form.images || []).filter(i => i.id !== id));
