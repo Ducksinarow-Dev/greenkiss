@@ -31,6 +31,7 @@ function App() {
   const [sopFocus, setSopFocus] = useState(null); // {id, mode, blockId, subId}
   const [projectFocus, setProjectFocus] = useState(null); // project id
   const [contentFocus, setContentFocus] = useState(null); // content item id
+  const [campaignFocus, setCampaignFocus] = useState(null); // campaign id (dashboard → calendar filter)
   const [playbookFocus, setPlaybookFocus] = useState(null); // playbook section id
   const [taskFocus, setTaskFocus] = useState(null); // task id (magnet deep-link)
 
@@ -75,6 +76,7 @@ function App() {
   // Dashboard "My Forms" deep-link (R4 E): open one submission in fill mode.
   const goToSubmission = (docId, subId) => { setSopFocus({ id: docId, mode: "view", blockId: null, subId }); setSection("forms"); };
   const goToContent = (id) => { setContentFocus(id); setSection("calendar"); };
+  const goToCampaign = (id) => { setCampaignFocus(id); setSection("calendar"); };
   const goToPlaybookSection = (id) => { setPlaybookFocus(id); setSection("playbook"); };
   const goToTask = (id) => { setTaskFocus(id); setSection("tasks"); };
   // Shared by both SOPLibrary mounts (library/forms) as onNavigateOut — a
@@ -87,9 +89,9 @@ function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
-      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") setContentFocus(null); if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
+      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
-        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} />}
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} />}
         {section === "store" && <StoreUpdate user={user} />}
         {section === "library" && (
           <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
@@ -104,7 +106,7 @@ function App() {
         )}
         {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} onNavigateOut={onNavigateOut} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
-        {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} onClearFocus={() => setContentFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
+        {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />

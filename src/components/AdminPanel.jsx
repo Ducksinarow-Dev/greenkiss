@@ -633,10 +633,12 @@ function AdminPanel() {
   return (
     <div className="gk-fade-in">
       <SectionHeader title="Admin Panel" sub="Manage users, categories, and backups" />
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Two-up on desktop (#25). Order pairs Users|Software Update and
+          Categories|Backups per the grid's row flow. */}
+      <div className="gk-admin-grid">
         <UsersPanel />
-        <CategoriesPanel bump={bump} />
         {REMOTE_MODE && <DeployPanel />}
+        <CategoriesPanel bump={bump} />
         {REMOTE_MODE && <BackupsPanel />}
         <ExportImportPanel />
       </div>

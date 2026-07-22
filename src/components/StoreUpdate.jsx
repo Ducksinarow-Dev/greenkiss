@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, canEdit, isAdmin, inp, triggerSaved,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
@@ -12,6 +12,18 @@ import { Btn, OBtn, IconBtn, Icon, SectionHeader, lbl } from './shared.jsx';
 
 const fmtMoney = (n, cur = "$") => cur + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+/* Progress ramp for the gauge arc (#26): red → orange → yellow → green so a
+   low number reads "behind" and staff feel it; calm green only near target.
+   oklch keeps the steps perceptually even at a soft, low chroma so they stay
+   pastel and on-brand (green anchored near the app's moss) rather than alarming. */
+function gaugeColor(pct) {
+  if (pct >= 0.9) return "oklch(0.66 0.09 150)";   // calm moss green — on/near target
+  if (pct >= 0.75) return "oklch(0.80 0.11 132)";  // yellow-green
+  if (pct >= 0.55) return "oklch(0.86 0.10 96)";   // soft yellow
+  if (pct >= 0.35) return "oklch(0.79 0.11 62)";   // soft orange
+  return "oklch(0.71 0.12 28)";                     // soft red — behind
+}
+
 /* Hand-rolled semicircle gauge — no chart dependency. Fills an arc from the
    left (0) to the right (target) proportional to value/target; caps the fill
    at 100% but shows the true percentage in the readout. */
@@ -22,7 +34,7 @@ function Speedometer({ value, target, label, currency = "$", size = 240, sample 
   const r = size * 0.40, cx = w / 2, cy = h - 4, sw = size * 0.075;
   const track = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
   const met = pct >= 1;
-  const arcColor = met ? C.moss : pct >= 0.5 ? C.moss : C.clay;
+  const arcColor = gaugeColor(pct);
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, opacity: sample ? 0.72 : 1 }}>
       <svg width={w} height={h + 4} viewBox={`0 0 ${w} ${h + 4}`} role="img"
@@ -32,12 +44,25 @@ function Speedometer({ value, target, label, currency = "$", size = 240, sample 
           <path d={track} fill="none" stroke={arcColor} strokeWidth={sw} strokeLinecap="round"
             pathLength={100} strokeDasharray="100" strokeDashoffset={100 - shown * 100} />
         )}
-        <text x={cx} y={cy - r * 0.30} textAnchor="middle" style={{ fontSize: size * 0.135, fontWeight: 800, fill: C.txt, fontFamily: "'IBM Plex Mono',monospace" }}>
-          {fmtMoney(value, currency)}
-        </text>
-        <text x={cx} y={cy - r * 0.30 + size * 0.10} textAnchor="middle" style={{ fontSize: size * 0.058, fill: C.mut }}>
-          {target > 0 ? `of ${fmtMoney(target, currency)} · ${Math.round(pct * 100)}%` : "no target set"}
-        </text>
+        {target > 0 ? (
+          <>
+            <text x={cx} y={cy - r * 0.26} textAnchor="middle" style={{ fontSize: size * 0.20, fontWeight: 800, fill: C.txt, fontFamily: "'IBM Plex Mono',monospace" }}>
+              {Math.round(pct * 100)}%
+            </text>
+            <text x={cx} y={cy - r * 0.26 + size * 0.095} textAnchor="middle" style={{ fontSize: size * 0.057, fill: C.mut }}>
+              {fmtMoney(value, currency)} / {fmtMoney(target, currency)}
+            </text>
+          </>
+        ) : (
+          <>
+            <text x={cx} y={cy - r * 0.26} textAnchor="middle" style={{ fontSize: size * 0.14, fontWeight: 800, fill: C.txt, fontFamily: "'IBM Plex Mono',monospace" }}>
+              {fmtMoney(value, currency)}
+            </text>
+            <text x={cx} y={cy - r * 0.26 + size * 0.085} textAnchor="middle" style={{ fontSize: size * 0.055, fill: C.faint }}>
+              no target set
+            </text>
+          </>
+        )}
       </svg>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{label}</span>
@@ -101,7 +126,7 @@ function StoreUpdate({ user }) {
     catch (err) { setError(err.message || "Couldn't load Shopify sales."); setSales(null); }
     setLoading(false);
   };
-  useEffect(() => { load(); }, [refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [refresh]);
 
   const { monthly, daily, weekly } = currentSalesTargets();
   const connected = !!sales;
@@ -114,7 +139,7 @@ function StoreUpdate({ user }) {
 
   return (
     <div className="gk-fade-in">
-      <SectionHeader title="Store Update" sub="Today, this week, and month-to-date sales against your targets"
+      <SectionHeader title="Store Goals" sub="Today, this week, and month-to-date sales against your targets"
         right={editable && (
           <div style={{ display: "flex", gap: 8 }}>
             {admin && <OBtn onClick={() => setEditing(true)}><Icon name="tune" size={16} />Targets</OBtn>}

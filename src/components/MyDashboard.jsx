@@ -157,10 +157,10 @@ function DashStoreStrip({ user, onOpen }) {
       onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>
-          Store{!connected && <span style={{ color: C.faint, fontWeight: 500, textTransform: "none", letterSpacing: 0, marginLeft: 8, fontFamily: "inherit" }}>· sample, connect Shopify for live sales</span>}
+          Store Goals{!connected && <span style={{ color: C.faint, fontWeight: 500, textTransform: "none", letterSpacing: 0, marginLeft: 8, fontFamily: "inherit" }}>· sample, connect Shopify for live sales</span>}
         </span>
         <span style={{ fontSize: 12.5, color: C.moss, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
-          Open Store Update <Icon name="arrow_forward" size={14} />
+          Open Store Goals <Icon name="arrow_forward" size={14} />
         </span>
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-around" }}>
@@ -182,13 +182,18 @@ const DashEmpty = ({ icon, title, sub }) => (
   </div>
 );
 
-/** Compact campaign card for the dashboard's Upcoming Campaigns column. */
-function DashCampaignCard({ campaign }) {
+/** Compact campaign card for the dashboard's Upcoming Campaigns column.
+ * Clickable (#23) — opens the Content Calendar filtered to this campaign. */
+function DashCampaignCard({ campaign, onOpen }) {
   const sm = campaignStatusMeta[campaign.status] || { label: campaign.status, col: C.mut };
   return (
-    <div style={{ display: "flex", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 11, overflow: "hidden" }}>
+    <div onClick={onOpen} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen && onOpen(); } }}
+      style={{ display: "flex", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 12, overflow: "hidden", cursor: "pointer", transition: "border-color .15s" }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+      onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
       <div style={{ width: 5, background: campaign.color || C.moss, flexShrink: 0 }} />
-      <div style={{ padding: "11px 13px", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ padding: "12px 14px", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
         <span style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{campaign.name || "Untitled campaign"}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: sm.col, background: sm.col + "1F", padding: "2px 8px", borderRadius: 99 }}>{sm.label}</span>
@@ -203,7 +208,7 @@ function DashCampaignCard({ campaign }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onNavigateOut, onOpenStore }) {
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -364,7 +369,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onN
           <SecTitle>Upcoming Campaigns</SecTitle>
           {upcomingCampaigns.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {upcomingCampaigns.map(c => <DashCampaignCard key={c.id} campaign={c} />)}
+              {upcomingCampaigns.map(c => <DashCampaignCard key={c.id} campaign={c} onOpen={() => onOpenCampaign && onOpenCampaign(c.id)} />)}
             </div>
           ) : (
             <DashEmpty icon="campaign" title="No upcoming campaigns" sub="Campaigns with a current or future date range show here." />
@@ -380,7 +385,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onN
                   <div key={f.id} onClick={() => onOpenSubmission && onOpenSubmission(f.docId, f.id)} role="button" tabIndex={0}
                     onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenSubmission && onOpenSubmission(f.docId, f.id); } }}
                     style={{
-                      display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 10,
+                      display: "flex", alignItems: "center", gap: 11, padding: "12px 14px", borderRadius: 12,
                       background: C.sur, border: `1.5px solid ${C.bdr}`, cursor: "pointer", transition: "border-color .15s",
                     }}
                     onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}

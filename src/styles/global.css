@@ -27,6 +27,11 @@ textarea { resize: vertical; }
 .gk-slide-in { animation: gkSlideIn .2s cubic-bezier(.2,.7,.3,1); }
 @keyframes gkSlideIn { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
+/* Admin Panel cards: single column on narrow screens, two-up (50%) on desktop
+   (#25). Inline styles can't do media queries, so the grid lives here. */
+.gk-admin-grid { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+@media (min-width: 820px) { .gk-admin-grid { grid-template-columns: 1fr 1fr; } }
+
 /* ─── ACCESSIBILITY: visible focus ring for keyboard nav ────────────
    --gk-focus is kept in sync with C.bdrFocus by setTheme() in globals.js
    so it tracks the light/dark accent automatically. */

@@ -900,7 +900,7 @@ function CampaignsView({ campaigns, items, users, editable, onOpenCampaign, onNe
 }
 
 /* ─── ROOT ───────────────────────────────────────────────────────────── */
-function ContentCalendar({ user, focusItemId, onClearFocus, onOpenSop, onNavigateOut }) {
+function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onClearCampaignFocus, onOpenSop, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
   const [tab, setTab] = useState("calendar");
@@ -932,6 +932,17 @@ function ContentCalendar({ user, focusItemId, onClearFocus, onOpenSop, onNavigat
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusItemId]);
+
+  // Dashboard "Upcoming Campaigns" click (#23): land on the calendar filtered
+  // to that campaign, so its items + date band are front-and-centre.
+  React.useEffect(() => {
+    if (focusCampaignId) {
+      setFilterCampaign(focusCampaignId);
+      setTab("calendar");
+      onClearCampaignFocus && onClearCampaignFocus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusCampaignId]);
 
   const items = allItems.filter(i => {
     if (filterChannel && i.channel !== filterChannel) return false;

@@ -8,7 +8,7 @@ import gkLogo from '../assets/gk-logo.svg';
    this list; it's pinned at the bottom of the sidebar for admins. */
 const NAV_ITEMS = [
   { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
-  { key: "store", label: "Store Update", icon: "speed" },
+  { key: "store", label: "Store Goals", icon: "speed" },
   { divider: true },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
   { key: "projects", label: "Projects", icon: "folder_special" },
