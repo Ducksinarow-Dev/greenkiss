@@ -194,146 +194,82 @@ switch ($action) {
 
     case 'task_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $task = $body['task'] ?? null;
-        if (!is_array($task) || empty($task['id'])) respond(400, ['error' => 'Missing task']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'tasks' => collectionUpsert($pdo, 'tasks', $task)]);
+        handleCollectionSave($pdo, $body, $user, 'task', 'tasks');
         break;
 
     case 'task_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'tasks' => collectionDelete($pdo, 'tasks', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'tasks');
         break;
 
     case 'project_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $project = $body['project'] ?? null;
-        if (!is_array($project) || empty($project['id'])) respond(400, ['error' => 'Missing project']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'projects' => collectionUpsert($pdo, 'projects', $project)]);
+        handleCollectionSave($pdo, $body, $user, 'project', 'projects');
         break;
 
     case 'project_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'projects' => collectionDelete($pdo, 'projects', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'projects');
         break;
 
     case 'campaign_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $campaign = $body['campaign'] ?? null;
-        if (!is_array($campaign) || empty($campaign['id'])) respond(400, ['error' => 'Missing campaign']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'campaigns' => collectionUpsert($pdo, 'campaigns', $campaign)]);
+        handleCollectionSave($pdo, $body, $user, 'campaign', 'campaigns');
         break;
 
     case 'campaign_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'campaigns' => collectionDelete($pdo, 'campaigns', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'campaigns');
         break;
 
     case 'content_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $item = $body['item'] ?? null;
-        if (!is_array($item) || empty($item['id'])) respond(400, ['error' => 'Missing item']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'content' => collectionUpsert($pdo, 'content', $item)]);
+        handleCollectionSave($pdo, $body, $user, 'item', 'content');
         break;
 
     case 'content_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'content' => collectionDelete($pdo, 'content', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'content');
         break;
 
     case 'category_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $category = $body['category'] ?? null;
-        if (!is_array($category) || empty($category['id'])) respond(400, ['error' => 'Missing category']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'categories' => collectionUpsert($pdo, 'categories', $category)]);
+        handleCollectionSave($pdo, $body, $user, 'category', 'categories');
         break;
 
     case 'category_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'categories' => collectionDelete($pdo, 'categories', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'categories');
         break;
 
     case 'tag_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $tag = $body['tag'] ?? null;
-        if (!is_array($tag) || empty($tag['id'])) respond(400, ['error' => 'Missing tag']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'tags' => collectionUpsert($pdo, 'tags', $tag)]);
+        handleCollectionSave($pdo, $body, $user, 'tag', 'tags');
         break;
 
     case 'tag_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'tags' => collectionDelete($pdo, 'tags', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'tags');
         break;
 
     case 'contact_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $contact = $body['contact'] ?? null;
-        if (!is_array($contact) || empty($contact['id'])) respond(400, ['error' => 'Missing contact']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'contacts' => collectionUpsert($pdo, 'contacts', $contact)]);
+        handleCollectionSave($pdo, $body, $user, 'contact', 'contacts');
         break;
 
     case 'contact_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'contacts' => collectionDelete($pdo, 'contacts', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'contacts');
         break;
 
     case 'instance_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $instance = $body['instance'] ?? null;
-        if (!is_array($instance) || empty($instance['id'])) respond(400, ['error' => 'Missing instance']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'instances' => collectionUpsert($pdo, 'instances', $instance)]);
+        handleCollectionSave($pdo, $body, $user, 'instance', 'instances');
         break;
 
     case 'instance_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'instances' => collectionDelete($pdo, 'instances', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'instances');
         break;
 
     case 'alert_save':
@@ -365,20 +301,12 @@ switch ($action) {
 
     case 'template_save':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $template = $body['template'] ?? null;
-        if (!is_array($template) || empty($template['id'])) respond(400, ['error' => 'Missing template']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'taskTemplates' => collectionUpsert($pdo, 'taskTemplates', $template)]);
+        handleCollectionSave($pdo, $body, $user, 'template', 'taskTemplates');
         break;
 
     case 'template_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'taskTemplates' => collectionDelete($pdo, 'taskTemplates', $id)]);
+        handleCollectionDelete($pdo, $body, $user, 'taskTemplates');
         break;
 
     case 'ack_save':
@@ -937,6 +865,30 @@ function collectionDelete($pdo, $key, $id) {
     $list = array_values(array_filter($list, function ($x) use ($id) { return ($x['id'] ?? null) !== $id; }));
     kvSet($pdo, $key, $list);
     return $list;
+}
+
+// The *_save/*_delete cases above (task, project, campaign, content,
+// category, tag, contact, instance, template) were all the same 6-7 lines
+// of editor/admin gate + validate + backup + upsert-or-delete, differing
+// only in the body key and kv key — collapsed here so a future tweak to
+// that flow (e.g. the validation or the auto-backup call) happens once.
+// alert_save/alert_delete stay hand-written in the switch above: any
+// authenticated user (not just editor/admin) may create one, and delete
+// has an ownership check instead of a plain role gate.
+function handleCollectionSave($pdo, $body, $user, $bodyKey, $kvKey) {
+    requireRole($user, ['editor', 'admin']);
+    $item = $body[$bodyKey] ?? null;
+    if (!is_array($item) || empty($item['id'])) respond(400, ['error' => 'Missing ' . $bodyKey]);
+    maybeAutoBackup($pdo);
+    respond(200, ['ok' => true, $kvKey => collectionUpsert($pdo, $kvKey, $item)]);
+}
+
+function handleCollectionDelete($pdo, $body, $user, $kvKey) {
+    requireRole($user, ['editor', 'admin']);
+    $id = $body['id'] ?? '';
+    if ($id === '') respond(400, ['error' => 'Missing id']);
+    maybeAutoBackup($pdo);
+    respond(200, ['ok' => true, $kvKey => collectionDelete($pdo, $kvKey, $id)]);
 }
 
 // Minimal curl wrapper for cPanel's UAPI (Authorization: cpanel header).
