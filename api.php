@@ -64,6 +64,7 @@
  *   GET   calendar_feed    ?token=      - UNAUTHENTICATED; text/calendar feed of the user's dated content
  *   GET   omnisend_campaigns_list       - editor/admin; proxied Omnisend campaign list (key stays server-side)
  *   GET   omnisend_campaign_stats ?id=  - editor/admin; proxied Omnisend stats {opens,clicks,revenue}
+ *   GET   shopify_sales                 - editor/admin; today + month-to-date sales summed from Shopify (key server-side)
  */
 
 header('Content-Type: application/json');
@@ -808,6 +809,33 @@ switch ($action) {
         ]]);
         break;
 
+    case 'shopify_sales':
+        // Store Update gauges (#21): today's + month-to-date sales summed from
+        // the Shopify Orders REST API. Day boundaries use the SHOP's own
+        // timezone (fetched from shop.json) so "today" matches what staff see
+        // in Shopify admin, not the server's UTC. Only the last ~60 days of
+        // orders are available by default — fine for today + MTD.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $shopRes = shopifyApiCall('/shop.json');
+        if (!$shopRes['ok']) respond(502, ['error' => $shopRes['error']]);
+        $tz = $shopRes['data']['shop']['iana_timezone'] ?? 'UTC';
+        try { $zone = new DateTimeZone($tz); } catch (Exception $e) { $zone = new DateTimeZone('UTC'); }
+        $now = new DateTime('now', $zone);
+        $dayStart = (clone $now)->setTime(0, 0, 0);
+        $monthStart = new DateTime($now->format('Y-m-01 00:00:00'), $zone);
+        $today = shopifySumSales($dayStart->format('c'));
+        $mtd = shopifySumSales($monthStart->format('c'));
+        if ($today === null || $mtd === null) respond(502, ['error' => 'Shopify request failed while summing orders.']);
+        respond(200, ['sales' => [
+            'today' => $today,
+            'monthToDate' => $mtd,
+            'currency' => $shopRes['data']['shop']['currency'] ?? '',
+            'timezone' => $tz,
+            'asOf' => $now->format('c'),
+        ]]);
+        break;
+
     default:
         respond(404, ['error' => 'Unknown action']);
 }
@@ -978,6 +1006,69 @@ function omnisendApiCall($path, $method = 'GET', $reqBody = null) {
         return ['ok' => false, 'error' => 'Omnisend returned HTTP ' . $httpCode . (is_array($data) && isset($data['error']) ? ' — ' . $data['error'] : '')];
     }
     return ['ok' => true, 'data' => is_array($data) ? $data : []];
+}
+
+// Shopify Admin REST API wrapper. Custom-app auth via X-Shopify-Access-Token.
+// Accepts a relative path ("/orders.json?...") or an absolute URL (used to
+// follow the Link-header "next" cursor for pagination). Returns
+// {ok, data, error, nextUrl}. Token/domain stay server-side.
+// ponytail: REST is Shopify's "legacy" API but still supported for custom
+// apps; upgrade path is the GraphQL Admin API (or ShopifyQL for aggregates)
+// only if Shopify ever drops REST for custom apps.
+function shopifyApiCall($pathOrUrl) {
+    if (!defined('SHOPIFY_STORE_DOMAIN') || SHOPIFY_STORE_DOMAIN === '' || strpos(SHOPIFY_STORE_DOMAIN, 'PASTE_') === 0
+        || !defined('SHOPIFY_ADMIN_TOKEN') || SHOPIFY_ADMIN_TOKEN === '' || strpos(SHOPIFY_ADMIN_TOKEN, 'PASTE_') === 0) {
+        return ['ok' => false, 'error' => 'Shopify is not configured yet. Add SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN to config.php.'];
+    }
+    $ver = (defined('SHOPIFY_API_VERSION') && SHOPIFY_API_VERSION) ? SHOPIFY_API_VERSION : '2025-07';
+    $url = strpos($pathOrUrl, 'http') === 0 ? $pathOrUrl : ('https://' . SHOPIFY_STORE_DOMAIN . '/admin/api/' . $ver . $pathOrUrl);
+    $respHeaders = [];
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['X-Shopify-Access-Token: ' . SHOPIFY_ADMIN_TOKEN, 'Accept: application/json'],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_HEADERFUNCTION => function ($ch, $header) use (&$respHeaders) { $respHeaders[] = $header; return strlen($header); },
+    ]);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch) ?: null;
+    curl_close($ch);
+    if ($curlError) return ['ok' => false, 'error' => 'Shopify request failed: ' . $curlError];
+    $data = $raw !== false ? json_decode($raw, true) : null;
+    if ($httpCode < 200 || $httpCode >= 300) {
+        return ['ok' => false, 'error' => 'Shopify returned HTTP ' . $httpCode];
+    }
+    $nextUrl = null;
+    foreach ($respHeaders as $h) {
+        if (stripos($h, 'Link:') === 0 && preg_match('/<([^>]+)>;\s*rel="next"/i', $h, $m)) $nextUrl = $m[1];
+    }
+    return ['ok' => true, 'data' => is_array($data) ? $data : [], 'nextUrl' => $nextUrl];
+}
+
+// Sums order total_price (post-discount/refund, store currency) for orders
+// created since $minIso, following the Link cursor. Skips cancelled orders.
+// Returns a float, or null if any page request fails.
+// ponytail: 40-page cap (~10k orders) bounds runtime — a single shop day/month
+// won't approach that; raise if it ever does.
+function shopifySumSales($minIso) {
+    $sum = 0.0;
+    $next = '/orders.json?status=any&limit=250&fields=total_price,cancelled_at&created_at_min=' . rawurlencode($minIso);
+    $pages = 0;
+    while ($next && $pages < 40) {
+        $res = shopifyApiCall($next);
+        if (!$res['ok']) return null;
+        foreach (($res['data']['orders'] ?? []) as $o) {
+            if (!empty($o['cancelled_at'])) continue;
+            $sum += (float)($o['total_price'] ?? 0);
+        }
+        $next = $res['nextUrl'] ?? null;
+        $pages++;
+    }
+    return round($sum, 2);
 }
 
 function saveRevision($pdo, $sopId, $snapshot, $savedBy) {
