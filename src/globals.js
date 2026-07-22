@@ -1438,6 +1438,28 @@ async function getIcsSubscribeUrl() {
   return `${origin}/${API_BASE}?action=calendar_feed&token=${encodeURIComponent(res.token)}`;
 }
 
+/* ─── STORE UPDATE — Shopify sales vs seasonal targets (#21) ───────────
+   Live sales (today + month-to-date) come from the server-side Shopify
+   proxy (token never reaches the client). Targets are a per-month-of-year
+   table (seasonal) stored in kv, admin-editable. */
+async function fetchShopifySales() {
+  if (!REMOTE_MODE) return null; // ponytail: no server proxy in dev; UI shows "connect Shopify"
+  const res = await apiCall("shopify_sales", { method: "GET" });
+  return res.sales || null; // {today, monthToDate, currency, timezone, asOf}
+}
+/** Seasonal targets keyed by month number 1–12. @returns {{[m:string]:number}} */
+const getSalesTargets = () => db.getSync("salesTargets") || {};
+const saveSalesTargets = (t) => db.setSync("salesTargets", t);
+/** This month's target, and a daily target = monthly ÷ days in month. */
+function currentSalesTargets() {
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const monthly = Number(getSalesTargets()[m]) || 0;
+  const daysInMonth = new Date(now.getFullYear(), m, 0).getDate();
+  return { monthly, daily: monthly ? monthly / daysInMonth : 0, month: m, daysInMonth };
+}
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 const _mk = (title, blocks) => ({ id: uid(), title, blocks });
 const _txt = (t) => ({ id: uid(), type: "text", text: t });
 const _head = (t, d = "") => ({ id: uid(), type: "heading", text: t, description: d });
@@ -2194,6 +2216,7 @@ export {
   getImageRepo, saveImageRepo, seedImageRepoIfEmpty, letterOf,
   getToolsPrompts, saveToolsPrompts,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
+  fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, getAckFor, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,

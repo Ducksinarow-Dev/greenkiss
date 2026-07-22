@@ -10,6 +10,7 @@ import ToolsPromptsRepository from './components/ToolsPromptsRepository.jsx';
 import TaskManager from './components/TaskManager.jsx';
 import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
+import StoreUpdate from './components/StoreUpdate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
 import LoginReminders from './components/LoginReminders.jsx';
@@ -88,7 +89,8 @@ function App() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
       <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") setContentFocus(null); if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
-        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} />}
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} />}
+        {section === "store" && <StoreUpdate user={user} />}
         {section === "library" && (
           <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
         )}

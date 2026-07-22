@@ -43,3 +43,14 @@ define('CPANEL_REPO_PATH', '/home/hubthegreenkiss/repositories/greenkiss');
 // Leave as the placeholder and the email-metrics buttons return a clear
 // "not configured" error instead of a fatal. Key stays server-side only.
 define('OMNISEND_API_KEY', 'PASTE_A_REAL_OMNISEND_API_KEY_HERE');
+
+// ── Shopify (Store Update → sales vs targets) ───────────────────────────
+// Create a custom app in Shopify admin → Settings → Apps and sales channels
+// → Develop apps → Create an app → Admin API scopes: enable read_orders (and
+// read the shop) → Install → reveal the Admin API access token. Domain is the
+// permanent *.myshopify.com one (Settings → Domains), e.g. thegreenkiss.myshopify.com.
+// Leave placeholders and the Store Update gauges show a clear "connect Shopify"
+// state instead of a fatal. Token stays server-side only.
+define('SHOPIFY_STORE_DOMAIN', 'PASTE_YOUR_STORE.myshopify.com');
+define('SHOPIFY_ADMIN_TOKEN', 'PASTE_A_REAL_SHOPIFY_ADMIN_API_TOKEN_HERE');
+define('SHOPIFY_API_VERSION', '2025-07'); // bump to a newer stable version as Shopify releases them

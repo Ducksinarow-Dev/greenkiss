@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, getTasks, updateTask, deleteTask, getUsers, getSOPs, getProjects,
   getContentItems, updateContentItem, getCampaigns, campaignStatusMeta, contentChannelMeta, getTags,
-  getAlerts, deleteAlert, fmtDate, getAllInstances, formColor,
+  getAlerts, deleteAlert, fmtDate, getAllInstances, formColor, canEdit,
+  fetchShopifySales, currentSalesTargets,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
 } from '../globals.js';
 import { Icon, IconBtn } from './shared.jsx';
+import { Speedometer } from './StoreUpdate.jsx';
 import { TaskModal } from './TaskManager.jsx';
 import { ProjectCard } from './Projects.jsx';
 
@@ -130,6 +132,44 @@ const SecTitle = ({ children }) => (
   <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, marginBottom: 12 }}>{children}</div>
 );
 
+/** Compact month-to-date sales gauge for the top of the dashboard (editors/
+ * admins only — the same roles the Shopify proxy allows). Self-fetches; falls
+ * back to a labelled sample when Shopify isn't connected, mirroring StoreUpdate. */
+function DashStoreStrip({ user, onOpen }) {
+  const [sales, setSales] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchShopifySales().then(s => { if (alive) setSales(s); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  if (!canEdit(user)) return null;
+  const { monthly } = currentSalesTargets();
+  const connected = !!sales;
+  const cur = sales?.currency === "USD" || sales?.currency === "CAD" ? "$" : (sales?.currency ? sales.currency + " " : "$");
+  const monthVal = connected ? sales.monthToDate : monthly * 0.62;
+  const money = (n) => cur + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return (
+    <div onClick={onOpen} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen && onOpen(); } }}
+      style={{ display: "flex", alignItems: "center", gap: 18, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "14px 20px", marginBottom: 22, cursor: "pointer", transition: "border-color .15s" }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+      onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
+      <Speedometer label="Month to date" value={monthVal} target={monthly} currency={cur} size={148} sample={!connected} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Store</div>
+        {connected ? (
+          <div style={{ fontSize: 13, color: C.mut, marginTop: 5 }}>Today so far: <b style={{ color: C.txt }}>{money(sales.today)}</b></div>
+        ) : (
+          <div style={{ fontSize: 12.5, color: C.faint, marginTop: 5 }}>Sample — connect Shopify for live sales.</div>
+        )}
+        <div style={{ fontSize: 12.5, color: C.moss, fontWeight: 600, marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+          Open Store Update <Icon name="arrow_forward" size={14} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Small per-column empty state — the dashboard is now split into columns,
  * so each one carries its own quiet "nothing here yet" instead of one big card. */
 const DashEmpty = ({ icon, title, sub }) => (
@@ -161,7 +201,7 @@ function DashCampaignCard({ campaign }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onNavigateOut }) {
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onNavigateOut, onOpenStore }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -283,6 +323,8 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenSubmission, onN
       </div>
 
       <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
+
+      <DashStoreStrip user={user} onOpen={onOpenStore} />
 
       {/* Top row — Tasks 50% | Projects 50% */}
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 22 }}>
