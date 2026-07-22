@@ -829,12 +829,15 @@ switch ($action) {
         try { $zone = new DateTimeZone($tz); } catch (Exception $e) { $zone = new DateTimeZone('UTC'); $tz = 'UTC'; }
         $now = new DateTime('now', $zone);
         $dayStart = (clone $now)->setTime(0, 0, 0);
+        $weekStart = (clone $now)->modify('monday this week')->setTime(0, 0, 0); // week = Mon–today
         $monthStart = new DateTime($now->format('Y-m-01 00:00:00'), $zone);
         $today = shopifySumSales($dayStart->format('c'), $token);
+        $wtd = shopifySumSales($weekStart->format('c'), $token);
         $mtd = shopifySumSales($monthStart->format('c'), $token);
-        if ($today === null || $mtd === null) respond(502, ['error' => 'Shopify request failed while summing orders.']);
+        if ($today === null || $wtd === null || $mtd === null) respond(502, ['error' => 'Shopify request failed while summing orders.']);
         respond(200, ['sales' => [
             'today' => $today,
+            'weekToDate' => $wtd,
             'monthToDate' => $mtd,
             'currency' => $currency,
             'timezone' => $tz,
