@@ -164,9 +164,9 @@ function DashStoreStrip({ user, onOpen }) {
         </span>
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-around" }}>
-        <Speedometer label="Today" value={todayVal} target={daily} currency={cur} size={132} sample={!connected} />
-        <Speedometer label="This week" value={weekVal} target={weekly} currency={cur} size={132} sample={!connected} />
-        <Speedometer label="This month" value={monthVal} target={monthly} currency={cur} size={132} sample={!connected} />
+        <Speedometer label="Today" value={todayVal} target={daily} currency={cur} size={132} sample={!connected} timePeriod="day" />
+        <Speedometer label="This week" value={weekVal} target={weekly} currency={cur} size={132} sample={!connected} timePeriod="week" />
+        <Speedometer label="This month" value={monthVal} target={monthly} currency={cur} size={132} sample={!connected} timePeriod="month" />
       </div>
     </div>
   );

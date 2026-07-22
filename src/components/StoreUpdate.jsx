@@ -24,10 +24,52 @@ function gaugeColor(pct) {
   return "oklch(0.71 0.12 28)";                     // soft red — behind
 }
 
+/* How far through the current day / week (Mon-start) / month we are, plus a
+   human "time left" label. Uses the viewer's local clock — staff are in the
+   store's timezone, so this is close enough for a pace read (the sales numbers
+   themselves still use the shop timezone server-side). */
+function periodProgress(period) {
+  const now = new Date();
+  let start, end, remaining;
+  if (period === "week") {
+    start = new Date(now); const dow = (start.getDay() + 6) % 7; // Mon = 0
+    start.setDate(start.getDate() - dow); start.setHours(0, 0, 0, 0);
+    end = new Date(start); end.setDate(end.getDate() + 7);
+    const d = Math.ceil((end - now) / 86400000);
+    remaining = `${d} day${d === 1 ? "" : "s"} left this week`;
+  } else if (period === "month") {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const d = Math.ceil((end - now) / 86400000);
+    remaining = `${d} day${d === 1 ? "" : "s"} left this month`;
+  } else { // day
+    start = new Date(now); start.setHours(0, 0, 0, 0);
+    end = new Date(start); end.setDate(end.getDate() + 1);
+    const ms = end - now, h = Math.floor(ms / 3600000), m = Math.floor((ms % 3600000) / 60000);
+    remaining = h >= 1 ? `${h}h ${m}m left today` : `${m}m left today`;
+  }
+  return { pct: Math.min(1, Math.max(0, (now - start) / (end - start))), remaining };
+}
+
+/* Thin "time elapsed" bar shown under a gauge. Neutral fill (not the gauge's
+   semantic colors) so it reads as a separate pace reference: if the time bar is
+   fuller than the sales arc, you're behind. */
+function TimeMeter({ period, width = 160 }) {
+  const { pct, remaining } = periodProgress(period);
+  return (
+    <div style={{ width, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ height: 5, borderRadius: 99, background: C.bdr, overflow: "hidden" }}>
+        <div style={{ width: `${pct * 100}%`, height: "100%", background: C.faint, borderRadius: 99 }} />
+      </div>
+      <div style={{ fontSize: 10.5, color: C.faint, textAlign: "center" }}>{remaining}</div>
+    </div>
+  );
+}
+
 /* Hand-rolled semicircle gauge — no chart dependency. Fills an arc from the
    left (0) to the right (target) proportional to value/target; caps the fill
    at 100% but shows the true percentage in the readout. */
-function Speedometer({ value, target, label, currency = "$", size = 240, sample = false }) {
+function Speedometer({ value, target, label, currency = "$", size = 240, sample = false, timePeriod }) {
   const pct = target > 0 ? value / target : 0;
   const shown = Math.max(0, Math.min(pct, 1));
   const w = size, h = size * 0.60;
@@ -68,6 +110,7 @@ function Speedometer({ value, target, label, currency = "$", size = 240, sample 
         <span style={{ fontSize: 12, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{label}</span>
         {met && target > 0 && <Icon name="check_circle" size={15} style={{ color: C.moss }} title="Target met" />}
       </div>
+      {timePeriod && <TimeMeter period={timePeriod} width={size * 0.72} />}
     </div>
   );
 }
@@ -159,9 +202,9 @@ function StoreUpdate({ user }) {
       )}
 
       <div style={{ display: "flex", gap: 22, flexWrap: "wrap", justifyContent: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "26px 20px" }}>
-        <Speedometer label="Today" value={todayVal} target={daily} currency={currency} sample={!connected} />
-        <Speedometer label="This week" value={weekVal} target={weekly} currency={currency} sample={!connected} />
-        <Speedometer label="Month to date" value={monthVal} target={monthly} currency={currency} sample={!connected} />
+        <Speedometer label="Today" value={todayVal} target={daily} currency={currency} sample={!connected} timePeriod="day" />
+        <Speedometer label="This week" value={weekVal} target={weekly} currency={currency} sample={!connected} timePeriod="week" />
+        <Speedometer label="Month to date" value={monthVal} target={monthly} currency={currency} sample={!connected} timePeriod="month" />
       </div>
 
       {connected && (
