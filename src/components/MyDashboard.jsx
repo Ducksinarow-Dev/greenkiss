@@ -143,28 +143,30 @@ function DashStoreStrip({ user, onOpen }) {
     return () => { alive = false; };
   }, []);
   if (!canEdit(user)) return null;
-  const { monthly } = currentSalesTargets();
+  const { monthly, daily, weekly } = currentSalesTargets();
   const connected = !!sales;
   const cur = sales?.currency === "USD" || sales?.currency === "CAD" ? "$" : (sales?.currency ? sales.currency + " " : "$");
+  const todayVal = connected ? sales.today : daily * 0.62;
+  const weekVal = connected ? sales.weekToDate : weekly * 0.62;
   const monthVal = connected ? sales.monthToDate : monthly * 0.62;
-  const money = (n) => cur + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
   return (
     <div onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen && onOpen(); } }}
-      style={{ display: "flex", alignItems: "center", gap: 18, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "14px 20px", marginBottom: 22, cursor: "pointer", transition: "border-color .15s" }}
+      style={{ display: "flex", flexDirection: "column", gap: 8, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "14px 20px", marginBottom: 22, cursor: "pointer", transition: "border-color .15s" }}
       onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
       onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
-      <Speedometer label="Month to date" value={monthVal} target={monthly} currency={cur} size={148} sample={!connected} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Store</div>
-        {connected ? (
-          <div style={{ fontSize: 13, color: C.mut, marginTop: 5 }}>Today so far: <b style={{ color: C.txt }}>{money(sales.today)}</b></div>
-        ) : (
-          <div style={{ fontSize: 12.5, color: C.faint, marginTop: 5 }}>Sample — connect Shopify for live sales.</div>
-        )}
-        <div style={{ fontSize: 12.5, color: C.moss, fontWeight: 600, marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.txt2, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>
+          Store{!connected && <span style={{ color: C.faint, fontWeight: 500, textTransform: "none", letterSpacing: 0, marginLeft: 8, fontFamily: "inherit" }}>· sample, connect Shopify for live sales</span>}
+        </span>
+        <span style={{ fontSize: 12.5, color: C.moss, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
           Open Store Update <Icon name="arrow_forward" size={14} />
-        </div>
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-around" }}>
+        <Speedometer label="Today" value={todayVal} target={daily} currency={cur} size={132} sample={!connected} />
+        <Speedometer label="This week" value={weekVal} target={weekly} currency={cur} size={132} sample={!connected} />
+        <Speedometer label="This month" value={monthVal} target={monthly} currency={cur} size={132} sample={!connected} />
       </div>
     </div>
   );

@@ -1456,7 +1456,8 @@ function currentSalesTargets() {
   const m = now.getMonth() + 1;
   const monthly = Number(getSalesTargets()[m]) || 0;
   const daysInMonth = new Date(now.getFullYear(), m, 0).getDate();
-  return { monthly, daily: monthly ? monthly / daysInMonth : 0, month: m, daysInMonth };
+  const daily = monthly ? monthly / daysInMonth : 0;
+  return { monthly, daily, weekly: daily * 7, month: m, daysInMonth };
 }
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 

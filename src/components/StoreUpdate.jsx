@@ -103,17 +103,18 @@ function StoreUpdate({ user }) {
   };
   useEffect(() => { load(); }, [refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { monthly, daily } = currentSalesTargets();
+  const { monthly, daily, weekly } = currentSalesTargets();
   const connected = !!sales;
   const currency = sales?.currency ? (sales.currency === "USD" || sales.currency === "CAD" ? "$" : sales.currency + " ") : "$";
   // Not connected → illustrative sample (62% of target) so the gauges + layout
   // are still visible/verifiable; clearly labelled so nobody mistakes it for real.
   const todayVal = connected ? sales.today : daily * 0.62;
+  const weekVal = connected ? sales.weekToDate : weekly * 0.62;
   const monthVal = connected ? sales.monthToDate : monthly * 0.62;
 
   return (
     <div className="gk-fade-in">
-      <SectionHeader title="Store Update" sub="Today's and month-to-date sales against your targets"
+      <SectionHeader title="Store Update" sub="Today, this week, and month-to-date sales against your targets"
         right={editable && (
           <div style={{ display: "flex", gap: 8 }}>
             {admin && <OBtn onClick={() => setEditing(true)}><Icon name="tune" size={16} />Targets</OBtn>}
@@ -127,13 +128,14 @@ function StoreUpdate({ user }) {
           <div style={{ fontSize: 13, color: C.txt2 }}>
             {error
               ? error
-              : "Shopify isn't connected yet — the gauges below are a sample. Add your Shopify Admin API token on the server to see live sales."}
+              : "Shopify isn't connected yet — the gauges below are a sample. Add your Shopify credentials on the server to see live sales."}
           </div>
         </div>
       )}
 
       <div style={{ display: "flex", gap: 22, flexWrap: "wrap", justifyContent: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "26px 20px" }}>
         <Speedometer label="Today" value={todayVal} target={daily} currency={currency} sample={!connected} />
+        <Speedometer label="This week" value={weekVal} target={weekly} currency={currency} sample={!connected} />
         <Speedometer label="Month to date" value={monthVal} target={monthly} currency={currency} sample={!connected} />
       </div>
 
