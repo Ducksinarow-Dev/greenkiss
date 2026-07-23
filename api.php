@@ -39,11 +39,9 @@
  *   POST  category_save     {category}   - editor/admin; upsert one category by id
  *   POST  category_delete   {id}         - editor/admin
  *   POST  tag_save          {tag}        - editor/admin; upsert one tag by id (#8)
- *   POST  tag_delete        {id}         - editor/admin
  *   POST  contact_save      {contact}    - editor/admin; upsert one contact by id
  *   POST  contact_delete    {id}         - editor/admin
  *   POST  instance_save     {instance}   - editor/admin; upsert one SOP/Form fill-out instance by id
- *   POST  instance_delete   {id}         - editor/admin
  *   POST  alert_save        {alert}      - any authenticated user; upsert one alert by id (#9)
  *   POST  alert_delete      {id}         - alert's target, its creator, or admin
  *   POST  template_save     {template}   - editor/admin; upsert one task template by id (#9)
@@ -291,15 +289,6 @@ switch ($action) {
         respond(200, ['ok' => true, 'tags' => collectionUpsert($pdo, 'tags', $tag)]);
         break;
 
-    case 'tag_delete':
-        $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'tags' => collectionDelete($pdo, 'tags', $id)]);
-        break;
-
     case 'contact_save':
         $user = requireAuth($pdo, $body);
         requireRole($user, ['editor', 'admin']);
@@ -325,15 +314,6 @@ switch ($action) {
         if (!is_array($instance) || empty($instance['id'])) respond(400, ['error' => 'Missing instance']);
         maybeAutoBackup($pdo);
         respond(200, ['ok' => true, 'instances' => collectionUpsert($pdo, 'instances', $instance)]);
-        break;
-
-    case 'instance_delete':
-        $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'instances' => collectionDelete($pdo, 'instances', $id)]);
         break;
 
     case 'alert_save':
