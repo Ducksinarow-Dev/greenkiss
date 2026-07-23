@@ -450,7 +450,6 @@ const db = {
    Runs once right after login (and once on page reload if a session is
    already stored). Warms the same _cache Map dev mode seeds locally. */
 let _remoteWarm = false;
-const isRemoteMode = () => REMOTE_MODE;
 const isRemoteWarm = () => !REMOTE_MODE || _remoteWarm;
 async function remoteBootstrap() {
   const [all, roster] = await Promise.all([
@@ -728,19 +727,6 @@ const addTag = (name, color) => {
   saveTags(next);
   return newTag;
 };
-const updateTag = (id, changes) => {
-  const next = getTags().map(t => t.id === id ? { ...t, ...changes } : t);
-  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionSave("tag_save", "tag", next.find(t => t.id === id), "tags"); return next; }
-  saveTags(next);
-  return next;
-};
-const deleteTag = (id) => {
-  const next = getTags().filter(t => t.id !== id);
-  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionDelete("tag_delete", id, "tags"); }
-  else saveTags(next);
-  // Unlink rather than cascade-fail — tasks just lose the tag chip.
-  saveTasks(getTasks().map(t => (t.tagIds || []).includes(id) ? { ...t, tagIds: t.tagIds.filter(x => x !== id) } : t));
-};
 
 /* ─── CONTACT STORAGE (internal team + vendor contacts for Playbook Key
    Contacts and @person mentions) — same per-record collision-safe shape
@@ -1014,15 +1000,6 @@ function seedStandardSections() {
   return toAdd.length;
 }
 
-/** True if a document has any block that captures per-run fill state
- * (checklist / list-with-entry / completion) — gates whether SOPViewer
- * shows the Instances "Today's Run" UI at all (Phase 2). Reference-only
- * docs (vendor directory, appendices) have none of these and behave
- * exactly as a plain read-only document. */
-const hasFillableBlocks = (blocks) => (blocks || []).some(b =>
-  b.type === "checklist" || b.type === "completion" || (b.type === "list" && b.withEntry)
-);
-
 /** Full-text search across title + all block text/labels/urls/captions. */
 const sopMatchesSearch = (sop, query) => {
   if (!query) return true;
@@ -1069,11 +1046,6 @@ const updateInstance = (id, changes) => {
   saveInstances(next);
   return next;
 };
-const deleteInstance = (id) => {
-  const next = getAllInstances().filter(i => i.id !== id);
-  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionDelete("instance_delete", id, "instances"); }
-  else saveInstances(next);
-};
 /** Today's calendar date in the browser's own timezone, not UTC — plain
  * `nowISO().slice(0,10)` rolls over at UTC midnight, which is late
  * afternoon/evening in North American timezones, so an opening/closing
@@ -1082,14 +1054,6 @@ const deleteInstance = (id) => {
 const todayLocalISO = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
-/** Today's instance for a doc, if any — in progress OR already completed
- * (getInstances is newest-first, so this is the latest one). Used so the
- * "Today's Run" strip shows the right state (Continue / Completed today)
- * across page reloads, not just within the session that completed it. */
-const getTodayInstance = (docId) => {
-  const today = todayLocalISO();
-  return getInstances(docId).find(i => i.date === today) || null;
 };
 
 /* Form submissions (R4): a submission is an instance of a form — dated,
@@ -1612,11 +1576,6 @@ function ackSop(sopId, userId, sopUpdatedAt) {
   }
   saveAcks(next);
 }
-/** @returns {AckEntry|null} */
-function getAckFor(sopId, userId) {
-  const acks = getAcks();
-  return (acks[sopId] && acks[sopId][userId]) || null;
-}
 function isAckStale(ack, sop) {
   if (!ack) return false;
   return new Date(sop.updatedAt).getTime() > new Date(ack.version).getTime();
@@ -1719,7 +1678,6 @@ const TASK_STATUSES = [
   { key: "review", label: "Review Before Closing", col: C.clay },
   { key: "done", label: "Done", col: C.moss },
 ];
-const taskStatusMeta = Object.fromEntries(TASK_STATUSES.map(s => [s.key, s]));
 /** Columns shown on the main Task Manager / project-detail board — Done
  * lives behind the slide-over panel instead (see TaskDoneSlideOver). */
 const TASK_BOARD_STATUSES = TASK_STATUSES.filter(s => s.key !== "done");
@@ -1904,8 +1862,6 @@ function normalizeProjectStatus(status) {
 const getProjects = () => (db.getSync("projects") || []).map(p => ({ ...p, status: normalizeProjectStatus(p.status) }));
 /** @param {Project[]} p */
 const saveProjects = (p) => db.setSync("projects", p);
-/** @param {string} id @returns {Project|null} */
-const getProject = (id) => getProjects().find(p => p.id === id) || null;
 const addProject = (project) => {
   const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], status: "upcoming", ...project };
   const next = [...getProjects(), full];
@@ -1997,8 +1953,6 @@ const projectProgress = (projectId, allTasks) => {
 const getCampaigns = () => db.getSync("campaigns") || [];
 /** @param {Campaign[]} c */
 const saveCampaigns = (c) => db.setSync("campaigns", c);
-/** @param {string} id @returns {Campaign|null} */
-const getCampaign = (id) => getCampaigns().find(c => c.id === id) || null;
 const addCampaign = (campaign) => {
   const full = { id: uid(), createdAt: nowISO(), ...campaign };
   const next = [...getCampaigns(), full];
@@ -2029,8 +1983,6 @@ const defCampaign = () => ({
 const getContentItems = () => db.getSync("content") || [];
 /** @param {ContentItem[]} c */
 const saveContentItems = (c) => db.setSync("content", c);
-/** @param {string} id @returns {ContentItem|null} */
-const getContentItem = (id) => getContentItems().find(c => c.id === id) || null;
 const addContentItem = (item) => {
   const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), images: [], links: [], ...item };
   const next = [...getContentItems(), full];
@@ -2196,21 +2148,21 @@ async function importAllData(parsed) {
 
 export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
-  REMOTE_MODE, isRemoteMode, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall,
+  REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall,
   db, uid, nowISO, fmtDate, fmtDateShort,
   getCurrentUser, setCurrentUser, clearCurrentUser,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
-  getTags, saveTags, addTag, updateTag, deleteTag,
+  getTags, saveTags, addTag,
   getAlerts, saveAlerts, addAlert, deleteAlert,
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
-  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, hasFillableBlocks, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
+  getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
   isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
-  getAllInstances, saveInstances, getInstances, addInstance, updateInstance, deleteInstance, getTodayInstance, todayLocalISO,
+  getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,
   newSubmission, stampEditLog, formColor,
   parseMentionText, getMentionCandidates, findBacklinks,
   getPlaybook, savePlaybook, seedPlaybookIfEmpty,
@@ -2219,19 +2171,19 @@ export {
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
   getRevisions, getRevision, restoreRevision,
-  getAcks, saveAcks, ackSop, getAckFor, isAckStale,
+  getAcks, saveAcks, ackSop, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,
-  getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, taskStatusMeta, TASK_PRIORITIES, taskPriorityMeta,
+  getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskTypeMeta, taskType,
   RECURRENCE_OPTIONS, advanceDate, completeTaskWithRecurrence,
   toggleFavourite, duplicateTask, mergeTaskInto, convertTaskToProject, convertTaskToSubtask, emptyTaskShape,
   sortTasksForUser, dispatchTaskAction,
   isOverdue, isDueToday, isDueThisWeek,
-  getProjects, saveProjects, getProject, addProject, updateProject, deleteProject, defProject,
+  getProjects, saveProjects, addProject, updateProject, deleteProject, defProject,
   PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress, normalizeProjectStatus,
-  getCampaigns, saveCampaigns, getCampaign, addCampaign, updateCampaign, deleteCampaign, defCampaign,
+  getCampaigns, saveCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   CAMPAIGN_STATUSES, campaignStatusMeta,
-  getContentItems, saveContentItems, getContentItem, addContentItem, updateContentItem, deleteContentItem, defContentItem,
+  getContentItems, saveContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
   campaignChannelCounts, CONTENT_CHANNELS, contentChannelMeta, CONTENT_STATUSES, contentStatusMeta,
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,

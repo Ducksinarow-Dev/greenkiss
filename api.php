@@ -39,11 +39,9 @@
  *   POST  category_save     {category}   - editor/admin; upsert one category by id
  *   POST  category_delete   {id}         - editor/admin
  *   POST  tag_save          {tag}        - editor/admin; upsert one tag by id (#8)
- *   POST  tag_delete        {id}         - editor/admin
  *   POST  contact_save      {contact}    - editor/admin; upsert one contact by id
  *   POST  contact_delete    {id}         - editor/admin
  *   POST  instance_save     {instance}   - editor/admin; upsert one SOP/Form fill-out instance by id
- *   POST  instance_delete   {id}         - editor/admin
  *   POST  alert_save        {alert}      - any authenticated user; upsert one alert by id (#9)
  *   POST  alert_delete      {id}         - alert's target, its creator, or admin
  *   POST  template_save     {template}   - editor/admin; upsert one task template by id (#9)
@@ -247,11 +245,6 @@ switch ($action) {
         handleCollectionSave($pdo, $body, $user, 'tag', 'tags');
         break;
 
-    case 'tag_delete':
-        $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'tags');
-        break;
-
     case 'contact_save':
         $user = requireAuth($pdo, $body);
         handleCollectionSave($pdo, $body, $user, 'contact', 'contacts');
@@ -265,11 +258,6 @@ switch ($action) {
     case 'instance_save':
         $user = requireAuth($pdo, $body);
         handleCollectionSave($pdo, $body, $user, 'instance', 'instances');
-        break;
-
-    case 'instance_delete':
-        $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'instances');
         break;
 
     case 'alert_save':
