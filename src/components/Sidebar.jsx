@@ -1,26 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved, triggerToast, getIcsSubscribeUrl } from '../globals.js';
+import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved, triggerToast, getIcsSubscribeUrl, NAV_ITEMS, sectionsForUser } from '../globals.js';
 import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
-/* Nav order per Hayden (R4): Dashboard ‖ work sections ‖ documentation
-   sections — `divider` entries render as thin separators. Admin is NOT in
-   this list; it's pinned at the bottom of the sidebar for admins. */
-const NAV_ITEMS = [
-  { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
-  { key: "store", label: "Store Goals", icon: "speed" },
-  { divider: true },
-  { key: "tasks", label: "Task Manager", icon: "checklist" },
-  { key: "projects", label: "Projects", icon: "folder_special" },
-  { key: "calendar", label: "Content Calendar", icon: "calendar_month" },
-  { divider: true },
-  { key: "library", label: "SOP Library", icon: "menu_book" },
-  { key: "forms", label: "Forms", icon: "description" },
-  { key: "imagerepo", label: "Image Repository", icon: "perm_media" },
-  { key: "toolsprompts", label: "Tools & Prompts", icon: "auto_awesome" },
-  { divider: true },
-  { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
-];
+/* NAV_ITEMS + per-user access (#38) live in globals.js so Admin Panel shares
+   the same section list. Non-admins see only their enabled sections; admins
+   see everything. Admin Panel is NOT in NAV_ITEMS — it's pinned at the bottom
+   for admins only. */
+
+/** Drop hidden items, then collapse the dividers left dangling (leading,
+    trailing, or doubled-up) so a hidden section never leaves a stray line. */
+function visibleNav(user) {
+  const allowed = sectionsForUser(user);
+  const kept = NAV_ITEMS.filter(it => it.divider || allowed.includes(it.key));
+  const out = [];
+  for (const it of kept) {
+    if (it.divider) { if (out.length && !out[out.length - 1].divider) out.push(it); }
+    else out.push(it);
+  }
+  while (out.length && out[out.length - 1].divider) out.pop();
+  return out;
+}
 
 // Baked in at build time by vite.config.js's `define` (see scripts/release.sh).
 // Dev server never defines these, hence the typeof guards.
@@ -187,7 +187,7 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
 
       {/* Nav */}
       <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-        {NAV_ITEMS.map((it, i) => it.divider
+        {visibleNav(user).map((it, i) => it.divider
           ? <div key={"div" + i} style={{ height: 1, background: C.bdr, margin: "7px 10px" }} />
           : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} />
         )}

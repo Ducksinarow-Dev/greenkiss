@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   C, FONT_CAPS, getCategories, addCategory, updateCategory, deleteCategory, confirmDelete, triggerSaved,
   getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
+  NAV_SECTIONS, getUserSections, setUserSections,
   fetchUsersFull, addUser, updateUser, deleteUser,
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
   exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
@@ -15,17 +16,57 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
   const [name, setName] = useState(u.name);
   const [pin, setPin] = useState("");
   const [role, setRole] = useState(u.role || "viewer");
+  // Per-user sidebar access (#38) — only applies to non-admins (admins always
+  // see everything, so the picker is hidden when role === admin).
+  const [sections, setSections] = useState(() => getUserSections(u.id));
+  const toggleSection = (key) =>
+    setSections(s => s.includes(key) ? s.filter(k => k !== key) : [...s, key]);
+
+  const save = () => {
+    onUpdate({ name: name.trim() || u.name, pin, role });
+    if (role !== "admin") setUserSections(u.id, sections);
+    setEditing(false);
+  };
+  const cancel = () => {
+    setName(u.name); setPin(""); setRole(u.role || "viewer");
+    setSections(getUserSections(u.id)); setEditing(false);
+  };
 
   if (editing) {
     return (
-      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", background: C.s2, borderRadius: 10, flexWrap: "wrap" }}>
-        <input value={name} onChange={e => setName(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px" })} />
-        <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="New PIN (optional)" style={inp({ fontSize: 14, padding: "7px 10px", width: 150, flex: "0 0 auto", fontFamily: "'IBM Plex Mono',monospace" })} />
-        <select value={role} onChange={e => setRole(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", width: "auto", flex: "0 0 auto" })}>
-          {Object.keys(ROLE_LABELS).map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-        </select>
-        <IconBtn icon="check" title="Save" onClick={() => { onUpdate({ name: name.trim() || u.name, pin, role }); setEditing(false); }} style={{ color: C.moss }} />
-        <IconBtn icon="close" title="Cancel" onClick={() => { setName(u.name); setPin(""); setRole(u.role || "viewer"); setEditing(false); }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 14px", background: C.s2, borderRadius: 10 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input value={name} onChange={e => setName(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px" })} />
+          <input value={pin} onChange={e => setPin(e.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="New PIN (optional)" style={inp({ fontSize: 14, padding: "7px 10px", width: 150, flex: "0 0 auto", fontFamily: "'IBM Plex Mono',monospace" })} />
+          <select value={role} onChange={e => setRole(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", width: "auto", flex: "0 0 auto" })}>
+            {Object.keys(ROLE_LABELS).map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+          </select>
+          <IconBtn icon="check" title="Save" onClick={save} style={{ color: C.moss }} />
+          <IconBtn icon="close" title="Cancel" onClick={cancel} />
+        </div>
+        {role === "admin" ? (
+          <div style={{ fontSize: 12.5, color: C.mut }}>Admins can see every section.</div>
+        ) : (
+          <div>
+            <div style={lbl({ fontSize: 12, marginBottom: 6 })}>Sidebar sections this user can see</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {NAV_SECTIONS.map(s => {
+                const on = sections.includes(s.key);
+                return (
+                  <button key={s.key} onClick={() => toggleSection(s.key)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: `1.5px solid ${on ? C.moss : C.bdr}`, background: on ? C.mossSoft : C.sur,
+                      color: on ? C.moss : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                    }}>
+                    <Icon name={on ? "check_box" : "check_box_outline_blank"} size={16} />
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -221,18 +262,87 @@ function RestoreConfirmModal({ file, onCancel, onConfirm }) {
   );
 }
 
+/* Group backups (already newest-first) into Year → Month, preserving that
+   order. Month key is "YYYY-MM" so it's unique across years. */
+function groupBackupsByYearMonth(backups) {
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const years = [];
+  const yIdx = {}, mIdx = {};
+  backups.forEach(b => {
+    const d = new Date(b.createdAt);
+    const y = d.getFullYear(), m = d.getMonth();
+    const mk = y + "-" + String(m + 1).padStart(2, "0");
+    if (yIdx[y] === undefined) { yIdx[y] = years.length; years.push({ year: y, months: [] }); }
+    const yr = years[yIdx[y]];
+    if (mIdx[mk] === undefined) { mIdx[mk] = yr.months.length; yr.months.push({ key: mk, label: MONTHS[m], items: [] }); }
+    yr.months[mIdx[mk]].items.push(b);
+  });
+  return years;
+}
+
+function BackupRow({ b, onRestore }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10 }}
+      onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+      <Icon name="folder_zip" size={18} style={{ color: C.faint }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{fmtDate(b.createdAt)}</div>
+        <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>{b.file} · {b.sizeMB} MB</div>
+      </div>
+      <a href={backupDownloadUrl(b.file)} target="_blank" rel="noreferrer" title="Download" style={{ display: "flex" }}>
+        <IconBtn icon="download" title="Download" />
+      </a>
+      <IconBtn icon="settings_backup_restore" danger title="Restore this backup" onClick={() => onRestore(b.file)} />
+    </div>
+  );
+}
+
+/* Collapsible folder row (a year or a month). */
+function FolderRow({ label, count, open, onToggle, indent = 0, children }) {
+  return (
+    <div>
+      <button onClick={onToggle} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", paddingLeft: 14 + indent,
+        background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+        borderRadius: 8,
+      }}
+        onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        <Icon name={open ? "expand_more" : "chevron_right"} size={18} style={{ color: C.faint }} />
+        <Icon name={open ? "folder_open" : "folder"} size={18} style={{ color: C.moss }} />
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: C.txt }}>{label}</span>
+        <span style={{ fontSize: 12, color: C.faint }}>{count}</span>
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
 function BackupsPanel() {
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [restoreTarget, setRestoreTarget] = useState(null);
+  const [collapsed, setCollapsed] = useState(true); // whole list collapsed by default (#35)
+  const [openFolders, setOpenFolders] = useState({}); // year/month key -> bool
+  const toggleFolder = (k) => setOpenFolders(o => ({ ...o, [k]: !o[k] }));
 
   const load = () => {
     setLoading(true); setError("");
-    backupList().then(setBackups).catch(e => setError(e.message || "Could not load backups.")).finally(() => setLoading(false));
+    backupList().then(list => {
+      setBackups(list);
+      // Default-open the newest year + its newest month only, so a long
+      // history stays folded but the latest backups are one glance away.
+      const groups = groupBackupsByYearMonth(list);
+      if (groups.length) {
+        const y = groups[0], m = y.months[0];
+        setOpenFolders(o => (o[y.year] === undefined ? { ...o, [y.year]: true, [m.key]: true } : o));
+      }
+    }).catch(e => setError(e.message || "Could not load backups.")).finally(() => setLoading(false));
   };
   useEffect(() => { load(); }, []);
+
+  const groups = groupBackupsByYearMonth(backups);
 
   const runNow = async () => {
     setRunning(true); setError("");
@@ -254,30 +364,36 @@ function BackupsPanel() {
 
   return (
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
-      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
-        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Backups</div>
-        <div style={{ fontSize: 12, color: C.faint, marginRight: 12 }}>Auto-backs up daily on write; kept 60 deep</div>
+      <div style={{ padding: "14px 18px", borderBottom: collapsed ? "none" : `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button onClick={() => setCollapsed(c => !c)} title={collapsed ? "Show backups" : "Hide backups"}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit", flex: 1, minWidth: 0 }}>
+          <Icon name={collapsed ? "chevron_right" : "expand_more"} size={20} style={{ color: C.faint }} />
+          <span style={{ fontSize: 17, fontWeight: 800, color: C.txt }}>Backups</span>
+          {!loading && backups.length > 0 && <span style={{ fontSize: 12, color: C.faint }}>({backups.length})</span>}
+        </button>
+        <div style={{ fontSize: 12, color: C.faint }}>Auto-backs up daily on write; kept 60 deep</div>
         <Btn onClick={runNow} disabled={running}><Icon name="backup" size={16} />{running ? "Backing up…" : "Back up now"}</Btn>
       </div>
       {error && <div style={{ padding: "10px 18px", fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
-      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-        {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
-        {!loading && backups.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No backups yet.</div>}
-        {!loading && backups.map(b => (
-          <div key={b.file} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10 }}
-            onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            <Icon name="folder_zip" size={18} style={{ color: C.faint }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.txt }}>{fmtDate(b.createdAt)}</div>
-              <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>{b.file} · {b.sizeMB} MB</div>
-            </div>
-            <a href={backupDownloadUrl(b.file)} target="_blank" rel="noreferrer" title="Download" style={{ display: "flex" }}>
-              <IconBtn icon="download" title="Download" />
-            </a>
-            <IconBtn icon="settings_backup_restore" danger title="Restore this backup" onClick={() => setRestoreTarget(b.file)} />
-          </div>
-        ))}
-      </div>
+      {!collapsed && (
+        <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+          {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
+          {!loading && backups.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No backups yet.</div>}
+          {!loading && groups.map(y => (
+            <FolderRow key={y.year} label={String(y.year)} open={!!openFolders[y.year]} onToggle={() => toggleFolder(y.year)}
+              count={y.months.reduce((n, m) => n + m.items.length, 0)}>
+              {y.months.map(m => (
+                <FolderRow key={m.key} label={m.label} open={!!openFolders[m.key]} onToggle={() => toggleFolder(m.key)}
+                  count={m.items.length} indent={20}>
+                  <div style={{ paddingLeft: 20 }}>
+                    {m.items.map(b => <BackupRow key={b.file} b={b} onRestore={setRestoreTarget} />)}
+                  </div>
+                </FolderRow>
+              ))}
+            </FolderRow>
+          ))}
+        </div>
+      )}
       {restoreTarget && (
         <RestoreConfirmModal file={restoreTarget} onCancel={() => setRestoreTarget(null)} onConfirm={doRestore} />
       )}

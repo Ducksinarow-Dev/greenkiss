@@ -144,6 +144,7 @@ function LetterSection({ letter, items }) {
               {b.url
                 ? <ItemLink url={b.url}>{b.text || b.url}</ItemLink>
                 : <span style={{ color: C.txt, fontWeight: 600 }}>{b.text || "Untitled"}</span>}
+              {b.note && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, whiteSpace: "pre-wrap", marginTop: 3 }}>{b.note}</div>}
             </div>
           ))}
         </div>
@@ -156,6 +157,9 @@ function LetterSection({ letter, items }) {
    page-specific letter dropdown (defaulting to the title's first letter via
    letterOf). Only title-with-link and text blocks, per spec. */
 function EditView({ blocks, onPatch, onRemove, onAdd }) {
+  // Which brands have their note editor revealed — transient UI only, never
+  // persisted to the saved doc.
+  const [noteOpen, setNoteOpen] = useState({});
   const letterSelect = (b) => (
     <select value={letterOf(b)} onChange={e => onPatch(b.id, { letter: e.target.value })}
       title="Letter" style={inp({ width: 62, flex: "0 0 auto", fontSize: 13, padding: "8px 6px" })}>
@@ -164,8 +168,18 @@ function EditView({ blocks, onPatch, onRemove, onAdd }) {
     </select>
   );
   return (
-    <div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 760 }}>
+    <div style={{ maxWidth: 760 }}>
+      {/* Add controls float at the top and stick on scroll (#36) so they stay
+          reachable while editing a long A–Z list. */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 20, background: C.bg,
+        borderBottom: `1.5px solid ${C.bdr}`, padding: "10px 0", marginBottom: 12,
+        display: "flex", gap: 10, flexWrap: "wrap",
+      }}>
+        <OBtn onClick={() => onAdd("title")}><Icon name="add_link" size={16} />Add brand</OBtn>
+        <OBtn onClick={() => onAdd("text")}><Icon name="add" size={16} />Add note</OBtn>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blocks.map(b => (
           <div key={b.id} style={{
             display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap",
@@ -182,16 +196,24 @@ function EditView({ blocks, onPatch, onRemove, onAdd }) {
                     placeholder="Brand name" style={inp({ fontSize: 14, fontWeight: 600 })} />
                   <input value={b.url || ""} onChange={e => onPatch(b.id, { url: e.target.value })}
                     placeholder="https://… (image repository link)" style={inp({ fontSize: 13 })} />
+                  {/* Optional note attached to this brand (#37) — shown once
+                      added, or via the Add note link below. */}
+                  {(b.note != null && b.note !== "") || noteOpen[b.id] ? (
+                    <textarea value={b.note || ""} onChange={e => onPatch(b.id, { note: e.target.value })}
+                      placeholder="Note for this brand…" rows={2} autoFocus={noteOpen[b.id] && !b.note}
+                      style={inp({ fontSize: 13, lineHeight: 1.5 })} />
+                  ) : (
+                    <button onClick={() => setNoteOpen(o => ({ ...o, [b.id]: true }))}
+                      style={{ alignSelf: "flex-start", background: "none", border: "none", cursor: "pointer", color: C.moss, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, padding: 0 }}>
+                      <Icon name="add_comment" size={15} />Add note
+                    </button>
+                  )}
                 </>
               )}
             </div>
             <IconBtn icon="delete" danger title="Remove" onClick={() => onRemove(b.id)} />
           </div>
         ))}
-      </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-        <OBtn onClick={() => onAdd("title")}><Icon name="add_link" size={16} />Add brand</OBtn>
-        <OBtn onClick={() => onAdd("text")}><Icon name="add" size={16} />Add note</OBtn>
       </div>
     </div>
   );

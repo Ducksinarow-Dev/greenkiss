@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, getSOP } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, getSOP, sectionsForUser } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -27,7 +27,7 @@ function BootScreen() {
 function App() {
   const [user, setUser] = useState(() => getCurrentUser());
   const [booting, setBooting] = useState(() => REMOTE_MODE && !!getCurrentUser() && !isRemoteWarm());
-  const [section, setSection] = useState("dashboard");
+  const [sectionRaw, setSection] = useState("dashboard");
   const [sopFocus, setSopFocus] = useState(null); // {id, mode, blockId, subId}
   const [projectFocus, setProjectFocus] = useState(null); // project id
   const [contentFocus, setContentFocus] = useState(null); // content item id
@@ -63,6 +63,17 @@ function App() {
     return <Login onLogin={() => { setUser(getCurrentUser()); setBooting(false); }} />;
   }
   if (booting) return <BootScreen />;
+
+  // Per-user access (#38): a non-admin can only ever render a section they're
+  // allowed to see. If the raw section (default "dashboard", or a deep-link
+  // into a hidden section) isn't permitted, fall back to their first allowed
+  // one. Admins always pass through. Derived, not stored, so it re-resolves
+  // whenever access or the raw selection changes.
+  const allowed = sectionsForUser(user);
+  // "admin" isn't in NAV_ITEMS (it's the pinned admin-only panel), so allow it
+  // explicitly for admins alongside their section list.
+  const canView = (s) => allowed.includes(s) || (s === "admin" && isAdmin(user));
+  const section = canView(sectionRaw) ? sectionRaw : (allowed[0] || "dashboard");
 
   // Routes to the SOP Library or the Forms section depending on the
   // target document's own `kind` — so a mention/backlink click lands in

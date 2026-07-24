@@ -507,6 +507,49 @@ const ROLE_LABELS = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 const canEdit = (user) => user && (user.role === "admin" || user.role === "editor");
 const isAdmin = (user) => user && user.role === "admin";
 
+/* ─── SIDEBAR NAV + PER-USER ACCESS (#38) ─────────────────────────────
+   Single source of truth for the sidebar (Sidebar renders it; Admin Panel
+   builds its access checkboxes from it). `divider:true` entries render as
+   separators and aren't toggleable. Admin Panel itself is NOT here — it's
+   pinned separately and stays admin-only.
+
+   Access: non-admins see only the sections listed in the `navAccess` kv doc
+   (`{ [userId]: [sectionKey,...] }`); admins bypass the filter entirely.
+   A user with no entry defaults to Image Repository only — the deliberate
+   rollout default (staff get one ready section, more get flipped on per
+   user). */
+const NAV_ITEMS = [
+  { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
+  { key: "store", label: "Store Goals", icon: "speed" },
+  { divider: true },
+  { key: "tasks", label: "Task Manager", icon: "checklist" },
+  { key: "projects", label: "Projects", icon: "folder_special" },
+  { key: "calendar", label: "Content Calendar", icon: "calendar_month" },
+  { divider: true },
+  { key: "library", label: "SOP Library", icon: "menu_book" },
+  { key: "forms", label: "Forms", icon: "description" },
+  { key: "imagerepo", label: "Image Repository", icon: "perm_media" },
+  { key: "toolsprompts", label: "Tools & Prompts", icon: "auto_awesome" },
+  { divider: true },
+  { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
+];
+const NAV_SECTIONS = NAV_ITEMS.filter(it => !it.divider); // toggleable {key,label,icon}
+const DEFAULT_NAV_ACCESS = ["imagerepo"];
+const getNavAccess = () => db.getSync("navAccess") || {};
+/** Raw stored access list for one user (or the rollout default). Admin Panel
+ * prefills its checkboxes from this; does NOT apply the admin-all bypass. */
+const getUserSections = (userId) => {
+  const list = getNavAccess()[userId];
+  return Array.isArray(list) ? list : DEFAULT_NAV_ACCESS.slice();
+};
+const setUserSections = (userId, keys) => {
+  saveNavAccess({ ...getNavAccess(), [userId]: keys });
+};
+const saveNavAccess = (m) => db.setSync("navAccess", m);
+/** Effective visible section keys for a user — admins get everything. */
+const sectionsForUser = (user) =>
+  isAdmin(user) ? NAV_SECTIONS.map(s => s.key) : getUserSections(user?.id);
+
 /* ─── SEED DATA (dev mode only — remote mode is seeded once via schema.sql) ─
    Runs once against empty storage so the UI demos well immediately. */
 function seedIfEmpty() {
@@ -2152,6 +2195,7 @@ export {
   db, uid, nowISO, fmtDate, fmtDateShort,
   getCurrentUser, setCurrentUser, clearCurrentUser,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
+  NAV_ITEMS, NAV_SECTIONS, getUserSections, setUserSections, sectionsForUser,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,
