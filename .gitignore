@@ -10,3 +10,6 @@ config.php
 uploads/
 backups/
 VERSION
+
+# Claude Code local overrides — machine-specific paths and grants.
+.claude/settings.local.json

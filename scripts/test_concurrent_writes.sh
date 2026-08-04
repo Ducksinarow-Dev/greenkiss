@@ -1,0 +1,123 @@
+#!/bin/bash
+# Concurrent-write safety check. Every per-record write is a read-modify-write
+# of a whole JSON collection, so without a row lock two simultaneous writers
+# both read the same list and the second write drops the first one's record.
+#
+# The app really does fire parallel bursts: "seed the 12 standard sections"
+# sends 12 unawaited category_save calls, and converting a task to a project
+# sends one task_save per subtask. Before kvMutate() only 4 of 12 categories
+# survived that button.
+#
+#   bash scripts/test_concurrent_writes.sh
+#
+# Needs a local mysql + php. Throwaway DB and backups dir; never touches real data.
+set -u
+cd "$(dirname "$0")/.."
+ROOT=$(pwd)
+DB=gk_conc_test_$$
+PORT=8902
+TMP=$(mktemp -d)
+pass=0; fail=0
+ok(){ if [ "$2" = "$3" ]; then echo "  PASS $1"; pass=$((pass+1)); else echo "  FAIL $1 (got [$2] want [$3])"; fail=$((fail+1)); fi; }
+MU="${MYSQL_USER:-$USER}"
+q(){ mysql -N -u "$MU" "$DB" -e "$1"; }
+count_ids(){ q "SELECT v FROM kv_store WHERE k='$1';" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo is_array($d)?count($d):0;'; }
+
+command -v mysql >/dev/null && command -v php >/dev/null || { echo "SKIP: needs mysql + php on PATH"; exit 0; }
+mysqladmin ping >/dev/null 2>&1 || { echo "SKIP: no mysqld running"; exit 0; }
+lsof -i ":$PORT" >/dev/null 2>&1 && { echo "SKIP: port $PORT in use"; exit 0; }
+
+mkdir -p "$TMP/bk"
+cat > "$TMP/config.php" <<PHP
+<?php
+define('DB_HOST','localhost'); define('DB_NAME','$DB');
+define('DB_USER','$MU'); define('DB_PASS','${MYSQL_PASS:-}');
+define('CRON_KEY','test'); define('BACKUPS_DIR','$TMP/bk'); define('UPLOADS_DIR','$TMP/up');
+PHP
+# Copy, don't symlink: PHP resolves __DIR__ through symlinks and would pick up
+# the real config.php.
+cp "$ROOT/api.php" "$TMP/api.php"
+# Start with a recent backup present so maybeAutoBackup short-circuits, keeping
+# this test about write concurrency rather than about the backup path.
+printf 'x' | gzip > "$TMP/bk/gk_20990101_000000.json.gz"
+
+cleanup(){ [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null; mysql -u "$MU" -e "DROP DATABASE IF EXISTS $DB;" 2>/dev/null; rm -rf "$TMP"; }
+trap cleanup EXIT
+
+mysql -u "$MU" -e "DROP DATABASE IF EXISTS $DB; CREATE DATABASE $DB;" || exit 1
+mysql -u "$MU" "$DB" < schema.sql || exit 1
+# PHP_CLI_SERVER_WORKERS gives the built-in server real concurrency; it is
+# single-threaded otherwise, which hides this entire class of bug.
+PHP_CLI_SERVER_WORKERS=8 php -S 127.0.0.1:$PORT -t "$TMP" >/dev/null 2>&1 &
+SRV=$!
+sleep 1.5
+B="http://127.0.0.1:$PORT/api.php"
+J='Content-Type: application/json'
+TOK=$(curl -s --max-time 10 -X POST "$B?action=login" -H "$J" -d '{"name":"Hayden","pin":"1234"}' | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["token"] ?? "";')
+[ -n "$TOK" ] || { echo "FAIL: could not log in"; exit 1; }
+AH="Authorization: Bearer $TOK"
+post(){ curl -s --max-time 30 -X POST "$B?action=$1" -H "$AH" -H "$J" -d "$2" >/dev/null; }
+# Collect background request PIDs and wait on those specifically — a bare `wait`
+# would also wait on the php -S server, which never exits.
+PIDS=""
+bg(){ post "$@" & PIDS="$PIDS $!"; }
+waitall(){ for p in $PIDS; do wait "$p" 2>/dev/null; done; PIDS=""; }
+
+echo "== 12 concurrent category_save (the seed-standard-sections button) =="
+for i in $(seq 1 12); do
+  bg category_save "{\"category\":{\"id\":\"c$i\",\"name\":\"Section $i\",\"color\":\"#799385\"}}"
+done
+waitall
+ok "all 12 categories survived" "$(count_ids categories)" "12"
+
+echo "== 20 concurrent task_save across two collections =="
+for i in $(seq 1 10); do
+  bg task_save "{\"task\":{\"id\":\"t$i\",\"title\":\"Task $i\"}}"
+  bg content_save "{\"item\":{\"id\":\"n$i\",\"title\":\"Item $i\"}}"
+done
+waitall
+ok "all 10 tasks survived" "$(count_ids tasks)" "10"
+ok "all 10 content items survived" "$(count_ids content)" "10"
+
+echo "== 8 concurrent doc_item_save (two editors in Image Repository) =="
+for i in $(seq 1 8); do
+  bg doc_item_save "{\"key\":\"imagerepo\",\"item\":{\"id\":\"b$i\",\"type\":\"title\",\"text\":\"Vendor $i\"}}"
+done
+waitall
+ok "all 8 repo entries survived" "$(q "SELECT v FROM kv_store WHERE k='imagerepo';" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo isset($d["blocks"])?count($d["blocks"]):0;')" "8"
+
+echo "== concurrent deletes leave the rest alone =="
+for i in 1 2 3; do bg task_delete "{\"id\":\"t$i\"}"; done
+waitall
+ok "7 tasks left after 3 concurrent deletes" "$(count_ids tasks)" "7"
+
+echo "== cascade runs server-side, not from a stale client array =="
+post project_save '{"project":{"id":"p1","name":"Spring"}}'
+post task_save '{"task":{"id":"t20","title":"Project task","projectId":"p1"}}'
+# A second client adds a task AFTER the first one loaded its cache.
+post task_save '{"task":{"id":"t21","title":"Coworker task added later"}}'
+post project_delete '{"id":"p1"}'
+ok "coworker's later task survived the cascade" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c 'Coworker task added later')" "1"
+ok "deleted project's task was unlinked, not deleted" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c 'Project task')" "1"
+ok "projectId cleared" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c '"projectId":"p1"')" "0"
+
+echo "== sop_delete is server-side =="
+post sop_save '{"sop":{"id":"s1","title":"Mine"}}'
+post sop_save '{"sop":{"id":"s2","title":"Coworker SOP"}}'
+post sop_delete '{"id":"s1"}'
+ok "coworker's SOP survived" "$(q "SELECT v FROM kv_store WHERE k='sops';" | grep -c 'Coworker SOP')" "1"
+ok "target SOP gone" "$(q "SELECT v FROM kv_store WHERE k='sops';" | grep -c '"Mine"')" "0"
+
+echo "== nav_access_save merges per user (two admins, different staff) =="
+post nav_access_save '{"userId":"u_a","sections":["tasks"]}'
+post nav_access_save '{"userId":"u_b","sections":["imagerepo","calendar"]}'
+NAV=$(q "SELECT v FROM kv_store WHERE k='navAccess';")
+ok "first admin's grant survived" "$(echo "$NAV" | grep -c 'u_a')" "1"
+ok "second admin's grant survived" "$(echo "$NAV" | grep -c 'u_b')" "1"
+
+echo "== doc_item_save is allowlisted =="
+ok "cannot be aimed at tasks" "$(curl -s --max-time 10 -X POST "$B?action=doc_item_save" -H "$AH" -H "$J" -d '{"key":"tasks","item":{"id":"x"}}' | grep -c 'Unknown document')" "1"
+
+echo
+echo "RESULT: $pass passed, $fail failed"
+[ "$fail" -eq 0 ]

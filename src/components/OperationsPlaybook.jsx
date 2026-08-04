@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   C, FONT_CAPS, uid, inp, canEdit, confirmDelete, triggerSaved,
-  getPlaybook, savePlaybook, seedPlaybookIfEmpty,
+  getPlaybook, savePlaybook, savePlaybookSection, deletePlaybookSection, seedPlaybookIfEmpty,
   getContacts, addContact, updateContact, deleteContact,
   getPlaybookRevs, addPlaybookRev, getCurrentUser, fmtDate, nowISO, copyMagnet,
 } from '../globals.js';
@@ -29,15 +29,9 @@ function PlaybookHistoryModal({ onClose, onRestored }) {
     const ok = await confirmDelete(`Restore the page "${sec.title || "Untitled"}" from ${fmtDate(preview.savedAt)}? Only that page is replaced; the current version is saved to history first.`);
     if (!ok) return;
     addPlaybookRev("before restore");
-    const current = getPlaybook() || { sections: [] };
-    const restored = JSON.parse(JSON.stringify(sec));
-    const exists = (current.sections || []).some(s => s.id === restored.id);
-    savePlaybook({
-      ...current,
-      sections: exists
-        ? current.sections.map(s => s.id === restored.id ? restored : s)
-        : [...(current.sections || []), restored], // page was deleted since — re-add it
-    });
+    // Per-section upsert handles both cases: replace the current version, or
+    // re-add the page if it was deleted since the snapshot.
+    savePlaybookSection(JSON.parse(JSON.stringify(sec)));
     triggerSaved(); onRestored(); onClose();
   };
 
@@ -210,10 +204,14 @@ function OperationsPlaybook({ user, focusSectionId, onClearFocus, onNavigateSop,
 
   const active = sections.find(s => s.id === activeId) || null;
 
+  // Per-section writes, merged server-side. Saving the whole playbook doc meant
+  // two people editing different pages silently overwrote each other.
   const updateSection = (id, changes) => {
     // Author attribution (R3 #6): every edit stamps who + when on the section.
     const stamp = { updatedBy: getCurrentUser()?.name || "", updatedAt: nowISO() };
-    savePlaybook({ ...playbook, sections: sections.map(s => s.id === id ? { ...s, ...changes, ...stamp } : s) });
+    const section = sections.find(s => s.id === id);
+    if (!section) return;
+    savePlaybookSection({ ...section, ...changes, ...stamp });
     triggerSaved(); bump();
   };
   const finishEditing = () => {
@@ -224,7 +222,7 @@ function OperationsPlaybook({ user, focusSectionId, onClearFocus, onNavigateSop,
   };
   const addSection = () => {
     const s = { id: uid(), title: "New Section", blocks: [], updatedBy: getCurrentUser()?.name || "", updatedAt: nowISO() };
-    savePlaybook({ ...playbook, sections: [...sections, s] });
+    savePlaybookSection(s);
     setActiveId(s.id); setShowContacts(false); setEditMode(true); triggerSaved(); bump();
   };
   const deleteSection = async (id) => {
@@ -232,7 +230,7 @@ function OperationsPlaybook({ user, focusSectionId, onClearFocus, onNavigateSop,
     if (!ok) return;
     addPlaybookRev("before delete"); // snapshot WITH the section, so it's restorable
     const next = sections.filter(s => s.id !== id);
-    savePlaybook({ ...playbook, sections: next });
+    deletePlaybookSection(id);
     if (activeId === id) setActiveId(next[0]?.id || null);
     triggerSaved(); bump();
   };
