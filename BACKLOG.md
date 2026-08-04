@@ -95,3 +95,55 @@ blocked on a judgement call, not on effort. Recommendation given for each.
 
 ## Notes for whoever picks up #11/#12
 Both need a decision on: which model/API (cost target — "low cost" was specified), whether calls proxy through `api.php` (keeps the key server-side, required either way) or hit a provider directly from the client (insecure — never expose an API key client-side), and how much scope for v1 (search-only first is a much smaller lift than the full action-agent in #12; recommend shipping #11 before attempting #12).
+
+## Notes for whoever picks up #41 (the kv_store → real tables migration)
+
+Greenlit by Hayden 2026-08-04 to do **before go-live**, precisely because there's
+almost no real data at risk yet. That window closes when staff start using it
+for real, so this is time-sensitive in a way the rest of the backlog isn't.
+
+**Start by reading** `kvMutate()` in `api.php` and the `_SERVER_COLLECTIONS` /
+`_applyServerCollections` pair in `src/globals.js`. Those two are the current
+concurrency story and they're what gets deleted at the end.
+
+**Suggested order** (each step independently shippable, so a bad one is
+revertable without unwinding the whole thing):
+
+1. Schema first, no behaviour change. Add the tables alongside `kv_store`;
+   don't drop anything. `id` PK, real columns only for what's filtered or
+   sorted (`status`, `assignee_id`, `due_date`, `project_id`, `publish_date`),
+   plus a `data JSON` column for the long tail. Resist modelling all 30 fields
+   of `ContentItem` — the JSON column is what keeps this from becoming a
+   week of schema design.
+2. A re-runnable migration script (`scripts/migrate_kv_to_rows.php`), safe to
+   run twice, that copies one collection at a time and **leaves `kv_store`
+   untouched** so it stays the rollback.
+3. Convert one collection end-to-end — `tasks` is the right first one: highest
+   write volume, and `task_save`/`task_delete` are the simplest actions.
+   Ship it. Confirm `scripts/test_concurrent_writes.sh` still passes (it asserts
+   behaviour, not storage, so it should pass unchanged — if it doesn't, the
+   behaviour changed and that's the bug).
+4. Then the rest, one at a time. `doc_blocks` for imagerepo/toolsPrompts/
+   playbook pages last, since those are the least contended now that per-item
+   writes landed.
+5. Only once everything's converted: delete `collectionUpsert`,
+   `collectionDelete`, `collectionMapAll`, and `kvMutate`. Keep `kv_store` for
+   genuine single values (`salesTargets`, `lastDeploy`, `icsTokens`). Move
+   `navAccess` onto the `users` table.
+
+**Do #40 (optimistic concurrency) as part of step 1**, not afterwards — the
+`version` column is free to add while you're already writing the schema, and
+retrofitting it across every table later is pure rework.
+
+**Two traps, both already paid for once:**
+- Any read-modify-write still needs a row lock. Rows make *different-record*
+  writes safe automatically; they do nothing for two writers on the same row.
+- `SOPEditor` autosaves every 500ms. Conflict-check on explicit close/save
+  only, or the 409 will fight the autosave loop.
+
+**Keep both test scripts green throughout** — `scripts/test_concurrent_writes.sh`
+and `scripts/test_backup_restore.sh`. The second matters more than it looks:
+`runBackup` and `restoreFromBackupData` both enumerate tables explicitly, so
+**every new table has to be added to both** or backups will silently stop
+covering the data that moved out of `kv_store`. That is the single most likely
+way this migration loses data.
