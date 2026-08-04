@@ -62,3 +62,25 @@ define('SHOPIFY_API_VERSION', '2025-07'); // bump to a newer stable version as S
 // Optional: only used if the app can't read shop.json for the store's timezone
 // (day boundaries for "today"/"month-to-date"). IANA name, e.g. America/Vancouver.
 // define('SHOPIFY_TIMEZONE', 'America/Vancouver');
+
+// ── Off-site backups (Backblaze B2) ─────────────────────────────────────
+// A SECOND copy of every backup, pushed to B2 by the daily cron. Without this
+// there is exactly one copy, on the same cPanel account as the database — one
+// deleted or compromised account loses both. B2's free tier is 10 GB.
+//
+// Setup (one time, two values to copy) — see DEPLOY.md section 5a:
+//   1. backblaze.com → B2 Cloud Storage → Create a Bucket. Name it anything;
+//      set it PRIVATE (these dumps contain password hashes).
+//   2. Application Keys → Add a New Application Key. Scope it to just that
+//      bucket ("Allow access to Bucket: <yours>") and give it Read and Write.
+//   3. Copy keyID and applicationKey below. The key is shown ONCE — if you
+//      lose it, delete the key and make another.
+// Because the key is bucket-scoped, B2_BUCKET_ID can stay as-is: the server
+// reads the bucket from the key itself. Only set it if you used an unscoped key.
+// Leave the placeholders and off-site copies are skipped; local backups are
+// unaffected and Admin Panel says so.
+define('B2_KEY_ID', 'PASTE_YOUR_B2_KEY_ID_HERE');
+define('B2_APPLICATION_KEY', 'PASTE_YOUR_B2_APPLICATION_KEY_HERE');
+define('B2_BUCKET_ID', 'PASTE_ONLY_IF_YOUR_KEY_IS_NOT_BUCKET_SCOPED');
+// Folder prefix inside the bucket. Created implicitly.
+define('B2_FOLDER', 'greenkiss-backups');

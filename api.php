@@ -564,13 +564,23 @@ switch ($action) {
             requireRole($user, ['admin']);
         }
         $file = runBackupOrFail($pdo);
-        respond(200, ['ok' => true, 'file' => $file]);
+        // Off-site copy rides the explicit backup path only (this action = the
+        // daily cron and the admin's "Back up now" button), never the lazy
+        // write-triggered one — see offsiteSync's header comment.
+        respond(200, ['ok' => true, 'file' => $file, 'offsite' => offsiteSync($pdo, $file)]);
         break;
 
     case 'backup_list':
         $user = requireAuth($pdo, $body);
         requireRole($user, ['admin']);
-        respond(200, ['backups' => listBackups()]);
+        // Off-site status ships with the list so the Backups tile can show a
+        // dead uploader without the admin having to go looking for it.
+        respond(200, [
+            'backups' => listBackups(),
+            'offsite' => offsiteConfigured()
+                ? (kvGet($pdo, 'backupOffsite') ?: ['configured' => true, 'ok' => null, 'error' => 'No off-site copy has run yet.'])
+                : ['configured' => false],
+        ]);
         break;
 
     case 'backup_download':
@@ -1124,7 +1134,6 @@ function cpanelApiCall($url, $params, $authHeader) {
     $raw = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch) ?: null;
-    curl_close($ch);
     $data = $raw !== false && $raw !== null ? json_decode($raw, true) : null;
     return [
         'httpCode' => $httpCode,
@@ -1175,7 +1184,6 @@ function omnisendApiCall($path, $method = 'GET', $reqBody = null) {
     $raw = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch) ?: null;
-    curl_close($ch);
     if ($curlError) return ['ok' => false, 'error' => 'Omnisend request failed: ' . $curlError];
     $data = $raw !== false ? json_decode($raw, true) : null;
     if ($httpCode < 200 || $httpCode >= 300) {
@@ -1215,7 +1223,6 @@ function shopifyAccessToken() {
     $raw = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $err = curl_error($ch) ?: null;
-    curl_close($ch);
     if ($err) return ['ok' => false, 'error' => 'Shopify auth failed: ' . $err];
     $data = $raw !== false ? json_decode($raw, true) : null;
     if ($code < 200 || $code >= 300 || empty($data['access_token'])) {
@@ -1247,7 +1254,6 @@ function shopifyApiCall($pathOrUrl, $token) {
     $raw = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch) ?: null;
-    curl_close($ch);
     if ($curlError) return ['ok' => false, 'error' => 'Shopify request failed: ' . $curlError];
     $data = $raw !== false ? json_decode($raw, true) : null;
     if ($httpCode < 200 || $httpCode >= 300) {
@@ -1405,6 +1411,168 @@ function maybeAutoBackup($pdo) {
         // the real dump ever gets big enough for that to matter.
         if (time() - filemtime($files[0]) > 6 * 3600) runBackup($pdo);
     } catch (Exception $e) { /* see above */ }
+}
+
+// ── OFF-SITE BACKUP COPY (Backblaze B2) ───────────────────────────────────
+// backups/ lives on the same cPanel account as the database, so one deleted or
+// compromised account loses both copies at once. This pushes a second copy to
+// Backblaze B2 after each explicit backup run. 10 GB free tier.
+//
+// Deliberately NOT wired into maybeAutoBackup: that fires inside an ordinary
+// user's save request, and a synchronous HTTPS upload there would add ~a second
+// to saving a task. The daily cron (backup_run) carries the off-site copy; the
+// 6-hourly local snapshots stay local. That means off-site granularity is
+// daily, local is 6-hourly — a deliberate trade, documented in DEPLOY.md.
+//
+// B2's native API was chosen over its S3-compatible endpoint because the S3 one
+// needs AWS SigV4 request signing (an HMAC chain, ~60 lines of fiddly crypto);
+// the native API is plain Basic auth plus two JSON calls. Chosen over Dropbox
+// because setup is two values copied from a UI rather than an OAuth
+// authorize-then-exchange dance.
+// ponytail: B2 only, no provider abstraction — swapping destination is
+// replacing b2Authorize + offsiteUpload, not adding an interface.
+// ponytail: API v2. v3 is current and nests apiUrl under apiInfo.storageApi;
+// move to it if B2 ever retires v2.
+function offsiteConfigured() {
+    foreach (['B2_KEY_ID', 'B2_APPLICATION_KEY'] as $c) {
+        if (!defined($c) || constant($c) === '' || strpos((string)constant($c), 'PASTE_') === 0) return false;
+    }
+    return true;
+}
+
+// B2 puts the useful text in "code" ("bad_auth_token", "unauthorized") and
+// frequently leaves "message" empty, so prefer whichever is populated — and
+// never emit a bare "— " with nothing after it, since this string is what an
+// admin reads off the Backups tile when something has broken.
+function b2Detail($d, $raw = '') {
+    $t = '';
+    if (is_array($d)) {
+        $t = trim((string)($d['message'] ?? ''));
+        if ($t === '') $t = trim((string)($d['code'] ?? ''));
+    }
+    if ($t === '') $t = trim(substr((string)$raw, 0, 200));
+    return $t === '' ? '' : ' — ' . $t;
+}
+
+// Basic-auth handshake. Returns the short-lived token plus the api host to use
+// and, for a bucket-restricted key, the bucket it's scoped to — which is why
+// B2_BUCKET_ID is optional in config.php.
+function b2Authorize() {
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => 'https://api.backblazeb2.com/b2api/v2/b2_authorize_account',
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_USERPWD => B2_KEY_ID . ':' . B2_APPLICATION_KEY,
+        CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $raw = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch) ?: null;
+    if ($err) return ['ok' => false, 'error' => 'B2 auth failed: ' . $err];
+    $d = $raw !== false ? json_decode($raw, true) : null;
+    if ($code < 200 || $code >= 300 || empty($d['authorizationToken']) || empty($d['apiUrl'])) {
+        // B2's own message is the useful part ("bad_auth_token", "unauthorized").
+        return ['ok' => false, 'error' => 'B2 auth returned HTTP ' . $code . b2Detail($d, $raw)];
+    }
+    $bucketId = defined('B2_BUCKET_ID') && B2_BUCKET_ID !== '' && strpos((string)B2_BUCKET_ID, 'PASTE_') !== 0
+        ? B2_BUCKET_ID
+        : ($d['allowed']['bucketId'] ?? '');
+    if ($bucketId === '') {
+        return ['ok' => false, 'error' => 'B2 key is not restricted to a bucket, so set B2_BUCKET_ID in config.php.'];
+    }
+    return ['ok' => true, 'token' => $d['authorizationToken'], 'apiUrl' => rtrim($d['apiUrl'], '/'), 'bucketId' => $bucketId];
+}
+
+// Uploads one backup file. Returns ['ok'=>bool, 'error'=>?string].
+function offsiteUpload($path) {
+    if (!offsiteConfigured()) return ['ok' => false, 'error' => 'not configured'];
+    if (!is_file($path)) return ['ok' => false, 'error' => 'local backup file missing'];
+    $auth = b2Authorize();
+    if (!$auth['ok']) return ['ok' => false, 'error' => $auth['error']];
+
+    // B2 hands out a per-upload endpoint; it is not reusable across uploads.
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $auth['apiUrl'] . '/b2api/v2/b2_get_upload_url?bucketId=' . urlencode($auth['bucketId']),
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['Authorization: ' . $auth['token']],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 30,
+    ]);
+    $raw = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch) ?: null;
+    if ($err) return ['ok' => false, 'error' => 'B2 upload-url request failed: ' . $err];
+    $u = $raw !== false ? json_decode($raw, true) : null;
+    if ($code < 200 || $code >= 300 || empty($u['uploadUrl']) || empty($u['authorizationToken'])) {
+        return ['ok' => false, 'error' => 'B2 upload-url returned HTTP ' . $code . b2Detail($u, $raw)];
+    }
+
+    $body = file_get_contents($path);
+    if ($body === false) return ['ok' => false, 'error' => 'could not read local backup file'];
+
+    $prefix = defined('B2_FOLDER') && B2_FOLDER !== '' ? trim(B2_FOLDER, '/') . '/' : '';
+    // B2 versions files rather than overwriting, so re-uploading a name never
+    // destroys the earlier copy — the point of an off-site copy is that a bad
+    // run can't eat it.
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $u['uploadUrl'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: ' . $u['authorizationToken'],
+            'X-Bz-File-Name: ' . rawurlencode($prefix . basename($path)),
+            'Content-Type: application/octet-stream',
+            'Content-Length: ' . strlen($body),
+            // B2 verifies this and rejects a corrupted upload, which is exactly
+            // what you want for a backup you will never look at until you must.
+            'X-Bz-Content-Sha1: ' . sha1($body),
+        ],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_TIMEOUT => 120, // whole-file upload, not just a handshake
+    ]);
+    $raw = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch) ?: null;
+    if ($err) return ['ok' => false, 'error' => 'B2 upload failed: ' . $err];
+    if ($code < 200 || $code >= 300) {
+        return ['ok' => false, 'error' => 'B2 upload returned HTTP ' . $code . b2Detail(json_decode((string)$raw, true), $raw)];
+    }
+    return ['ok' => true, 'error' => null];
+}
+
+// Uploads and records the outcome in kv, so a silently-dead uploader is
+// visible in Admin Panel → Backups instead of being discovered during a
+// disaster. This matters more than the upload itself: nobody watches a cron,
+// and "automated but quietly broken for three months" is worse than manual.
+// Never throws — an off-site failure must not fail the local backup.
+function offsiteSync($pdo, $file) {
+    if (!offsiteConfigured()) return ['configured' => false];
+    $path = ensureBackupsDir() . '/' . $file;
+    try {
+        $res = offsiteUpload($path);
+    } catch (Throwable $e) {
+        $res = ['ok' => false, 'error' => $e->getMessage()];
+    }
+    $status = [
+        'configured' => true,
+        'ok' => $res['ok'],
+        'at' => gmdate('c'),
+        'file' => $file,
+        'error' => $res['ok'] ? null : $res['error'],
+        'destination' => 'Backblaze B2',
+    ];
+    // Best-effort: if even recording the status fails, the backup still stands.
+    try { kvSet($pdo, 'backupOffsite', $status); } catch (Throwable $e) { error_log('GK offsite status write failed: ' . $e->getMessage()); }
+    if (!$res['ok']) error_log('GK off-site backup FAILED for ' . $file . ': ' . $res['error']);
+    return $status;
 }
 
 // For the callers where a backup is the safety net for something destructive

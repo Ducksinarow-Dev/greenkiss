@@ -48,7 +48,29 @@ cPanel → **Cron Jobs** → add a daily job:
 curl -s "https://YOURSITE/api.php?action=backup_run&cron_key=YOUR_CRON_KEY" >/dev/null
 ```
 
-Use the same `CRON_KEY` value you put in `config.php`. (Backups also run automatically and lazily on any write if the newest one is over 24h old, so this cron is a belt-and-suspenders guarantee, not the only mechanism.)
+Use the same `CRON_KEY` value you put in `config.php`. Backups also run automatically on any write if the newest one is over **6h** old, so this cron is not the only mechanism — but it IS the only thing that makes the **off-site copy** below happen, so don't skip it.
+
+### 5a. Off-site backup copy (Backblaze B2)
+
+Without this there is exactly **one** copy of your data, on the same cPanel account as the database — one deleted or compromised account loses both. The daily cron above pushes a second copy to Backblaze B2. Free tier is 10 GB, which is thousands of these dumps.
+
+Local snapshots are 6-hourly; off-site copies are **daily** (they ride the cron only). That's deliberate: uploading on every 6-hourly snapshot would add a second of latency to whichever staff member's save happened to trigger it.
+
+One-time setup — two values to copy, no OAuth:
+
+1. <https://www.backblaze.com> → sign up → **B2 Cloud Storage** → **Create a Bucket**. Name it anything. Set it **Private** — these dumps contain password hashes.
+2. **Application Keys** → **Add a New Application Key**. Under *Allow access to Bucket*, pick the bucket you just made (not "All"), and give it **Read and Write**.
+3. Copy **keyID** and **applicationKey** into `config.php` as `B2_KEY_ID` and `B2_APPLICATION_KEY`. The applicationKey is displayed **once** — if you navigate away, delete the key and create another.
+4. Leave `B2_BUCKET_ID` on its placeholder. Because the key is scoped to one bucket, the server reads the bucket from the key itself. Only fill it in if you used an unscoped ("All") key.
+5. Confirm it works: **Admin Panel → Backups → Back up now**. The tile shows *"Copied off-site to Backblaze B2"* on success, or a red failure row carrying B2's own error text.
+
+**Check that row occasionally.** Admin Panel → Backups shows the last off-site result and displays failures in red. An automated copy that silently stopped is the one failure mode that looks exactly like success right up until you need it. If the key is ever deleted or the bucket renamed, that row is where you'll find out.
+
+Leave the `PASTE_…` placeholders and off-site copies are skipped entirely; local backups are unaffected and the tile says so.
+
+Uploads use B2's native API (plain Basic auth) rather than its S3-compatible endpoint, which would need AWS SigV4 request signing for no benefit here. Files are versioned by B2 rather than overwritten, so a repeated filename never destroys the earlier copy. Old off-site copies are **not** pruned automatically — set a bucket Lifecycle Rule in B2 if you ever want that; at daily dumps of this size, 10 GB lasts years.
+
+To use Dropbox or Cloudflare R2 instead, replace `b2Authorize()` and `offsiteUpload()` in `api.php` — the status reporting and failure UI are destination-agnostic.
 
 ## 6. First login
 

@@ -2242,7 +2242,12 @@ async function changeOwnPin(currentPin, newPin) {
    set; remote mode bundles the whole in-memory cache (already fully
    warm post-login). */
 async function backupRun() { return apiCall("backup_run", { method: "POST" }); }
-async function backupList() { const res = await apiCall("backup_list", { method: "GET" }); return res.backups || []; }
+/** @returns {Promise<{backups:Array, offsite:Object}>} — off-site status rides
+ * along so the Backups tile can show a dead uploader without being asked. */
+async function backupList() {
+  const res = await apiCall("backup_list", { method: "GET" });
+  return { backups: res.backups || [], offsite: res.offsite || { configured: false } };
+}
 function backupDownloadUrl(file) {
   const t = _getToken();
   return API_BASE + "?action=backup_download&file=" + encodeURIComponent(file) + (t ? "&token=" + encodeURIComponent(t) : "");
