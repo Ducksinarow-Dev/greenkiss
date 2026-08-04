@@ -98,6 +98,31 @@ ok "corrupt backup refused" "$(curl -s -X POST "$B?action=backup_restore" -H "$A
 ok "data survived that attempt" "$(q "SELECT v FROM kv_store WHERE k='imagerepo';" | grep -c Bathorium)" "1"
 ok "path traversal refused" "$(curl -s "$B?action=backup_download&file=../config.php" -H "$AH" | grep -c 'Invalid filename')" "1"
 
+echo "== off-site copy: unconfigured is safe and honest =="
+R=$(curl -s --max-time 20 -X POST "$B?action=backup_run" -H "$AH")
+ok "backup still succeeds with no B2 config" "$(echo "$R" | grep -c '"ok":true')" "1"
+ok "reports off-site as unconfigured" "$(echo "$R" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo (($d["offsite"]["configured"]??null)===false)?"1":"0";')" "1"
+
+echo "== off-site copy: a broken destination must not break the backup =="
+# Bogus credentials. The assertion is deliberately tolerant about WHY the upload
+# failed (rejected creds, or no network in CI) — what matters is that the local
+# backup still succeeded and the failure was recorded rather than swallowed.
+cat >> "$TMP/config.php" <<'PHP'
+define('B2_KEY_ID','bogus_key_id_for_test');
+define('B2_APPLICATION_KEY','bogus_application_key_for_test');
+PHP
+# OPcache has already compiled config.php by now and only re-checks mtime every
+# opcache.revalidate_freq seconds (default 2), so without this wait the server
+# keeps serving the pre-append config and the section below tests nothing.
+sleep 3
+BEFORE=$(ls "$BK"/gk_*.json.gz | wc -l | tr -d ' ')
+R=$(curl -s --max-time 60 -X POST "$B?action=backup_run" -H "$AH")
+ok "local backup still succeeded" "$(echo "$R" | grep -c '"ok":true')" "1"
+ok "local snapshot really written" "$([ "$(ls "$BK"/gk_*.json.gz | wc -l | tr -d ' ')" -gt "$BEFORE" ] && echo yes || echo no)" "yes"
+ok "off-site failure reported, not swallowed" "$(echo "$R" | php -r '$d=json_decode(stream_get_contents(STDIN),true); $o=$d["offsite"]??[]; echo (($o["configured"]??null)===true && ($o["ok"]??null)===false && !empty($o["error"]))?"1":"0";')" "1"
+ok "failure persisted for the Admin Panel" "$(q "SELECT v FROM kv_store WHERE k='backupOffsite';" | grep -c '"ok":false')" "1"
+ok "backup_list surfaces the failure" "$(curl -s --max-time 20 "$B?action=backup_list" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo (($d["offsite"]["ok"]??null)===false)?"1":"0";')" "1"
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

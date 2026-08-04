@@ -317,6 +317,47 @@ function FolderRow({ label, count, open, onToggle, indent = 0, children }) {
   );
 }
 
+/* Off-site copy status (#39). Deliberately prominent when it's broken: the
+   whole reason this is automated is that nobody remembers to do it manually,
+   which means nobody would notice a dead uploader either. A failure has to
+   look like a problem, not like a footnote. */
+function OffsiteStatus({ offsite, loading }) {
+  if (loading || !offsite) return null;
+  const failed = offsite.configured && offsite.ok === false;
+  const never = offsite.configured && offsite.ok == null;
+  const ok = offsite.configured && offsite.ok === true;
+
+  // Unconfigured is a real gap, not a neutral state — say so plainly, but
+  // quietly, since it's the expected state before setup.
+  if (!offsite.configured) {
+    return (
+      <div style={{ padding: "10px 18px", borderTop: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: C.mut }}>
+        <Icon name="cloud_off" size={16} style={{ color: C.faint }} />
+        <span>Off-site copies are off — backups exist only on this server. See DEPLOY.md to connect Backblaze B2.</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      padding: "10px 18px", borderTop: `1.5px solid ${C.bdr}`,
+      background: failed ? C.red + "14" : "transparent",
+      display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+      fontSize: 12.5, color: failed ? C.red : C.mut, fontWeight: failed ? 700 : 400,
+    }}>
+      <Icon name={failed ? "error" : (ok ? "cloud_done" : "cloud_queue")} size={16}
+        style={{ color: failed ? C.red : (ok ? C.moss : C.faint) }} />
+      {ok && <span>Copied off-site to {offsite.destination || "Dropbox"} — {fmtDate(offsite.at)}</span>}
+      {never && <span>Off-site copies are on, but none has run yet. The daily cron does it, or click Back up now.</span>}
+      {failed && (
+        <span>
+          Off-site copy FAILED {offsite.at ? "on " + fmtDate(offsite.at) : ""} — backups exist only on this server.
+          {offsite.error ? ` ${offsite.error}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function BackupsPanel() {
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -324,13 +365,15 @@ function BackupsPanel() {
   const [error, setError] = useState("");
   const [restoreTarget, setRestoreTarget] = useState(null);
   const [collapsed, setCollapsed] = useState(true); // whole list collapsed by default (#35)
+  const [offsite, setOffsite] = useState({ configured: false }); // #39 second copy
   const [openFolders, setOpenFolders] = useState({}); // year/month key -> bool
   const toggleFolder = (k) => setOpenFolders(o => ({ ...o, [k]: !o[k] }));
 
   const load = () => {
     setLoading(true); setError("");
-    backupList().then(list => {
+    backupList().then(({ backups: list, offsite: off }) => {
       setBackups(list);
+      setOffsite(off);
       // Default-open the newest year + its newest month only, so a long
       // history stays folded but the latest backups are one glance away.
       const groups = groupBackupsByYearMonth(list);
@@ -371,10 +414,11 @@ function BackupsPanel() {
           <span style={{ fontSize: 17, fontWeight: 800, color: C.txt }}>Backups</span>
           {!loading && backups.length > 0 && <span style={{ fontSize: 12, color: C.faint }}>({backups.length})</span>}
         </button>
-        <div style={{ fontSize: 12, color: C.faint }}>Auto-backs up daily on write; kept 60 deep</div>
+        <div style={{ fontSize: 12, color: C.faint }}>Auto-backs up every 6h on write; kept 240 deep</div>
         <Btn onClick={runNow} disabled={running}><Icon name="backup" size={16} />{running ? "Backing up…" : "Back up now"}</Btn>
       </div>
       {error && <div style={{ padding: "10px 18px", fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+      <OffsiteStatus offsite={offsite} loading={loading} />
       {!collapsed && (
         <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
           {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
