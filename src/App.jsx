@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, getSOP, sectionsForUser } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -58,6 +58,27 @@ function App() {
     }).finally(() => { if (alive) setBooting(false); });
     return () => { alive = false; };
   }, [booting]);
+
+  // The kv cache is warmed once at login and never again, so a tab left open
+  // all day builds its writes from an ever-staler view of the data — which is
+  // what makes any whole-value write dangerous. Re-pull when this tab regains
+  // focus, then force a re-render the same way themeVersion does. A state bump
+  // rather than a remount, so edit mode, scroll position and open editors all
+  // survive the refresh.
+  const [dataVersion, setDataVersion] = useState(0);
+  useEffect(() => {
+    if (!REMOTE_MODE) return;
+    const onFocus = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshCache().then(ok => { if (ok) setDataVersion(v => v + 1); }).catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   if (!user) {
     return <Login onLogin={() => { setUser(getCurrentUser()); setBooting(false); }} />;

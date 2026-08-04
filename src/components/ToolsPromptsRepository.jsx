@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   C, FONT_CAPS, uid, inp, canEdit, confirmDelete, triggerSaved, triggerToast,
-  getToolsPrompts, saveToolsPrompts,
+  getToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
 } from '../globals.js';
 import { Icon, IconBtn, Btn, OBtn, Pill, SectionHeader, EmptyState, LinkPopover, ItemLink } from './shared.jsx';
 
@@ -106,10 +106,12 @@ function ToolsPromptsRepository({ user, onOpenSop, onNavigateOut }) {
     goToPlaybookSection: (id) => onNavigateOut && onNavigateOut("playbook", id),
   };
 
-  const save = (next) => { saveToolsPrompts({ ...doc, items: next }); triggerSaved(); bump(); };
-  const addItem = () => save([...items, { id: uid(), type: tab, title: "", body: "", url: "", tags: "", createdAt: new Date().toISOString() }]);
-  const patch = (id, changes) => save(items.map(i => i.id === id ? { ...i, ...changes } : i));
-  const remove = async (id) => { if (await confirmDelete("Remove this entry?")) save(items.filter(i => i.id !== id)); };
+  // Per-item writes, merged server-side — a whole-doc write let two editors
+  // overwrite each other's entries.
+  const saveItem = (item) => { saveToolsPromptsItem(item); triggerSaved(); bump(); };
+  const addItem = () => saveItem({ id: uid(), type: tab, title: "", body: "", url: "", tags: "", createdAt: new Date().toISOString() });
+  const patch = (id, changes) => { const it = items.find(i => i.id === id); if (it) saveItem({ ...it, ...changes }); };
+  const remove = async (id) => { if (await confirmDelete("Remove this entry?")) { deleteToolsPromptsItem(id); triggerSaved(); bump(); } };
 
   const q = search.toLowerCase().trim();
   const shown = items.filter(i => i.type === tab && (!q || [i.title, i.body, i.tags].join(" ").toLowerCase().includes(q)));

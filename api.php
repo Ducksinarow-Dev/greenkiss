@@ -71,6 +71,18 @@ if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
     header('Strict-Transport-Security: max-age=63072000; includeSubDomains');
 }
 
+// Any exception that escapes a handler below would otherwise print a PHP fatal
+// (with the full server path) into a response that still reads as HTTP 200,
+// because the Content-Type header above is already sent. The client's writes are
+// fire-and-forget, so a body it can't parse looks like success — say plainly
+// that the change may not have saved instead.
+set_exception_handler(function ($e) {
+    error_log('GK API error: ' . $e);
+    if (!headers_sent()) http_response_code(500);
+    echo json_encode(['error' => 'The server hit an unexpected error and your change may not have saved. Please try again.']);
+    exit;
+});
+
 $configPath = __DIR__ . '/config.php';
 if (!is_file($configPath)) {
     http_response_code(500);
@@ -174,20 +186,80 @@ switch ($action) {
         $sop = $body['sop'] ?? null;
         if (!is_array($sop) || empty($sop['id'])) respond(400, ['error' => 'Missing sop']);
         maybeAutoBackup($pdo);
-        $sops = kvGet($pdo, 'sops') ?: [];
-        $idx = null;
-        foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $sop['id']) { $idx = $i; break; } }
-        if ($idx !== null) {
-            $old = $sops[$idx];
-            if (sopContentChanged($old, $sop)) {
-                saveRevision($pdo, $sop['id'], $old, $old['updatedBy'] ?? '');
+        // Snapshot-then-replace inside the row lock, so a concurrent save can't
+        // slip between the revision write and the list write.
+        $sops = kvMutate($pdo, 'sops', function ($sops) use ($pdo, $sop) {
+            if (!is_array($sops)) $sops = [];
+            $idx = null;
+            foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $sop['id']) { $idx = $i; break; } }
+            if ($idx !== null) {
+                $old = $sops[$idx];
+                if (sopContentChanged($old, $sop)) {
+                    saveRevision($pdo, $sop['id'], $old, $old['updatedBy'] ?? '');
+                }
+                $sops[$idx] = $sop;
+            } else {
+                $sops[] = $sop;
             }
-            $sops[$idx] = $sop;
-        } else {
-            $sops[] = $sop;
-        }
-        kvSet($pdo, 'sops', $sops);
+            return $sops;
+        });
         respond(200, ['ok' => true, 'sops' => $sops]);
+        break;
+
+    case 'sop_delete':
+        // Deleting used to be a client-side filter of its own cached array,
+        // shipped back as a whole-array kv_set — which silently dropped any SOP
+        // a coworker had created since that client loaded the page. The filter
+        // belongs here, against current data.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'sops' => collectionDelete($pdo, 'sops', $id)]);
+        break;
+
+    case 'doc_item_save':
+        // One entry in a single-document list (Image Repository, Tools &
+        // Prompts, a Playbook page) — merged server-side against current data.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $key = (string)($body['key'] ?? '');
+        $field = docListField($key);
+        if ($field === null) respond(400, ['error' => 'Unknown document']);
+        $item = $body['item'] ?? null;
+        if (!is_array($item) || empty($item['id'])) respond(400, ['error' => 'Missing item']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'doc' => docItemUpsert($pdo, $key, $field, $item)]);
+        break;
+
+    case 'doc_item_delete':
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['editor', 'admin']);
+        $key = (string)($body['key'] ?? '');
+        $field = docListField($key);
+        if ($field === null) respond(400, ['error' => 'Unknown document']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        maybeAutoBackup($pdo);
+        respond(200, ['ok' => true, 'doc' => docItemDelete($pdo, $key, $field, $id)]);
+        break;
+
+    case 'nav_access_save':
+        // One user's sidebar access, merged into the navAccess map — two admins
+        // editing different staff no longer overwrite each other.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        $targetId = (string)($body['userId'] ?? '');
+        if ($targetId === '') respond(400, ['error' => 'Missing userId']);
+        $sections = is_array($body['sections'] ?? null) ? array_values($body['sections']) : [];
+        maybeAutoBackup($pdo);
+        $map = kvMutate($pdo, 'navAccess', function ($map) use ($targetId, $sections) {
+            if (!is_array($map)) $map = [];
+            $map[$targetId] = $sections;
+            return $map;
+        });
+        respond(200, ['ok' => true, 'navAccess' => $map]);
         break;
 
     case 'task_save':
@@ -206,8 +278,14 @@ switch ($action) {
         break;
 
     case 'project_delete':
+        // Cascade: the project's tasks survive as standalone tasks.
         $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'projects');
+        handleCollectionDelete($pdo, $body, $user, 'projects', function ($pdo, $id) {
+            return ['tasks' => collectionMapAll($pdo, 'tasks', function ($t) use ($id) {
+                if (($t['projectId'] ?? '') === $id) $t['projectId'] = '';
+                return $t;
+            })];
+        });
         break;
 
     case 'campaign_save':
@@ -216,8 +294,14 @@ switch ($action) {
         break;
 
     case 'campaign_delete':
+        // Cascade: the campaign's content items survive uncampaigned.
         $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'campaigns');
+        handleCollectionDelete($pdo, $body, $user, 'campaigns', function ($pdo, $id) {
+            return ['content' => collectionMapAll($pdo, 'content', function ($c) use ($id) {
+                if (($c['campaignId'] ?? '') === $id) $c['campaignId'] = '';
+                return $c;
+            })];
+        });
         break;
 
     case 'content_save':
@@ -236,8 +320,14 @@ switch ($action) {
         break;
 
     case 'category_delete':
+        // Cascade: the category's SOPs become uncategorized rather than deleted.
         $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'categories');
+        handleCollectionDelete($pdo, $body, $user, 'categories', function ($pdo, $id) {
+            return ['sops' => collectionMapAll($pdo, 'sops', function ($s) use ($id) {
+                if (($s['categoryId'] ?? '') === $id) $s['categoryId'] = '';
+                return $s;
+            })];
+        });
         break;
 
     case 'tag_save':
@@ -309,11 +399,12 @@ switch ($action) {
         $at = $body['at'] ?? gmdate('c');
         $version = $body['version'] ?? '';
         maybeAutoBackup($pdo);
-        $acks = kvGet($pdo, 'acks');
-        if (!is_array($acks)) $acks = [];
-        if (!isset($acks[$sopId]) || !is_array($acks[$sopId])) $acks[$sopId] = [];
-        $acks[$sopId][$userId] = ['at' => $at, 'version' => $version];
-        kvSet($pdo, 'acks', $acks);
+        $acks = kvMutate($pdo, 'acks', function ($acks) use ($sopId, $userId, $at, $version) {
+            if (!is_array($acks)) $acks = [];
+            if (!isset($acks[$sopId]) || !is_array($acks[$sopId])) $acks[$sopId] = [];
+            $acks[$sopId][$userId] = ['at' => $at, 'version' => $version];
+            return $acks;
+        });
         respond(200, ['ok' => true, 'acks' => $acks]);
         break;
 
@@ -351,18 +442,24 @@ switch ($action) {
         if (!$rev) respond(404, ['error' => 'Not found']);
         maybeAutoBackup($pdo);
         $snapshot = json_decode($rev['snapshot'], true);
-        $sops = kvGet($pdo, 'sops') ?: [];
-        $idx = null;
-        foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $rev['sop_id']) { $idx = $i; break; } }
-        if ($idx === null) respond(404, ['error' => 'SOP no longer exists']);
-        saveRevision($pdo, $rev['sop_id'], $sops[$idx], $sops[$idx]['updatedBy'] ?? '');
-        $restored = array_merge($sops[$idx], $snapshot, [
-            'id' => $rev['sop_id'],
-            'updatedAt' => gmdate('c'),
-            'updatedBy' => $user['name'],
-        ]);
-        $sops[$idx] = $restored;
-        kvSet($pdo, 'sops', $sops);
+        $restored = null;
+        kvMutate($pdo, 'sops', function ($sops) use ($pdo, $rev, $snapshot, $user, &$restored) {
+            if (!is_array($sops)) $sops = [];
+            $idx = null;
+            foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $rev['sop_id']) { $idx = $i; break; } }
+            // Leave the list untouched and report afterwards — respond() exits,
+            // and exiting from inside the row lock is not worth relying on.
+            if ($idx === null) return $sops;
+            saveRevision($pdo, $rev['sop_id'], $sops[$idx], $sops[$idx]['updatedBy'] ?? '');
+            $restored = array_merge($sops[$idx], $snapshot, [
+                'id' => $rev['sop_id'],
+                'updatedAt' => gmdate('c'),
+                'updatedBy' => $user['name'],
+            ]);
+            $sops[$idx] = $restored;
+            return $sops;
+        });
+        if ($restored === null) respond(404, ['error' => 'SOP no longer exists']);
         respond(200, ['ok' => true, 'sop' => $restored]);
         break;
 
@@ -466,7 +563,7 @@ switch ($action) {
             $user = requireAuth($pdo, $body);
             requireRole($user, ['admin']);
         }
-        $file = runBackup($pdo);
+        $file = runBackupOrFail($pdo);
         respond(200, ['ok' => true, 'file' => $file]);
         break;
 
@@ -496,11 +593,14 @@ switch ($action) {
         if (!preg_match('/^gk_[0-9_]+\.json\.gz$/', $name)) respond(400, ['error' => 'Invalid filename']);
         $path = ensureBackupsDir() . '/' . $name;
         if (!file_exists($path)) respond(404, ['error' => 'Not found']);
-        // Safety snapshot of current state before we overwrite anything.
-        runBackup($pdo);
+        // Read the backup we're restoring BEFORE taking the safety snapshot —
+        // belt and braces alongside runBackup's no-overwrite guard, so the
+        // snapshot can never influence what gets restored.
         $raw = @gzdecode(file_get_contents($path));
         $data = $raw !== false ? json_decode($raw, true) : null;
         if (!is_array($data)) respond(500, ['error' => 'Backup file is corrupt or unreadable']);
+        // Safety snapshot of current state before we overwrite anything.
+        runBackupOrFail($pdo);
         restoreFromBackupData($pdo, $data);
         respond(200, ['ok' => true]);
         break;
@@ -525,7 +625,7 @@ switch ($action) {
         }
         // This is a "we're about to change what code is live" moment — take a
         // fresh data backup regardless of the normal 24h-lazy threshold...
-        runBackup($pdo);
+        runBackupOrFail($pdo);
         // ...and a code snapshot of what's CURRENTLY deployed, before we
         // overwrite it (see #13 rollback). Best-effort: if index.html isn't
         // there yet (first-ever deploy), this is a silent no-op.
@@ -611,11 +711,13 @@ switch ($action) {
         // Any authenticated user — a stable per-user token for their Google
         // Calendar subscribe feed. Stored in one kv map {userId: token}.
         $user = requireAuth($pdo, $body);
-        $tokens = kvGet($pdo, 'icsTokens') ?: [];
-        if (empty($tokens[$user['id']])) {
-            $tokens[$user['id']] = bin2hex(random_bytes(20));
-            kvSet($pdo, 'icsTokens', $tokens);
-        }
+        // Under the row lock: two tabs asking at once would otherwise each mint
+        // a token and the second write would drop the first user's entry.
+        $tokens = kvMutate($pdo, 'icsTokens', function ($tokens) use ($user) {
+            if (!is_array($tokens)) $tokens = [];
+            if (empty($tokens[$user['id']])) $tokens[$user['id']] = bin2hex(random_bytes(20));
+            return $tokens;
+        });
         respond(200, ['token' => $tokens[$user['id']]]);
         break;
 
@@ -837,6 +939,78 @@ function kvSet($pdo, $key, $value) {
     )->execute([$key, $json]);
 }
 
+// Atomic read-modify-write of one kv row. $fn receives the decoded current
+// value and returns the value to store.
+//
+// Every per-record write in this file is a read-modify-write of a whole JSON
+// collection, and doing that as a bare SELECT-then-write loses updates: two
+// concurrent requests both read the same list, each adds its own record, and
+// the second write drops the first. That is not theoretical — the "seed the 12
+// standard sections" button fires 12 unawaited category_save calls at once, and
+// only 4 of the 12 categories survived before this existed.
+//
+// SELECT ... FOR UPDATE holds an exclusive row lock until the surrounding
+// transaction commits, so concurrent writers to the same key serialize instead
+// of racing. The INSERT IGNORE first guarantees there is a row to lock (FOR
+// UPDATE on a nonexistent row locks a gap, not a row).
+//
+// Nest-safe: if a caller already opened a transaction (restoreFromBackupData),
+// this joins it rather than committing early.
+function kvMutate($pdo, $key, callable $fn) {
+    // The row has to exist before it can be locked: SELECT ... FOR UPDATE on a
+    // missing row takes a gap lock, not a row lock, so concurrent writers to a
+    // brand-new key wouldn't serialize at all.
+    //
+    // This INSERT must be its own committed statement, OUTSIDE the transaction.
+    // Doing it inside and then upgrading to FOR UPDATE is a lock upgrade, which
+    // InnoDB resolves by killing one of the contending transactions — measured
+    // at 5 of 12 concurrent writes dying with SQLSTATE 40001 when it lived
+    // inside the transaction.
+    $ensure = fn() => $pdo->prepare(
+        "INSERT IGNORE INTO kv_store (k, v, updated_at) VALUES (?, NULL, UTC_TIMESTAMP())"
+    )->execute([$key]);
+
+    // Already inside someone else's transaction (restoreFromBackupData): join
+    // it. Nothing to retry against there, and nothing concurrent either.
+    if ($pdo->inTransaction()) {
+        $ensure();
+        return kvMutateLocked($pdo, $key, $fn);
+    }
+    $ensure();
+
+    // Retry on deadlock (1213) and lock wait timeout (1205). Every one of these
+    // writes is fire-and-forget from the browser — nothing retries it and the
+    // user is never told — so an aborted transaction here IS silent data loss.
+    // $fn re-runs on retry, which is safe: the rollback undid everything it did,
+    // including sop_save's revision insert.
+    $delayUs = 15000;
+    for ($attempt = 1; ; $attempt++) {
+        $pdo->beginTransaction();
+        try {
+            $next = kvMutateLocked($pdo, $key, $fn);
+            $pdo->commit();
+            return $next;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $errno = ($e instanceof PDOException && isset($e->errorInfo[1])) ? (int)$e->errorInfo[1] : 0;
+            if ($attempt >= 6 || ($errno !== 1213 && $errno !== 1205)) throw $e;
+            usleep($delayUs + random_int(0, $delayUs)); // jittered backoff
+            $delayUs = min($delayUs * 2, 250000);
+        }
+    }
+}
+
+// The locked read-modify-write itself. Always called with a transaction open.
+function kvMutateLocked($pdo, $key, callable $fn) {
+    $stmt = $pdo->prepare("SELECT v FROM kv_store WHERE k = ? FOR UPDATE");
+    $stmt->execute([$key]);
+    $row = $stmt->fetch();
+    $current = ($row && $row['v'] !== null) ? json_decode($row['v'], true) : null;
+    $next = $fn($current);
+    kvSet($pdo, $key, $next);
+    return $next;
+}
+
 // Safe read-merge-write for the per-record collection actions (tasks,
 // projects, campaigns, content, categories). Re-reads the current list
 // fresh from the DB inside the request, replaces just the matching record
@@ -844,19 +1018,63 @@ function kvSet($pdo, $key, $value) {
 // editing different records in the same collection concurrently never
 // wipe each other out, unlike a blind whole-array kv_set.
 function collectionUpsert($pdo, $key, $item) {
-    $list = kvGet($pdo, $key) ?: [];
-    $idx = null;
-    foreach ($list as $i => $x) { if (($x['id'] ?? null) === $item['id']) { $idx = $i; break; } }
-    if ($idx !== null) { $list[$idx] = $item; } else { $list[] = $item; }
-    kvSet($pdo, $key, $list);
-    return $list;
+    return kvMutate($pdo, $key, function ($list) use ($item) {
+        if (!is_array($list)) $list = [];
+        $idx = null;
+        foreach ($list as $i => $x) { if (($x['id'] ?? null) === $item['id']) { $idx = $i; break; } }
+        if ($idx !== null) { $list[$idx] = $item; } else { $list[] = $item; }
+        return $list;
+    });
 }
 
 function collectionDelete($pdo, $key, $id) {
-    $list = kvGet($pdo, $key) ?: [];
-    $list = array_values(array_filter($list, function ($x) use ($id) { return ($x['id'] ?? null) !== $id; }));
-    kvSet($pdo, $key, $list);
-    return $list;
+    return kvMutate($pdo, $key, function ($list) use ($id) {
+        if (!is_array($list)) $list = [];
+        return array_values(array_filter($list, fn($x) => ($x['id'] ?? null) !== $id));
+    });
+}
+
+// Rewrites every record in a collection through $fn — for the cascades that
+// follow a delete (uncategorize a category's SOPs, unlink a project's tasks,
+// uncampaign a campaign's content). These used to run CLIENT-side as a blind
+// whole-array kv_set built from a cache warmed at login, so deleting one
+// project could wipe every task a coworker had created since your page load.
+function collectionMapAll($pdo, $key, callable $fn) {
+    return kvMutate($pdo, $key, function ($list) use ($fn) {
+        if (!is_array($list)) $list = [];
+        return array_values(array_map($fn, $list));
+    });
+}
+
+// The kv docs that are a single document wrapping one list of identified items
+// (Image Repository, Tools & Prompts, the Playbook's pages). Per-item writes
+// merge into these server-side, so two editors adding different entries no
+// longer overwrite each other. Allowlisted, so doc_item_save can't be pointed
+// at an arbitrary key like "tasks".
+function docListField($key) {
+    $map = ['imagerepo' => 'blocks', 'toolsPrompts' => 'items', 'playbook' => 'sections'];
+    return $map[$key] ?? null;
+}
+
+function docItemUpsert($pdo, $key, $field, $item) {
+    return kvMutate($pdo, $key, function ($doc) use ($field, $item) {
+        if (!is_array($doc)) $doc = [];
+        $list = isset($doc[$field]) && is_array($doc[$field]) ? $doc[$field] : [];
+        $idx = null;
+        foreach ($list as $i => $x) { if (($x['id'] ?? null) === $item['id']) { $idx = $i; break; } }
+        if ($idx !== null) { $list[$idx] = $item; } else { $list[] = $item; }
+        $doc[$field] = $list;
+        return $doc;
+    });
+}
+
+function docItemDelete($pdo, $key, $field, $id) {
+    return kvMutate($pdo, $key, function ($doc) use ($field, $id) {
+        if (!is_array($doc)) $doc = [];
+        $list = isset($doc[$field]) && is_array($doc[$field]) ? $doc[$field] : [];
+        $doc[$field] = array_values(array_filter($list, fn($x) => ($x['id'] ?? null) !== $id));
+        return $doc;
+    });
 }
 
 // The *_save/*_delete cases above (task, project, campaign, content,
@@ -875,12 +1093,17 @@ function handleCollectionSave($pdo, $body, $user, $bodyKey, $kvKey) {
     respond(200, ['ok' => true, $kvKey => collectionUpsert($pdo, $kvKey, $item)]);
 }
 
-function handleCollectionDelete($pdo, $body, $user, $kvKey) {
+// $cascade (optional) runs after the delete and returns extra collections to
+// merge into the response, so the client can refresh its cache from real data
+// instead of rewriting a second whole collection from its own stale copy.
+function handleCollectionDelete($pdo, $body, $user, $kvKey, $cascade = null) {
     requireRole($user, ['editor', 'admin']);
     $id = $body['id'] ?? '';
     if ($id === '') respond(400, ['error' => 'Missing id']);
     maybeAutoBackup($pdo);
-    respond(200, ['ok' => true, $kvKey => collectionDelete($pdo, $kvKey, $id)]);
+    $out = ['ok' => true, $kvKey => collectionDelete($pdo, $kvKey, $id)];
+    if ($cascade) $out = array_merge($out, $cascade($pdo, $id));
+    respond(200, $out);
 }
 
 // Minimal curl wrapper for cPanel's UAPI (Authorization: cpanel header).
@@ -1117,10 +1340,29 @@ function runBackup($pdo) {
     foreach ($pdo->query("SELECT id, sop_id, snapshot, saved_at, saved_by FROM revisions") as $row) $data['revisions'][] = $row;
 
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    // Never overwrite an existing snapshot. The stamp is second-resolution, so
+    // two backups in the same second land on the same name — and because
+    // backup_restore takes its safety snapshot BEFORE reading the file being
+    // restored, that collision used to truncate the very backup being restored
+    // and then "successfully" restore the already-broken current state. Suffix
+    // on collision instead; the extra "_N" still matches the gk_[0-9_]+ pattern
+    // backup_download/backup_restore validate against.
     $path = $dir . "/gk_$stamp.json.gz";
-    $gz = gzopen($path, 'wb9');
-    gzwrite($gz, $json);
+    for ($n = 1; file_exists($path); $n++) $path = $dir . "/gk_{$stamp}_$n.json.gz";
+
+    // Write to a temp file and rename into place, so a failed/partial write
+    // never leaves a truncated file that LOOKS like the newest good backup
+    // (which would also suppress maybeAutoBackup for the next 24h).
+    $tmp = $path . '.part';
+    $gz = @gzopen($tmp, 'wb9');
+    if ($gz === false) { @unlink($tmp); throw new Exception('Could not open the backups directory for writing.'); }
+    $written = gzwrite($gz, $json);
     gzclose($gz);
+    if ($written === false || $written < strlen($json) || !@rename($tmp, $path)) {
+        @unlink($tmp);
+        throw new Exception('Backup write failed — the snapshot was not saved.');
+    }
 
     // Keep the newest 60 only.
     $files = glob($dir . '/gk_*.json.gz');
@@ -1142,12 +1384,28 @@ function listBackups() {
 
 // Cheap staleness check — runs on every authenticated write. glob() over a
 // folder capped at 60 files is effectively free at this scale.
+// Deliberately swallows backup failures: this is opportunistic, and a full or
+// unwritable disk must not make the app unwritable too. A missed snapshot shows
+// up as a stale date in Admin Panel → Backups, which is the visible signal.
 function maybeAutoBackup($pdo) {
     $dir = ensureBackupsDir();
     $files = glob($dir . '/gk_*.json.gz');
-    if (!$files) { runBackup($pdo); return; }
-    usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
-    if (time() - filemtime($files[0]) > 86400) runBackup($pdo);
+    try {
+        if (!$files) { runBackup($pdo); return; }
+        usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
+        if (time() - filemtime($files[0]) > 86400) runBackup($pdo);
+    } catch (Exception $e) { /* see above */ }
+}
+
+// For the callers where a backup is the safety net for something destructive
+// (explicit backup, pre-restore snapshot, pre-deploy snapshot): if it can't be
+// written, say so and stop rather than proceeding without one.
+function runBackupOrFail($pdo) {
+    try {
+        return runBackup($pdo);
+    } catch (Exception $e) {
+        respond(500, ['error' => $e->getMessage() . ' Check that the backups/ directory is writable and the disk has free space.']);
+    }
 }
 
 // ── #13 RELEASE ROLLBACK ──────────────────────────────────────────────────

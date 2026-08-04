@@ -543,7 +543,18 @@ const getUserSections = (userId) => {
   return Array.isArray(list) ? list : DEFAULT_NAV_ACCESS.slice();
 };
 const setUserSections = (userId, keys) => {
-  saveNavAccess({ ...getNavAccess(), [userId]: keys });
+  const next = { ...getNavAccess(), [userId]: keys };
+  // Merged per-user server-side: two admins editing different staff members
+  // were overwriting each other's changes with a whole-map write.
+  if (REMOTE_MODE) {
+    _cache.set("navAccess", next);
+    apiCall("nav_access_save", { method: "POST", body: { userId, sections: keys } }).then(res => {
+      if (res && res.navAccess) _cache.set("navAccess", res.navAccess);
+      _setOffline(false);
+    }).catch(() => _setOffline(true));
+    return;
+  }
+  saveNavAccess(next);
 };
 const saveNavAccess = (m) => db.setSync("navAccess", m);
 /** Effective visible section keys for a user — admins get everything. */
@@ -710,17 +721,78 @@ function seedIfEmpty() {
    merged list, so the UI reflects the real merged truth (not just this
    client's optimistic local guess) once the request lands. Fire-and-forget
    from the caller's point of view, matching every other setSync call site. */
-function _remoteCollectionSave(action, bodyKey, item, cacheKey) {
+/* Every collection the server may echo back on a write. A delete that cascades
+   returns BOTH its own collection and the cascaded one (project_delete →
+   {projects, tasks}), so the client refreshes both from real server data
+   instead of rewriting the second one from its own stale copy. */
+const _SERVER_COLLECTIONS = [
+  "sops", "categories", "tasks", "projects", "campaigns", "content", "contacts",
+  "instances", "tags", "alerts", "taskTemplates", "acks", "navAccess",
+];
+function _applyServerCollections(res) {
+  if (!res) return;
+  _SERVER_COLLECTIONS.forEach(k => { if (res[k] !== undefined) _cache.set(k, res[k]); });
+}
+function _remoteCollectionSave(action, bodyKey, item) {
   apiCall(action, { method: "POST", body: { [bodyKey]: item } }).then(res => {
-    if (res && res[cacheKey]) _cache.set(cacheKey, res[cacheKey]);
+    _applyServerCollections(res);
     _setOffline(false);
   }).catch(() => _setOffline(true));
 }
-function _remoteCollectionDelete(action, id, cacheKey) {
+function _remoteCollectionDelete(action, id) {
   apiCall(action, { method: "POST", body: { id } }).then(res => {
-    if (res && res[cacheKey]) _cache.set(cacheKey, res[cacheKey]);
+    _applyServerCollections(res);
     _setOffline(false);
   }).catch(() => _setOffline(true));
+}
+
+/* ─── SINGLE-DOCUMENT SECTIONS — per-item writes ──────────────────────
+   Image Repository, Tools & Prompts and the Playbook's pages are each one kv
+   doc wrapping a list of identified items. Writing the whole doc meant two
+   editors on the same page silently overwrote each other's entries, so
+   add/edit/remove now send just the one item and the server merges it.
+
+   The whole-doc save* helpers below stay for the genuinely whole-list intents —
+   reordering, and restoring a whole document from history — where losing a race
+   costs an ordering rather than someone's content. */
+function _docItemWrite(kvKey, field, item, id) {
+  const doc = db.getSync(kvKey) || {};
+  const list = Array.isArray(doc[field]) ? doc[field] : [];
+  const nextList = item
+    ? (list.some(x => x.id === item.id) ? list.map(x => x.id === item.id ? item : x) : [...list, item])
+    : list.filter(x => x.id !== id);
+  const next = { ...doc, [field]: nextList };
+  if (REMOTE_MODE) {
+    _cache.set(kvKey, next); // optimistic; replaced by the server's merged doc
+    const body = item ? { key: kvKey, item } : { key: kvKey, id };
+    apiCall(item ? "doc_item_save" : "doc_item_delete", { method: "POST", body }).then(res => {
+      if (res && res.doc) _cache.set(kvKey, res.doc);
+      _setOffline(false);
+    }).catch(() => _setOffline(true));
+    return next;
+  }
+  db.setSync(kvKey, next);
+  return next;
+}
+const saveImageRepoBlock = (block) => _docItemWrite("imagerepo", "blocks", block);
+const deleteImageRepoBlock = (id) => _docItemWrite("imagerepo", "blocks", null, id);
+const saveToolsPromptsItem = (item) => _docItemWrite("toolsPrompts", "items", item);
+const deleteToolsPromptsItem = (id) => _docItemWrite("toolsPrompts", "items", null, id);
+const savePlaybookSection = (section) => _docItemWrite("playbook", "sections", section);
+const deletePlaybookSection = (id) => _docItemWrite("playbook", "sections", null, id);
+
+/* ─── CACHE REFRESH ───────────────────────────────────────────────────
+   The kv cache is warmed once at login and never again, so a tab left open all
+   day builds its writes from an ever-staler view of the data. Re-pulling on
+   focus bounds that to "since you last looked at this tab". One request. */
+async function refreshCache() {
+  if (!REMOTE_MODE || !_remoteWarm) return false;
+  const all = await apiCall("kv_all", { method: "GET" });
+  const data = all.data || {};
+  // Note: "users" is the roster from login_options, not a kv row, so kv_all
+  // never contains it and this can't clobber it.
+  Object.keys(data).forEach(k => _cache.set(k, data[k]));
+  return true;
 }
 
 /* ─── CATEGORY STORAGE ───────────────────────────────────────────── */
@@ -731,7 +803,7 @@ const saveCategories = (c) => db.setSync("categories", c);
 const addCategory = (name, color) => {
   const newCat = { id: uid(), name, color, createdAt: nowISO() };
   const next = [...getCategories(), newCat];
-  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionSave("category_save", "category", newCat, "categories"); return newCat; }
+  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionSave("category_save", "category", newCat); return newCat; }
   saveCategories(next);
   return newCat;
 };
@@ -739,7 +811,7 @@ const updateCategory = (id, changes) => {
   const next = getCategories().map(c => c.id === id ? { ...c, ...changes } : c);
   if (REMOTE_MODE) {
     _cache.set("categories", next);
-    _remoteCollectionSave("category_save", "category", next.find(c => c.id === id), "categories");
+    _remoteCollectionSave("category_save", "category", next.find(c => c.id === id));
     return next;
   }
   saveCategories(next);
@@ -747,12 +819,19 @@ const updateCategory = (id, changes) => {
 };
 const deleteCategory = (id) => {
   const next = getCategories().filter(c => c.id !== id);
-  if (REMOTE_MODE) { _cache.set("categories", next); _remoteCollectionDelete("category_delete", id, "categories"); }
-  else saveCategories(next);
-  // Leave SOPs uncategorized rather than deleting them — bulk cascade stays
-  // on the plain saveSOPs path either way (not "an edit" worth per-record merging).
-  const sops = getSOPs().map(s => s.categoryId === id ? { ...s, categoryId: "" } : s);
-  saveSOPs(sops);
+  // Leave SOPs uncategorized rather than deleting them. In remote mode the
+  // server runs that cascade against current data and echoes both collections
+  // back — writing it from here was a whole-array kv_set built from a cache
+  // warmed at login, which silently dropped any SOP added since.
+  const uncategorized = getSOPs().map(s => s.categoryId === id ? { ...s, categoryId: "" } : s);
+  if (REMOTE_MODE) {
+    _cache.set("categories", next);
+    _cache.set("sops", uncategorized); // optimistic; server's version wins
+    _remoteCollectionDelete("category_delete", id);
+    return;
+  }
+  saveCategories(next);
+  saveSOPs(uncategorized);
 };
 
 /* ─── TAG STORAGE (#8 — foundation for tag chips + create-on-the-fly) ─
@@ -766,7 +845,7 @@ const saveTags = (t) => db.setSync("tags", t);
 const addTag = (name, color) => {
   const newTag = { id: uid(), name, color, createdAt: nowISO() };
   const next = [...getTags(), newTag];
-  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionSave("tag_save", "tag", newTag, "tags"); return newTag; }
+  if (REMOTE_MODE) { _cache.set("tags", next); _remoteCollectionSave("tag_save", "tag", newTag); return newTag; }
   saveTags(next);
   return newTag;
 };
@@ -781,19 +860,19 @@ const saveContacts = (c) => db.setSync("contacts", c);
 const addContact = (contact) => {
   const newContact = { id: uid(), createdAt: nowISO(), ...contact };
   const next = [...getContacts(), newContact];
-  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", newContact, "contacts"); return newContact; }
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", newContact); return newContact; }
   saveContacts(next);
   return newContact;
 };
 const updateContact = (id, changes) => {
   const next = getContacts().map(c => c.id === id ? { ...c, ...changes } : c);
-  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", next.find(c => c.id === id), "contacts"); return next; }
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionSave("contact_save", "contact", next.find(c => c.id === id)); return next; }
   saveContacts(next);
   return next;
 };
 const deleteContact = (id) => {
   const next = getContacts().filter(c => c.id !== id);
-  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionDelete("contact_delete", id, "contacts"); }
+  if (REMOTE_MODE) { _cache.set("contacts", next); _remoteCollectionDelete("contact_delete", id); }
   else saveContacts(next);
 };
 
@@ -809,13 +888,13 @@ const addAlert = (taskId, toUserId) => {
   const me = getCurrentUser();
   const newAlert = { id: uid(), taskId, fromUserId: me?.id || "", toUserId, at: nowISO() };
   const next = [...getAlerts(), newAlert];
-  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionSave("alert_save", "alert", newAlert, "alerts"); return newAlert; }
+  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionSave("alert_save", "alert", newAlert); return newAlert; }
   saveAlerts(next);
   return newAlert;
 };
 const deleteAlert = (id) => {
   const next = getAlerts().filter(a => a.id !== id);
-  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionDelete("alert_delete", id, "alerts"); }
+  if (REMOTE_MODE) { _cache.set("alerts", next); _remoteCollectionDelete("alert_delete", id); }
   else saveAlerts(next);
 };
 
@@ -835,13 +914,13 @@ const snapshotTaskForTemplate = (task) => ({
 const addTaskTemplate = (name, task) => {
   const newTpl = { id: uid(), name, snapshot: snapshotTaskForTemplate(task), createdAt: nowISO() };
   const next = [...getTaskTemplates(), newTpl];
-  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionSave("template_save", "template", newTpl, "taskTemplates"); return newTpl; }
+  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionSave("template_save", "template", newTpl); return newTpl; }
   saveTaskTemplates(next);
   return newTpl;
 };
 const deleteTaskTemplate = (id) => {
   const next = getTaskTemplates().filter(t => t.id !== id);
-  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionDelete("template_delete", id, "taskTemplates"); }
+  if (REMOTE_MODE) { _cache.set("taskTemplates", next); _remoteCollectionDelete("template_delete", id); }
   else saveTaskTemplates(next);
 };
 /** Builds a fresh Task from a template — into a specific column/project,
@@ -909,7 +988,14 @@ const updateSOP = (id, changes) => {
   _devSnapshotIfChanged(prev, updated);
   saveSOPs(next);
 };
-const deleteSOP = (id) => saveSOPs(getSOPs().filter(s => s.id !== id));
+const deleteSOP = (id) => {
+  const next = getSOPs().filter(s => s.id !== id);
+  // Remote mode filters server-side. Doing it here shipped the whole remaining
+  // array as a kv_set, so deleting one SOP wiped every SOP a coworker had
+  // created since this tab loaded.
+  if (REMOTE_MODE) { _cache.set("sops", next); _remoteCollectionDelete("sop_delete", id); return; }
+  saveSOPs(next);
+};
 /** Copies a SOP as a new Draft "(copy)" — goes through the normal create path. */
 const duplicateSOP = (sop) => {
   const copy = {
@@ -1079,13 +1165,13 @@ const getInstances = (docId) => getAllInstances().filter(i => i.docId === docId)
 const addInstance = (instance) => {
   const newInstance = { id: uid(), values: {}, ...instance };
   const next = [...getAllInstances(), newInstance];
-  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", newInstance, "instances"); return newInstance; }
+  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", newInstance); return newInstance; }
   saveInstances(next);
   return newInstance;
 };
 const updateInstance = (id, changes) => {
   const next = getAllInstances().map(i => i.id === id ? { ...i, ...changes } : i);
-  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", next.find(i => i.id === id), "instances"); return next; }
+  if (REMOTE_MODE) { _cache.set("instances", next); _remoteCollectionSave("instance_save", "instance", next.find(i => i.id === id)); return next; }
   saveInstances(next);
   return next;
 };
@@ -1699,18 +1785,18 @@ const saveTasks = (t) => db.setSync("tasks", t);
 const addTask = (task) => {
   const full = { id: uid(), createdAt: nowISO(), subTasks: [], ...task };
   const next = [...getTasks(), full];
-  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", full, "tasks"); return next; }
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", full); return next; }
   saveTasks(next);
   return next;
 };
 const updateTask = (id, changes) => {
   const next = getTasks().map(t => t.id === id ? { ...t, ...changes } : t);
-  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", next.find(t => t.id === id), "tasks"); return; }
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionSave("task_save", "task", next.find(t => t.id === id)); return; }
   saveTasks(next);
 };
 const deleteTask = (id) => {
   const next = getTasks().filter(t => t.id !== id);
-  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionDelete("task_delete", id, "tasks"); return; }
+  if (REMOTE_MODE) { _cache.set("tasks", next); _remoteCollectionDelete("task_delete", id); return; }
   saveTasks(next);
 };
 
@@ -1908,22 +1994,28 @@ const saveProjects = (p) => db.setSync("projects", p);
 const addProject = (project) => {
   const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), memberIds: [], status: "upcoming", ...project };
   const next = [...getProjects(), full];
-  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", full, "projects"); return next; }
+  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", full); return next; }
   saveProjects(next);
   return next;
 };
 const updateProject = (id, changes) => {
   const next = getProjects().map(p => p.id === id ? { ...p, ...changes, updatedAt: nowISO() } : p);
-  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", next.find(p => p.id === id), "projects"); return; }
+  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionSave("project_save", "project", next.find(p => p.id === id)); return; }
   saveProjects(next);
 };
 const deleteProject = (id) => {
   const next = getProjects().filter(p => p.id !== id);
-  if (REMOTE_MODE) { _cache.set("projects", next); _remoteCollectionDelete("project_delete", id, "projects"); }
-  else saveProjects(next);
-  // Unlink rather than delete — a project's tasks survive as standalone tasks
-  // (bulk cascade write, stays on the plain saveTasks path either way).
-  saveTasks(getTasks().map(t => t.projectId === id ? { ...t, projectId: "" } : t));
+  // Unlink rather than delete — a project's tasks survive as standalone tasks.
+  // Server-side cascade in remote mode (see deleteCategory for why).
+  const unlinked = getTasks().map(t => t.projectId === id ? { ...t, projectId: "" } : t);
+  if (REMOTE_MODE) {
+    _cache.set("projects", next);
+    _cache.set("tasks", unlinked); // optimistic; server's version wins
+    _remoteCollectionDelete("project_delete", id);
+    return;
+  }
+  saveProjects(next);
+  saveTasks(unlinked);
 };
 const defProject = () => ({
   id: uid(), name: "", description: "", status: "upcoming", startDate: "", dueDate: "",
@@ -1999,22 +2091,28 @@ const saveCampaigns = (c) => db.setSync("campaigns", c);
 const addCampaign = (campaign) => {
   const full = { id: uid(), createdAt: nowISO(), ...campaign };
   const next = [...getCampaigns(), full];
-  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", full, "campaigns"); return next; }
+  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", full); return next; }
   saveCampaigns(next);
   return next;
 };
 const updateCampaign = (id, changes) => {
   const next = getCampaigns().map(c => c.id === id ? { ...c, ...changes } : c);
-  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", next.find(c => c.id === id), "campaigns"); return; }
+  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionSave("campaign_save", "campaign", next.find(c => c.id === id)); return; }
   saveCampaigns(next);
 };
 const deleteCampaign = (id) => {
   const next = getCampaigns().filter(c => c.id !== id);
-  if (REMOTE_MODE) { _cache.set("campaigns", next); _remoteCollectionDelete("campaign_delete", id, "campaigns"); }
-  else saveCampaigns(next);
-  // Unlink rather than delete — a campaign's content items survive uncampaigned
-  // (bulk cascade write, stays on the plain saveContentItems path either way).
-  saveContentItems(getContentItems().map(c => c.campaignId === id ? { ...c, campaignId: "" } : c));
+  // Unlink rather than delete — content items survive uncampaigned.
+  // Server-side cascade in remote mode (see deleteCategory for why).
+  const uncampaigned = getContentItems().map(c => c.campaignId === id ? { ...c, campaignId: "" } : c);
+  if (REMOTE_MODE) {
+    _cache.set("campaigns", next);
+    _cache.set("content", uncampaigned); // optimistic; server's version wins
+    _remoteCollectionDelete("campaign_delete", id);
+    return;
+  }
+  saveCampaigns(next);
+  saveContentItems(uncampaigned);
 };
 const defCampaign = () => ({
   id: uid(), name: "", description: "", startDate: "", endDate: "",
@@ -2029,18 +2127,18 @@ const saveContentItems = (c) => db.setSync("content", c);
 const addContentItem = (item) => {
   const full = { id: uid(), createdAt: nowISO(), updatedAt: nowISO(), images: [], links: [], ...item };
   const next = [...getContentItems(), full];
-  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", full, "content"); return next; }
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", full); return next; }
   saveContentItems(next);
   return next;
 };
 const updateContentItem = (id, changes) => {
   const next = getContentItems().map(c => c.id === id ? { ...c, ...changes, updatedAt: nowISO() } : c);
-  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", next.find(c => c.id === id), "content"); return; }
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", next.find(c => c.id === id)); return; }
   saveContentItems(next);
 };
 const deleteContentItem = (id) => {
   const next = getContentItems().filter(c => c.id !== id);
-  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id, "content"); return; }
+  if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id); return; }
   saveContentItems(next);
 };
 const defContentItem = (channel = "gbp") => ({
@@ -2171,7 +2269,18 @@ async function fetchLastDeploy() {
 async function releaseList() { const res = await apiCall("release_list", { method: "GET" }); return res.releases || []; }
 async function releaseRollback(name) { return apiCall("release_rollback", { method: "POST", body: { name } }); }
 
-const EXPORT_KEYS = ["sops", "categories", "tasks", "acks", "projects", "campaigns", "content", "contacts", "instances", "playbook"];
+// Every kv key the app writes. Anything missing here is silently absent from
+// an Export — which matters because Export/Import is the manual belt-and-
+// suspenders path an admin reaches for when they don't trust the server
+// backups. imagerepo/toolsPrompts especially: Image Repository is the one
+// section every staff member has by default (see DEFAULT_NAV_ACCESS).
+// Deliberately excluded: icsTokens (per-user calendar credentials, regenerate
+// on demand) and lastDeploy (server state, not user data).
+const EXPORT_KEYS = [
+  "sops", "categories", "tasks", "acks", "projects", "campaigns", "content",
+  "contacts", "instances", "playbook", "playbookRevs", "tags", "alerts",
+  "taskTemplates", "imagerepo", "toolsPrompts", "navAccess", "salesTargets",
+];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
   const out = { exportedAt: nowISO(), app: "greenkiss", data: {} };
@@ -2191,7 +2300,7 @@ async function importAllData(parsed) {
 
 export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
-  REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall,
+  REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall, refreshCache,
   db, uid, nowISO, fmtDate, fmtDateShort,
   getCurrentUser, setCurrentUser, clearCurrentUser,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
@@ -2209,9 +2318,9 @@ export {
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,
   newSubmission, stampEditLog, formColor,
   parseMentionText, getMentionCandidates, findBacklinks,
-  getPlaybook, savePlaybook, seedPlaybookIfEmpty,
-  getImageRepo, saveImageRepo, seedImageRepoIfEmpty, letterOf,
-  getToolsPrompts, saveToolsPrompts,
+  getPlaybook, savePlaybook, savePlaybookSection, deletePlaybookSection, seedPlaybookIfEmpty,
+  getImageRepo, saveImageRepo, saveImageRepoBlock, deleteImageRepoBlock, seedImageRepoIfEmpty, letterOf,
+  getToolsPrompts, saveToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
   getRevisions, getRevision, restoreRevision,

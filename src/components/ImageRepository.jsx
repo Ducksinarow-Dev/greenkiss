@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, uid, inp, canEdit, confirmDelete, triggerSaved,
-  getImageRepo, saveImageRepo, seedImageRepoIfEmpty, letterOf,
+  getImageRepo, saveImageRepoBlock, deleteImageRepoBlock, seedImageRepoIfEmpty, letterOf,
 } from '../globals.js';
 import { Icon, IconBtn, Btn, OBtn, SectionHeader, EmptyState, ItemLink } from './shared.jsx';
 
@@ -32,14 +32,21 @@ function ImageRepository({ user }) {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const save = (next) => { saveImageRepo({ ...doc, blocks: next }); triggerSaved(); bump(); };
-  const addBlock = (type) => save([...blocks, type === "text"
+  // One entry at a time, merged server-side — writing the whole doc meant two
+  // staff editing this page silently overwrote each other's entries. Image
+  // Repository is the section every staff member has by default, so it's the
+  // most-shared editing surface in the app.
+  const saveBlock = (block) => { saveImageRepoBlock(block); triggerSaved(); bump(); };
+  const addBlock = (type) => saveBlock(type === "text"
     ? { id: uid(), type: "text", text: "", letter: "" }
-    : { id: uid(), type: "title", text: "", url: "", letter: "" }]);
-  const patch = (id, changes) => save(blocks.map(b => b.id === id ? { ...b, ...changes } : b));
+    : { id: uid(), type: "title", text: "", url: "", letter: "" });
+  const patch = (id, changes) => {
+    const block = blocks.find(b => b.id === id);
+    if (block) saveBlock({ ...block, ...changes });
+  };
   const remove = async (id) => {
     const ok = await confirmDelete("Remove this entry?");
-    if (ok) save(blocks.filter(b => b.id !== id));
+    if (ok) { deleteImageRepoBlock(id); triggerSaved(); bump(); }
   };
 
   // letter -> blocks (in doc order). Non-A–Z group under "#".
