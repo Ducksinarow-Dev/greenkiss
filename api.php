@@ -1364,10 +1364,15 @@ function runBackup($pdo) {
         throw new Exception('Backup write failed — the snapshot was not saved.');
     }
 
-    // Keep the newest 60 only.
+    // Keep the newest 240. Retention is a file COUNT, so it multiplies with the
+    // auto-backup interval in maybeAutoBackup: 60 files at the old 24h was
+    // ~60 days of history, and leaving it at 60 alongside the new 6h interval
+    // would have quietly cut that to ~15 days. 240 restores the same ~60-day
+    // reach. Cost is disk — 240 × the gzipped dump size. Lower this (or raise
+    // the interval) if the dump ever grows enough for that to bite.
     $files = glob($dir . '/gk_*.json.gz');
     usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
-    foreach (array_slice($files, 60) as $old) @unlink($old);
+    foreach (array_slice($files, 240) as $old) @unlink($old);
 
     return basename($path);
 }
@@ -1393,7 +1398,12 @@ function maybeAutoBackup($pdo) {
     try {
         if (!$files) { runBackup($pdo); return; }
         usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
-        if (time() - filemtime($files[0]) > 86400) runBackup($pdo);
+        // 6h, not 24h: this bounds how much work a restore can lose, and the
+        // daily cron doesn't narrow it. Retention is a file count (60), so a
+        // shorter interval trades history depth for a tighter loss window —
+        // ~15 days of snapshots instead of ~60. Worth revisiting together if
+        // the real dump ever gets big enough for that to matter.
+        if (time() - filemtime($files[0]) > 6 * 3600) runBackup($pdo);
     } catch (Exception $e) { /* see above */ }
 }
 
