@@ -6,13 +6,15 @@ import {
 import { Icon, IconBtn, Btn, OBtn, SectionHeader, EmptyState, ItemLink } from './shared.jsx';
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const DIGITS = "0123456789".split("");
 
 /* Alphabetical vendor image-repository directory (recreates
    team.thegreenkiss.com). Standalone page, one kv doc. Blocks are brand
    "title" rows (name + external link) or free "text" notes, each grouped by
-   its `letter`. Floating A–Z menu filters to one letter; a return icon
-   restores the full scrollable list; a return-to-top button appears on
-   scroll. Editing gives each block a page-specific letter dropdown. */
+   its `letter` — A–Z, or 0–9 for brands starting with a digit. Floating
+   0–9/A–Z menu filters to one group; a return icon restores the full
+   scrollable list; a return-to-top button appears on scroll. Editing gives
+   each block a page-specific letter dropdown. */
 function ImageRepository({ user }) {
   const [, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
@@ -49,10 +51,14 @@ function ImageRepository({ user }) {
     if (ok) { deleteImageRepoBlock(id); triggerSaved(); bump(); }
   };
 
-  // letter -> blocks (in doc order). Non-A–Z group under "#".
+  // letter -> blocks (in doc order). Non-alphanumeric groups under "#".
   const byLetter = {};
   blocks.forEach(b => { const l = letterOf(b); (byLetter[l] = byLetter[l] || []).push(b); });
   const has = (l) => (byLetter[l] || []).length > 0;
+  // A–Z always shows (empty letters read as gaps in the alphabet), but digits
+  // only appear once a brand actually files under one — a permanent 0–9 row
+  // would be ten dead chips for the one or two numeric names we ever have.
+  const groups = [...DIGITS.filter(has), ...LETTERS];
 
   return (
     <div className="gk-fade-in">
@@ -72,7 +78,7 @@ function ImageRepository({ user }) {
           action={canManage && <Btn onClick={() => setEditMode(true)}><Icon name="add" size={16} />Add entries</Btn>} />
       ) : (
         <>
-          {/* Floating A–Z menu — sticks to the top of the viewport on scroll */}
+          {/* Floating 0–9/A–Z menu — sticks to the top of the viewport on scroll */}
           <div style={{
             position: "sticky", top: 0, zIndex: 20, background: C.bg,
             borderBottom: `1.5px solid ${C.bdr}`, padding: "10px 0", marginBottom: 8,
@@ -87,7 +93,7 @@ function ImageRepository({ user }) {
               }}>
               <Icon name="restart_alt" size={17} />
             </button>
-            {LETTERS.map(l => {
+            {groups.map(l => {
               const on = has(l), sel = active === l;
               return (
                 <button key={l} onClick={() => setActive(l)} disabled={false}
@@ -106,7 +112,7 @@ function ImageRepository({ user }) {
           </div>
 
           <div style={{ maxWidth: 760 }}>
-            {(active === null ? LETTERS : [active]).map(l => (
+            {(active === null ? groups : [active]).map(l => (
               <LetterSection key={l} letter={l} items={byLetter[l] || []} />
             ))}
             {active === null && byLetter["#"] && byLetter["#"].length > 0 && (
@@ -171,6 +177,9 @@ function EditView({ blocks, onPatch, onRemove, onAdd }) {
     <select value={letterOf(b)} onChange={e => onPatch(b.id, { letter: e.target.value })}
       title="Letter" style={inp({ width: 62, flex: "0 0 auto", fontSize: 13, padding: "8px 6px" })}>
       {LETTERS.map(l => <option key={l} value={l}>{l}</option>)}
+      {/* Digits are always offered here — the filter bar hides the unused
+          ones, so this dropdown is how a numeric group gets created. */}
+      {DIGITS.map(d => <option key={d} value={d}>{d}</option>)}
       <option value="#">#</option>
     </select>
   );
