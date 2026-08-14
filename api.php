@@ -141,18 +141,40 @@ switch ($action) {
         $token = bin2hex(random_bytes(32));
         $pdo->prepare("INSERT INTO tokens (token, user_id, created_at, last_seen) VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())")
             ->execute([$token, $user['id']]);
+        // Record the sign-in for admin login history (Batch 1).
+        ensureLoginSessionsTable($pdo);
+        $pdo->prepare("INSERT INTO login_sessions (token, user_id, user_name, login_at, last_seen) VALUES (?, ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())")
+            ->execute([$token, $user['id'], $user['name']]);
         respond(200, ['token' => $token, 'user' => publicUser($user)]);
         break;
 
     case 'logout':
         $token = bearerToken($body);
-        if ($token !== '') $pdo->prepare("DELETE FROM tokens WHERE token = ?")->execute([$token]);
+        if ($token !== '') {
+            ensureLoginSessionsTable($pdo);
+            $pdo->prepare("UPDATE login_sessions SET logout_at = UTC_TIMESTAMP(), last_seen = UTC_TIMESTAMP() WHERE token = ? AND logout_at IS NULL")
+                ->execute([$token]);
+            $pdo->prepare("DELETE FROM tokens WHERE token = ?")->execute([$token]);
+        }
         respond(200, ['ok' => true]);
         break;
 
     case 'me':
         $user = requireAuth($pdo, $body);
         respond(200, ['user' => publicUser($user)]);
+        break;
+
+    case 'login_history':
+        // Admin-only staff sign-in history (Batch 1). Newest first; the client
+        // groups/filters by month. Capped so the payload can't balloon.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        ensureLoginSessionsTable($pdo);
+        $stmt = $pdo->query(
+            "SELECT id, user_id, user_name, login_at, last_seen, logout_at
+             FROM login_sessions ORDER BY login_at DESC LIMIT 2000"
+        );
+        respond(200, ['sessions' => $stmt->fetchAll()]);
         break;
 
     case 'kv_all':
@@ -403,6 +425,25 @@ switch ($action) {
             if (!is_array($acks)) $acks = [];
             if (!isset($acks[$sopId]) || !is_array($acks[$sopId])) $acks[$sopId] = [];
             $acks[$sopId][$userId] = ['at' => $at, 'version' => $version];
+            return $acks;
+        });
+        respond(200, ['ok' => true, 'acks' => $acks]);
+        break;
+
+    case 'announcement_ack_save':
+        // Any authenticated user may acknowledge an announcement aimed at them
+        // (Batch 2). Merged server-side into announcementAcks so simultaneous
+        // acks from different staff never overwrite each other.
+        $user = requireAuth($pdo, $body);
+        $announcementId = (string)($body['announcementId'] ?? '');
+        $userId = (string)($body['userId'] ?? '');
+        if ($announcementId === '' || $userId === '') respond(400, ['error' => 'Missing announcementId/userId']);
+        $at = $body['at'] ?? gmdate('c');
+        maybeAutoBackup($pdo);
+        $acks = kvMutate($pdo, 'announcementAcks', function ($acks) use ($announcementId, $userId, $at) {
+            if (!is_array($acks)) $acks = [];
+            if (!isset($acks[$announcementId]) || !is_array($acks[$announcementId])) $acks[$announcementId] = [];
+            $acks[$announcementId][$userId] = ['at' => $at];
             return $acks;
         });
         respond(200, ['ok' => true, 'acks' => $acks]);
@@ -915,6 +956,10 @@ function requireAuth($pdo, $body) {
     $user = $stmt->fetch();
     if (!$user) respond(401, ['error' => 'Session expired, please log in again']);
     $pdo->prepare("UPDATE tokens SET last_seen = UTC_TIMESTAMP() WHERE token = ?")->execute([$token]);
+    // Advance the login-history session's activity clock too (Batch 1) — this
+    // is what makes a stale last_seen readable as "idle since" on the client.
+    ensureLoginSessionsTable($pdo);
+    $pdo->prepare("UPDATE login_sessions SET last_seen = UTC_TIMESTAMP() WHERE token = ? AND logout_at IS NULL")->execute([$token]);
     return $user;
 }
 
@@ -931,6 +976,29 @@ function pruneTokens($pdo) {
     if ($done) return;
     $done = true;
     $pdo->exec("DELETE FROM tokens WHERE last_seen < (UTC_TIMESTAMP() - INTERVAL 30 DAY)");
+}
+
+// Lazily create the login_sessions table (Batch 1) so an already-live DB
+// picks up sign-in history on the next code deploy — no manual schema import.
+// Idempotent + static-guarded, so at most one CREATE IF NOT EXISTS per request.
+function ensureLoginSessionsTable($pdo) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS login_sessions (
+            id         INT AUTO_INCREMENT PRIMARY KEY,
+            token      VARCHAR(64)  NOT NULL,
+            user_id    VARCHAR(16)  NOT NULL,
+            user_name  VARCHAR(100) NULL,
+            login_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            logout_at  DATETIME     NULL,
+            INDEX idx_login_sessions_user (user_id),
+            INDEX idx_login_sessions_login (login_at),
+            INDEX idx_login_sessions_token (token)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
 }
 
 function kvGet($pdo, $key) {
