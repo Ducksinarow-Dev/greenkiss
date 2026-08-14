@@ -34,6 +34,19 @@ INSERT INTO users (id, name, pin_hash, role, created_at)
 VALUES ('u_megan00', 'Megan', '$2y$10$SYATm60c.gYR5woNgtW3dOCWRRYnwPE4r2lwz0TfNIoTWijUCL9MG', 'admin', UTC_TIMESTAMP())
 ON DUPLICATE KEY UPDATE id = id;
 
+-- Jessica + Liz — Editors, PIN 1234 (same bcrypt hash as Hayden's seed).
+-- NOTE: schema.sql only seeds a FRESH database. On an already-live DB these
+-- INSERTs won't run — add them via Admin Panel → Users, or run these two
+-- statements once against the live DB. Both should change their PIN on first
+-- login. See DEPLOY.md.
+INSERT INTO users (id, name, pin_hash, role, created_at)
+VALUES ('u_jessica', 'Jessica', '$2b$10$4SDOtPIlGc/nXwwkym1FTuEpixXNh3rE1wr4aDQdYbUm1ig2NqGvq', 'editor', UTC_TIMESTAMP())
+ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO users (id, name, pin_hash, role, created_at)
+VALUES ('u_liz0000', 'Liz', '$2b$10$4SDOtPIlGc/nXwwkym1FTuEpixXNh3rE1wr4aDQdYbUm1ig2NqGvq', 'editor', UTC_TIMESTAMP())
+ON DUPLICATE KEY UPDATE id = id;
+
 -- ─── tokens ───────────────────────────────────────────────────────────
 -- Bearer session tokens. Expire after 30 days idle (pruned opportunistically
 -- in api.php, not via a MySQL event — keeps hosting requirements minimal).
@@ -43,6 +56,27 @@ CREATE TABLE IF NOT EXISTS tokens (
   created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_tokens_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── login_sessions ───────────────────────────────────────────────────
+-- Staff sign-in history (Batch 1). One row per login. login_at is set on
+-- login; last_seen advances on every authenticated request (so it doubles
+-- as "last activity"); logout_at is set on explicit logout. A session with
+-- no logout_at whose last_seen is >30 min stale is treated as idle-ended at
+-- last_seen (derived on the client, no cron needed). api.php also creates
+-- this table lazily (ensureLoginSessionsTable) so an already-live DB picks
+-- it up on the next deploy without a manual import.
+CREATE TABLE IF NOT EXISTS login_sessions (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  token      VARCHAR(64)  NOT NULL,
+  user_id    VARCHAR(16)  NOT NULL,
+  user_name  VARCHAR(100) NULL,
+  login_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  logout_at  DATETIME     NULL,
+  INDEX idx_login_sessions_user (user_id),
+  INDEX idx_login_sessions_login (login_at),
+  INDEX idx_login_sessions_token (token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── revisions ────────────────────────────────────────────────────────

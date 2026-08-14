@@ -141,12 +141,13 @@ function CalendarSyncModal({ onClose }) {
   );
 }
 
-function NavButton({ it, active, onClick }) {
+function NavButton({ it, active, onClick, collapsed }) {
   return (
-    <button onClick={onClick}
+    <button onClick={onClick} title={collapsed ? it.label : undefined}
       style={{
-        display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9,
-        border: "none", cursor: "pointer", textAlign: "left", width: "100%",
+        display: "flex", alignItems: "center", gap: 11,
+        padding: collapsed ? "10px 0" : "10px 12px", justifyContent: collapsed ? "center" : "flex-start",
+        borderRadius: 9, border: "none", cursor: "pointer", textAlign: "left", width: "100%",
         background: active ? C.mossSoft : "transparent",
         color: active ? C.moss : C.txt2, fontWeight: active ? 600 : 500, fontSize: 13,
         textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
@@ -155,8 +156,8 @@ function NavButton({ it, active, onClick }) {
       onMouseEnter={e => { if (!active) e.currentTarget.style.background = C.s2; }}
       onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
     >
-      <Icon name={it.icon} size={20} style={{ color: active ? C.moss : C.faint }} />
-      {it.label}
+      <Icon name={it.icon} size={20} style={{ color: active ? C.moss : C.faint, flexShrink: 0 }} />
+      {!collapsed && it.label}
     </button>
   );
 }
@@ -164,32 +165,56 @@ function NavButton({ it, active, onClick }) {
 function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
   const [showPinModal, setShowPinModal] = useState(false);
   const [showCalSync, setShowCalSync] = useState(false);
+  // Collapse the sidebar to icon-only (Batch 1). Persisted per browser so it
+  // sticks across reloads — handy as the nav list grows.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("gkSidebarCollapsed") === "1"; } catch { return false; }
+  });
+  const toggleCollapsed = () => setCollapsed(c => {
+    const next = !c;
+    try { localStorage.setItem("gkSidebarCollapsed", next ? "1" : "0"); } catch {}
+    return next;
+  });
   const theme = getTheme();
 
   return (
     <div style={{
-      width: 232, flexShrink: 0, background: C.bg, borderRight: `1.5px solid ${C.bdr}`,
+      width: collapsed ? 66 : 232, flexShrink: 0, background: C.bg, borderRight: `1.5px solid ${C.bdr}`,
       display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0,
+      transition: "width .18s ease",
     }}>
       {/* Wordmark — real GK mark, recolored pure black via CSS filter (it
           can't be recolored by fill, the asset is a flattened raster). */}
-      <div style={{ padding: "26px 20px 22px", display: "flex", alignItems: "center", gap: 11 }}>
+      <div style={{ padding: collapsed ? "22px 0 18px" : "26px 20px 22px", display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 11 }}>
         <img src={gkLogo} alt="" aria-hidden="true" style={
           theme === "dark"
             ? { width: 32, height: 32, flexShrink: 0, filter: "invert(1)", mixBlendMode: "screen" }
             : { width: 32, height: 32, flexShrink: 0, mixBlendMode: "multiply" }
         } />
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: C.txt, letterSpacing: "0.04em", lineHeight: 1.2, textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
-          <div style={{ fontSize: 11, color: C.mut, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: FONT_CAPS, marginTop: 2 }}>Ops</div>
-        </div>
+        {!collapsed && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: C.txt, letterSpacing: "0.04em", lineHeight: 1.2, textTransform: "uppercase", fontFamily: FONT_CAPS }}>The Green Kiss</div>
+            <div style={{ fontSize: 11, color: C.mut, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: FONT_CAPS, marginTop: 2 }}>Ops</div>
+          </div>
+        )}
       </div>
 
+      {/* Collapse / expand toggle */}
+      <button onClick={toggleCollapsed} title={collapsed ? "Expand menu" : "Collapse menu"}
+        style={{
+          margin: collapsed ? "0 auto 6px" : "0 12px 6px auto", display: "flex", alignItems: "center", gap: 6,
+          background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7,
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = C.s2}
+        onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        <Icon name={collapsed ? "chevron_right" : "chevron_left"} size={18} />
+      </button>
+
       {/* Nav */}
-      <nav style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+      <nav style={{ padding: collapsed ? "8px 8px" : "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
         {visibleNav(user).map((it, i) => it.divider
-          ? <div key={"div" + i} style={{ height: 1, background: C.bdr, margin: "7px 10px" }} />
-          : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} />
+          ? <div key={"div" + i} style={{ height: 1, background: C.bdr, margin: collapsed ? "7px 6px" : "7px 10px" }} />
+          : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} collapsed={collapsed} />
         )}
       </nav>
 
@@ -197,19 +222,28 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
 
       {/* Admin — pinned at the bottom, admins only (R4 nav order). */}
       {isAdmin(user) && (
-        <div style={{ padding: "8px 12px", borderTop: `1.5px solid ${C.bdr}` }}>
-          <NavButton it={{ key: "admin", label: "Admin Panel", icon: "tune" }} active={section === "admin"} onClick={() => setSection("admin")} />
+        <div style={{ padding: collapsed ? "8px 8px" : "8px 12px", borderTop: `1.5px solid ${C.bdr}` }}>
+          <NavButton it={{ key: "admin", label: "Admin Panel", icon: "tune" }} active={section === "admin"} onClick={() => setSection("admin")} collapsed={collapsed} />
         </div>
       )}
 
       {/* Current user + logout */}
-      <div style={{ padding: 14, borderTop: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 10 }}>
-        <Avatar name={user?.name} size={32} />
-        <button onClick={() => setShowPinModal(true)} title="Change my PIN"
-          style={{ flex: 1, minWidth: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontFamily: "inherit" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</div>
-          <div style={{ fontSize: 11, color: C.mut, textTransform: "capitalize" }}>{user?.role}</div>
-        </button>
+      <div style={{ padding: 14, borderTop: `1.5px solid ${C.bdr}`, display: "flex", flexDirection: collapsed ? "column" : "row", alignItems: "center", gap: 10 }}>
+        {collapsed ? (
+          <button onClick={() => setShowPinModal(true)} title={`${user?.name || ""} — change my PIN`}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex" }}>
+            <Avatar name={user?.name} size={32} />
+          </button>
+        ) : (
+          <>
+            <Avatar name={user?.name} size={32} />
+            <button onClick={() => setShowPinModal(true)} title="Change my PIN"
+              style={{ flex: 1, minWidth: 0, background: "none", border: "none", cursor: "pointer", textAlign: "left", padding: 0, fontFamily: "inherit" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.name}</div>
+              <div style={{ fontSize: 11, color: C.mut, textTransform: "capitalize" }}>{user?.role}</div>
+            </button>
+          </>
+        )}
         <button onClick={() => setShowCalSync(true)} title="Sync to Google Calendar"
           style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 6, borderRadius: 7, display: "flex" }}
           onMouseEnter={e => e.currentTarget.style.background = C.s2}
@@ -234,9 +268,11 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
       </div>
 
       {/* Build info — see scripts/release.sh */}
-      <div style={{ padding: "6px 14px 12px", fontSize: 10, color: C.faint, textAlign: "center", fontFamily: "'IBM Plex Mono',monospace" }}>
-        Build v{GK_VERSION} · {GK_COMMIT}{GK_BUILD_DATE ? ` · ${GK_BUILD_DATE}` : ""}
-      </div>
+      {!collapsed && (
+        <div style={{ padding: "6px 14px 12px", fontSize: 10, color: C.faint, textAlign: "center", fontFamily: "'IBM Plex Mono',monospace" }}>
+          Build v{GK_VERSION} · {GK_COMMIT}{GK_BUILD_DATE ? ` · ${GK_BUILD_DATE}` : ""}
+        </div>
+      )}
 
       {showPinModal && <ChangePinModal onClose={() => setShowPinModal(false)} />}
       {showCalSync && <CalendarSyncModal onClose={() => setShowCalSync(false)} />}

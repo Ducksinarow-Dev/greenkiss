@@ -467,8 +467,40 @@ async function remoteBootstrap() {
 
 /* ─── USER SESSION (sessionStorage, mirrors DuckTracks) ─────────────── */
 const getCurrentUser = () => { try { return JSON.parse(sessionStorage.getItem("gkCurrentUser") || "null"); } catch { return null; } };
-const setCurrentUser = (u) => sessionStorage.setItem("gkCurrentUser", JSON.stringify(u));
-const clearCurrentUser = () => sessionStorage.removeItem("gkCurrentUser");
+const setCurrentUser = (u) => { sessionStorage.setItem("gkCurrentUser", JSON.stringify(u)); _devRecordLogin(u); };
+const clearCurrentUser = () => { _devRecordLogout(); sessionStorage.removeItem("gkCurrentUser"); };
+
+/* Login history (Batch 1). Remote mode records server-side (login_sessions,
+   see api.php); dev mode mirrors it in a kv "loginHistory" list so the Admin
+   panel has something to show and the feature works end-to-end locally. */
+function _devRecordLogin(u) {
+  if (REMOTE_MODE || !u || !u.id) return;
+  const list = db.getSync("loginHistory") || [];
+  list.unshift({ id: uid(), userId: u.id, userName: u.name, loginAt: nowISO(), lastSeen: nowISO(), logoutAt: null });
+  db.setSync("loginHistory", list.slice(0, 2000));
+}
+function _devRecordLogout() {
+  if (REMOTE_MODE) return;
+  const me = getCurrentUser();
+  if (!me) return;
+  const list = db.getSync("loginHistory") || [];
+  const idx = list.findIndex(s => s.userId === me.id && !s.logoutAt);
+  if (idx < 0) return;
+  list[idx] = { ...list[idx], logoutAt: nowISO(), lastSeen: nowISO() };
+  db.setSync("loginHistory", list);
+}
+/** Admin-only staff sign-in history, normalized to the server's snake_case
+ * field shape in both modes so the panel reads one format. */
+async function fetchLoginHistory() {
+  if (REMOTE_MODE) {
+    const res = await apiCall("login_history", { method: "GET" });
+    return res.sessions || [];
+  }
+  return (db.getSync("loginHistory") || []).map(s => ({
+    id: s.id, user_id: s.userId, user_name: s.userName,
+    login_at: s.loginAt, last_seen: s.lastSeen, logout_at: s.logoutAt,
+  }));
+}
 
 /** Remote login: POSTs {name, pin}, stores token+user, warms the cache.
  * Throws with a user-facing message on failure. */
@@ -532,6 +564,7 @@ const NAV_ITEMS = [
   { key: "toolsprompts", label: "Tools & Prompts", icon: "auto_awesome" },
   { divider: true },
   { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
+  { key: "announcements", label: "Announcements", icon: "campaign" },
 ];
 const NAV_SECTIONS = NAV_ITEMS.filter(it => !it.divider); // toggleable {key,label,icon}
 const DEFAULT_NAV_ACCESS = ["imagerepo"];
@@ -561,6 +594,167 @@ const saveNavAccess = (m) => db.setSync("navAccess", m);
 const sectionsForUser = (user) =>
   isAdmin(user) ? NAV_SECTIONS.map(s => s.key) : getUserSections(user?.id);
 
+/* ─── STAFF GROUPS (Batch 1) ──────────────────────────────────────────
+   Lightweight labels a staff member can hold several of (Ops, Floor,
+   Sales, …). Used to target announcements, chat channels and callbacks
+   at a whole group at once. Two generic kv docs, so they ride the plain
+   kv_set endpoint with no dedicated PHP action:
+     groups     = [{ id, name, color, parentId }]  (parentId reserved for
+                  a future hierarchy — always null for now, flat in the UI)
+     userGroups = { [userId]: [groupId, …] }
+   Membership lives keyed by user rather than on the users table so it
+   works identically in dev and remote mode (remote users are server-side
+   and we don't want to widen that API just for a label). */
+const getGroups = () => db.getSync("groups") || [];
+const saveGroups = (list) => db.setSync("groups", list);
+const addGroup = (name, color, parentId = null) => {
+  const g = { id: uid(), name: (name || "").trim(), color: color || CATEGORY_COLORS[0], parentId: parentId || null };
+  saveGroups([...getGroups(), g]);
+  return g;
+};
+const updateGroup = (id, changes) =>
+  saveGroups(getGroups().map(g => g.id === id ? { ...g, ...changes } : g));
+/** Removing a group also strips it from every member so no dangling ids
+    are left behind in userGroups. */
+const deleteGroup = (id) => {
+  saveGroups(getGroups().filter(g => g.id !== id));
+  const map = getUserGroupsMap();
+  let touched = false;
+  const next = {};
+  for (const [uidKey, ids] of Object.entries(map)) {
+    const kept = (ids || []).filter(g => g !== id);
+    if (kept.length !== (ids || []).length) touched = true;
+    next[uidKey] = kept;
+  }
+  if (touched) db.setSync("userGroups", next);
+};
+const getUserGroupsMap = () => db.getSync("userGroups") || {};
+/** Group ids a single user belongs to. */
+const getUserGroups = (userId) => {
+  const ids = getUserGroupsMap()[userId];
+  return Array.isArray(ids) ? ids : [];
+};
+const setUserGroups = (userId, groupIds) =>
+  db.setSync("userGroups", { ...getUserGroupsMap(), [userId]: groupIds });
+/** Resolved group objects for a user (skips any stale/deleted ids). */
+const groupsForUser = (userId) => {
+  const set = new Set(getUserGroups(userId));
+  return getGroups().filter(g => set.has(g.id));
+};
+/** User ids that belong to a group — the reverse lookup targeting uses. */
+const userIdsInGroup = (groupId) =>
+  Object.entries(getUserGroupsMap()).filter(([, ids]) => (ids || []).includes(groupId)).map(([id]) => id);
+
+/* ─── ANNOUNCEMENTS + NEWS (Batch 2) ─────────────────────────────────
+   One store, two kinds:
+     kind:"announcement" — an active push. Shows as a bottom-right toast or
+       a full-screen must-acknowledge blocker. delivery is "now" (to anyone
+       currently in the app, surfaced on the next poll) or "signin" (queued
+       for each person's next login). requireAck records who's confirmed.
+     kind:"news" — a passive "Current News" dashboard card, grouped by
+       section (General/Sales/…), auto-expiring, no acknowledgement.
+   Targeting is shared: audience "all" | "groups" | "users". Read receipts
+   live in a separate nested map (announcementAcks), merged server-side the
+   same way SOP acks are, so simultaneous acks never clobber each other. */
+const ANNOUNCEMENT_SURFACES = [
+  { key: "toast", label: "Toast — corner popup", icon: "notifications" },
+  { key: "fullscreen", label: "Full screen — blocks the app", icon: "full_screen" },
+];
+const ANNOUNCEMENT_DELIVERY = [
+  { key: "signin", label: "At next sign-in" },
+  { key: "now", label: "Live now" },
+];
+const NEWS_SECTIONS = [
+  { key: "general", label: "General", color: "#799385" },
+  { key: "sales", label: "Sales", color: "#B63E59" },
+  { key: "product", label: "Product", color: "#4f6358" },
+  { key: "events", label: "Events", color: "#B98A3E" },
+];
+const newsSectionMeta = (key) => NEWS_SECTIONS.find(s => s.key === key) || NEWS_SECTIONS[0];
+
+const getAnnouncements = () => db.getSync("announcements") || [];
+const saveAnnouncements = (list) => db.setSync("announcements", list);
+function defAnnouncement(kind, user) {
+  return {
+    id: uid(), kind: kind || "announcement",
+    title: "", body: "",
+    audience: "all", groupIds: [], userIds: [],
+    surface: "toast", delivery: "signin", requireAck: true,
+    section: "general",
+    publishAt: nowISO(), expiresAt: null,
+    createdBy: user?.id || "", createdByName: user?.name || "",
+    createdAt: nowISO(), updatedAt: nowISO(),
+  };
+}
+function addAnnouncement(a) {
+  const rec = { ...a, id: a.id || uid(), createdAt: a.createdAt || nowISO(), updatedAt: nowISO() };
+  saveAnnouncements([rec, ...getAnnouncements()]);
+  return rec;
+}
+function updateAnnouncement(id, changes) {
+  saveAnnouncements(getAnnouncements().map(a => a.id === id ? { ...a, ...changes, updatedAt: nowISO() } : a));
+}
+function deleteAnnouncement(id) {
+  saveAnnouncements(getAnnouncements().filter(a => a.id !== id));
+  const acks = getAnnouncementAcks();
+  if (acks[id]) { const next = { ...acks }; delete next[id]; db.setSync("announcementAcks", next); }
+}
+/** Live right now: publish window open and not yet expired. */
+function announcementIsLive(a, at = Date.now()) {
+  const pub = a.publishAt ? new Date(a.publishAt).getTime() : 0;
+  if (pub > at) return false;
+  if (a.expiresAt && new Date(a.expiresAt).getTime() <= at) return false;
+  return true;
+}
+/** Does this post's audience include the given user? */
+function announcementTargetsUser(a, user) {
+  if (!user) return false;
+  if (a.audience === "all") return true;
+  if (a.audience === "users") return (a.userIds || []).includes(user.id);
+  if (a.audience === "groups") {
+    const mine = new Set(getUserGroups(user.id));
+    return (a.groupIds || []).some(g => mine.has(g));
+  }
+  return false;
+}
+/** Live posts of a kind ("announcement"/"news", or all) aimed at this user. */
+function announcementsForUser(user, kind) {
+  return getAnnouncements().filter(a =>
+    (!kind || a.kind === kind) && announcementIsLive(a) && announcementTargetsUser(a, user));
+}
+/** Concrete recipient ids, for read-receipt math (audience → user ids). */
+function announcementRecipientIds(a) {
+  if (a.audience === "all") return getUsers().map(u => u.id);
+  if (a.audience === "users") return [...(a.userIds || [])];
+  if (a.audience === "groups") {
+    const set = new Set();
+    (a.groupIds || []).forEach(g => userIdsInGroup(g).forEach(id => set.add(id)));
+    return [...set];
+  }
+  return [];
+}
+const getAnnouncementAcks = () => db.getSync("announcementAcks") || {};
+const hasAckedAnnouncement = (id, userId) => !!(getAnnouncementAcks()[id] || {})[userId];
+const announcementAckList = (id) => Object.entries(getAnnouncementAcks()[id] || {}).map(([userId, v]) => ({ userId, at: v.at }));
+/** Record one user's acknowledgement. Merged server-side (like SOP acks) so
+    many people acking the same announcement never overwrite each other. */
+function ackAnnouncement(id, userId) {
+  const at = nowISO();
+  const acks = getAnnouncementAcks();
+  const forA = { ...(acks[id] || {}) };
+  forA[userId] = { at };
+  const next = { ...acks, [id]: forA };
+  if (REMOTE_MODE) {
+    _cache.set("announcementAcks", next);
+    apiCall("announcement_ack_save", { method: "POST", body: { announcementId: id, userId, at } }).then(res => {
+      if (res && res.acks) _cache.set("announcementAcks", res.acks);
+      _setOffline(false);
+    }).catch(() => _setOffline(true));
+    return;
+  }
+  db.setSync("announcementAcks", next);
+}
+
 /* ─── SEED DATA (dev mode only — remote mode is seeded once via schema.sql) ─
    Runs once against empty storage so the UI demos well immediately. */
 function seedIfEmpty() {
@@ -572,6 +766,8 @@ function seedIfEmpty() {
     db.setSync("users", [
       { id: uid(), name: "Hayden", pin: "1234", role: "admin" },
       { id: uid(), name: "Megan", pin: "1234", role: "admin" },
+      { id: uid(), name: "Jessica", pin: "1234", role: "editor" },
+      { id: uid(), name: "Liz", pin: "1234", role: "editor" },
     ]);
   }
   const categories = db.getSync("categories");
@@ -1458,7 +1654,7 @@ function seedImageRepoIfEmpty() {
     ["D", "DermaE", "https://www.dropbox.com/scl/fo/x5b1i99xb51dhpd9hpc7t/AI5pZsBvtAROamvzNoXNWfI"],
     ["F", "Fitglow", "https://www.dropbox.com/scl/fo/seyh36ryknhtpxd5pbcx9/ACXqmxNAKNyP9lBjegKlp98"],
     ["G", "Glow Jar", "https://drive.google.com/drive/folders/1qbK3AZFLxsNu5hHfo2iwu0HS45dYV1Tw"],
-    ["G", "Glow Jar — Second Image Collection", "https://photos.google.com/share/AF1QipNwvJr3JhmTZfumwwiHnW5vpfe9S0UmAE1nS_0tg3Mq"],
+    ["G", "Glow Jar — Second Image Collection", "https://photos.google.com/share/AF1QipNwvJr3JhmTZfumwwiHnW5vpfe9S0UmAE1nS_0tg3Mq", { note: "May require login — ask vendor." }],
     ["G", "GJB Lifestyle Images", "https://photos.app.goo.gl/bKvajrwEzSJ3Erjr9"],
     ["G", "GJB E-comm Images", "https://photos.app.goo.gl/ouknFmXsiukANWBN6"],
     ["H", "Helena Lane", "https://www.dropbox.com/scl/fo/xlmgpqwigg325yelyx0k0/AK6u7_DyL3xPuN1YpHuTBz0"],
@@ -1470,8 +1666,8 @@ function seedImageRepoIfEmpty() {
     ["H", "Hygge", "https://drive.google.com/drive/folders/1lwqQQganb79NYr_epppXkaL4BFXDxXql"],
     ["I", "Indie Lee", "https://www.dropbox.com/scl/fo/56u8vma2nwe5g5nahr2lt/AK5qmjgrhrI6JPC0YrDPqeI"],
     ["I", "Innersense", "https://www.dropbox.com/scl/fo/pczv71lsn3wc3cnm07nxb/ANiNSYqHmym3soxke34sKEk"],
-    ["J", "Joni", "https://drive.google.com/drive/folders/1tAgII3srN0kEbemmspezQy9M1-wpBEOl"],
-    ["J", "Josh Rosebrook", "https://joshrosebrookwholesale.com/pages/assets-education"],
+    ["J", "Joni", "https://drive.google.com/drive/folders/1tAgII3srN0kEbemmspezQy9M1-wpBEOl", { note: "May need to request Google Account access for first-time users." }],
+    ["J", "Josh Rosebrook", "https://joshrosebrookwholesale.com/pages/assets-education", { user: "vendors@thegreenkiss.com", pass: "Swagk23!" }],
     ["J", "JustSun", "https://www.dropbox.com/scl/fo/wrni064tye7yr121se3v9/ADgmLeiGSR2mMTg3fTdWgww"],
     ["K", "Kaia", "https://www.dropbox.com/scl/fo/ca63x9ot2svutznxcdaur/AAojR_ArwagD8bGR1VPkk4g"],
     ["K", "Karite", "https://drive.google.com/drive/folders/18riUlYNgKNETqV49NL03p2r-V7QOWI87"],
@@ -1484,7 +1680,7 @@ function seedImageRepoIfEmpty() {
     ["M", "My Daughter Fragrances", "https://www.dropbox.com/scl/fo/kpg9z9ouj515qn6pytuyk/AIq2iL4xPUj6tLk_Xpeza8I"],
     ["N", "Nala", "https://drive.google.com/drive/u/0/folders/12ZqZ7wXnraxrtZ42EHi1Xq1zRNjz7l9w"],
     ["O", "Orgaid", "https://www.dropbox.com/scl/fo/vmnd2t6c4ftnyhocx6xku/AEM2aClsgMrtRVzlw9yLDb4"],
-    ["P", "100% Pure", "https://toolbox.puritycosmetics.com/partners/login.php"],
+    ["P", "100% Pure", "https://toolbox.puritycosmetics.com/partners/login.php", { user: "megan@thegreenkiss.com", pass: "Baby123!" }],
     ["P", "Plume", "https://www.dropbox.com/scl/fo/zqvldwi6eddoiha25it2y/AO8Q0ESJ2dsGl6DBOwYODSs"],
     ["S", "Sappho New Paradigm", "https://www.dropbox.com/scl/fo/iqqx5njpv3np7s2uwari3/APbxPXfWCmH0dc-eHVMPoDQ"],
     ["S", "Skwalwen Botanicals", "https://photos.google.com/share/AF1QipMB0yCR4kic223D_c10HwipZniAxDGBujhrEjVHXpr-"],
@@ -1497,7 +1693,9 @@ function seedImageRepoIfEmpty() {
     ["V", "Viva", "https://drive.google.com/drive/folders/164GeLX_SnjlrKdSSF8myAJBHklJJgMn1"],
     ["W", "Wyld Skincare", "https://drive.google.com/drive/folders/1UhiGIeghtxUucdxB3EUKW84ZlNCqg_DS"],
   ];
-  saveImageRepo({ blocks: rows.map(([letter, text, url]) => ({ id: uid(), type: "title", text, url, letter })) });
+  // Optional 4th tuple element carries extra fields migrated from the live
+  // site — per-brand login credentials (user/pass) and/or a note.
+  saveImageRepo({ blocks: rows.map(([letter, text, url, extra]) => ({ id: uid(), type: "title", text, url, letter, ...(extra || {}) })) });
   return true;
 }
 
@@ -2286,6 +2484,7 @@ const EXPORT_KEYS = [
   "sops", "categories", "tasks", "acks", "projects", "campaigns", "content",
   "contacts", "instances", "playbook", "playbookRevs", "tags", "alerts",
   "taskTemplates", "imagerepo", "toolsPrompts", "navAccess", "salesTargets",
+  "groups", "userGroups", "announcements", "announcementAcks",
 ];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
@@ -2308,9 +2507,15 @@ export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
   REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall, refreshCache,
   db, uid, nowISO, fmtDate, fmtDateShort,
-  getCurrentUser, setCurrentUser, clearCurrentUser,
+  getCurrentUser, setCurrentUser, clearCurrentUser, fetchLoginHistory,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   NAV_ITEMS, NAV_SECTIONS, getUserSections, setUserSections, sectionsForUser,
+  getGroups, saveGroups, addGroup, updateGroup, deleteGroup,
+  getUserGroups, setUserGroups, groupsForUser, userIdsInGroup,
+  ANNOUNCEMENT_SURFACES, ANNOUNCEMENT_DELIVERY, NEWS_SECTIONS, newsSectionMeta,
+  getAnnouncements, saveAnnouncements, defAnnouncement, addAnnouncement, updateAnnouncement, deleteAnnouncement,
+  announcementIsLive, announcementTargetsUser, announcementsForUser, announcementRecipientIds,
+  getAnnouncementAcks, hasAckedAnnouncement, announcementAckList, ackAnnouncement,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,

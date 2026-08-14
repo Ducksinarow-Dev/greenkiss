@@ -1,12 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import {
-  C, FONT_CAPS, uid, inp, canEdit, confirmDelete, triggerSaved,
+  C, FONT_CAPS, uid, inp, canEdit, confirmDelete, triggerSaved, triggerToast,
   getImageRepo, saveImageRepoBlock, deleteImageRepoBlock, seedImageRepoIfEmpty, letterOf,
 } from '../globals.js';
 import { Icon, IconBtn, Btn, OBtn, SectionHeader, EmptyState, ItemLink } from './shared.jsx';
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const DIGITS = "0123456789".split("");
+
+/* Per-brand login credentials (migrated from the live site) — some vendor
+   portals are login-gated, so the brand's link is useless without these.
+   Password is masked with a reveal toggle; both fields copy to clipboard. */
+function CopyRow({ label, value, mono, secret }) {
+  const [show, setShow] = useState(!secret);
+  const copy = () => { try { navigator.clipboard.writeText(value); triggerToast("Copied"); } catch { /* clipboard blocked */ } };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: 11, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS, width: 42, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 13, color: C.txt, fontFamily: mono ? "'IBM Plex Mono',monospace" : "inherit", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {show ? value : "•".repeat(Math.min(10, value.length || 6))}
+      </span>
+      {secret && <IconBtn icon={show ? "visibility_off" : "visibility"} title={show ? "Hide" : "Show"} onClick={() => setShow(s => !s)} />}
+      <IconBtn icon="content_copy" title="Copy" onClick={copy} />
+    </div>
+  );
+}
+function LoginBox({ user, pass }) {
+  return (
+    <div style={{ marginTop: 6, background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9, padding: "8px 11px", display: "flex", flexDirection: "column", gap: 4, maxWidth: 380 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS, marginBottom: 2 }}>
+        <Icon name="key" size={14} />Login
+      </div>
+      {user && <CopyRow label="User" value={user} />}
+      {pass && <CopyRow label="Pass" value={pass} mono secret />}
+    </div>
+  );
+}
 
 /* Alphabetical vendor image-repository directory (recreates
    team.thegreenkiss.com). Standalone page, one kv doc. Blocks are brand
@@ -158,6 +187,7 @@ function LetterSection({ letter, items }) {
                 ? <ItemLink url={b.url}>{b.text || b.url}</ItemLink>
                 : <span style={{ color: C.txt, fontWeight: 600 }}>{b.text || "Untitled"}</span>}
               {b.note && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, whiteSpace: "pre-wrap", marginTop: 3 }}>{b.note}</div>}
+              {(b.user || b.pass) && <LoginBox user={b.user} pass={b.pass} />}
             </div>
           ))}
         </div>
@@ -170,9 +200,10 @@ function LetterSection({ letter, items }) {
    page-specific letter dropdown (defaulting to the title's first letter via
    letterOf). Only title-with-link and text blocks, per spec. */
 function EditView({ blocks, onPatch, onRemove, onAdd }) {
-  // Which brands have their note editor revealed — transient UI only, never
-  // persisted to the saved doc.
+  // Which brands have their note / login editors revealed — transient UI
+  // only, never persisted to the saved doc.
   const [noteOpen, setNoteOpen] = useState({});
+  const [loginOpen, setLoginOpen] = useState({});
   const letterSelect = (b) => (
     <select value={letterOf(b)} onChange={e => onPatch(b.id, { letter: e.target.value })}
       title="Letter" style={inp({ width: 62, flex: "0 0 auto", fontSize: 13, padding: "8px 6px" })}>
@@ -222,6 +253,20 @@ function EditView({ blocks, onPatch, onRemove, onAdd }) {
                     <button onClick={() => setNoteOpen(o => ({ ...o, [b.id]: true }))}
                       style={{ alignSelf: "flex-start", background: "none", border: "none", cursor: "pointer", color: C.moss, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, padding: 0 }}>
                       <Icon name="add_comment" size={15} />Add note
+                    </button>
+                  )}
+                  {/* Optional per-brand login for portals that are login-gated. */}
+                  {(b.user != null && b.user !== "") || (b.pass != null && b.pass !== "") || loginOpen[b.id] ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <input value={b.user || ""} onChange={e => onPatch(b.id, { user: e.target.value })}
+                        placeholder="Login user / email" style={inp({ fontSize: 13, flex: "1 1 160px" })} />
+                      <input value={b.pass || ""} onChange={e => onPatch(b.id, { pass: e.target.value })}
+                        placeholder="Password" style={inp({ fontSize: 13, flex: "1 1 120px", fontFamily: "'IBM Plex Mono',monospace" })} />
+                    </div>
+                  ) : (
+                    <button onClick={() => setLoginOpen(o => ({ ...o, [b.id]: true }))}
+                      style={{ alignSelf: "flex-start", background: "none", border: "none", cursor: "pointer", color: C.moss, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, padding: 0 }}>
+                      <Icon name="key" size={15} />Add login
                     </button>
                   )}
                 </>

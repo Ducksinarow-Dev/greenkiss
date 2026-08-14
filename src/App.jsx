@@ -12,8 +12,10 @@ import Projects from './components/Projects.jsx';
 import ContentCalendar from './components/ContentCalendar.jsx';
 import StoreUpdate from './components/StoreUpdate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
+import Announcements from './components/Announcements.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
 import LoginReminders from './components/LoginReminders.jsx';
+import AnnouncementDelivery from './components/AnnouncementDelivery.jsx';
 
 function BootScreen() {
   return (
@@ -123,7 +125,7 @@ function App() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
       <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
-        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} />}
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} />}
         {section === "store" && <StoreUpdate user={user} />}
         {section === "library" && (
           <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
@@ -139,12 +141,14 @@ function App() {
         {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} onNavigateOut={onNavigateOut} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
+        {section === "announcements" && <Announcements user={user} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />
       <SavedToast />
       <OfflineIndicator />
       <LoginReminders user={user} onOpenTasks={() => setSection("tasks")} onOpenTask={goToTask} />
+      <AnnouncementDelivery user={user} onOpen={() => setSection("announcements")} />
     </div>
   );
 }

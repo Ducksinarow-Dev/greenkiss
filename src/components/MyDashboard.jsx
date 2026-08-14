@@ -5,8 +5,9 @@ import {
   getAlerts, deleteAlert, fmtDate, getAllInstances, formColor, canEdit,
   fetchShopifySales, currentSalesTargets,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
+  announcementsForUser, newsSectionMeta,
 } from '../globals.js';
-import { Icon, IconBtn } from './shared.jsx';
+import { Icon, IconBtn, Pill } from './shared.jsx';
 import { Speedometer } from './StoreUpdate.jsx';
 import { TaskModal } from './TaskManager.jsx';
 import { ProjectCard } from './Projects.jsx';
@@ -208,7 +209,36 @@ function DashCampaignCard({ campaign, onOpen }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore }) {
+/* Current News (Batch 2) — passive, auto-expiring news cards aimed at this
+   user, grouped visually by section colour. Clicking one opens the full
+   Announcements board. Hidden entirely when there's nothing live. */
+function NewsStrip({ user, onOpen }) {
+  const items = announcementsForUser(user, "news");
+  if (items.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <SecTitle>Current News</SecTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+        {items.map(a => {
+          const meta = newsSectionMeta(a.section);
+          return (
+            <div key={a.id} onClick={onOpen} role="button" tabIndex={0}
+              onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen && onOpen(); } }}
+              style={{ cursor: "pointer", background: C.sur, border: `1.5px solid ${C.bdr}`, borderLeft: `4px solid ${meta.color}`, borderRadius: 12, padding: "13px 15px", transition: "border-color .15s" }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
+              onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
+              <Pill color={meta.color}>{meta.label}</Pill>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: C.txt, marginTop: 7 }}>{a.title}</div>
+              {a.body && <div style={{ fontSize: 13, color: C.txt2, marginTop: 3, lineHeight: 1.45, maxHeight: 58, overflow: "hidden" }}>{a.body}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -328,6 +358,8 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
         <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>{greeting}, {user.name}</div>
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
+
+      <NewsStrip user={user} onOpen={onOpenAnnouncements} />
 
       <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
 

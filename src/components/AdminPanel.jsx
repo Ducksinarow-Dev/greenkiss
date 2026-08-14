@@ -3,7 +3,8 @@ import {
   C, FONT_CAPS, getCategories, addCategory, updateCategory, deleteCategory, confirmDelete, triggerSaved,
   getCurrentUser, CATEGORY_COLORS, ROLE_LABELS, inp,
   NAV_SECTIONS, getUserSections, setUserSections,
-  fetchUsersFull, addUser, updateUser, deleteUser,
+  getGroups, addGroup, updateGroup, deleteGroup, getUserGroups, setUserGroups, userIdsInGroup,
+  fetchUsersFull, addUser, updateUser, deleteUser, fetchLoginHistory,
   REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
   exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
   releaseList, releaseRollback,
@@ -11,7 +12,7 @@ import {
 import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl } from './shared.jsx';
 
 /* ─── USERS ──────────────────────────────────────────────────────── */
-function UserRow({ u, isSelf, onUpdate, onDelete }) {
+function UserRow({ u, isSelf, onUpdate, onDelete, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(u.name);
   const [pin, setPin] = useState("");
@@ -21,15 +22,24 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
   const [sections, setSections] = useState(() => getUserSections(u.id));
   const toggleSection = (key) =>
     setSections(s => s.includes(key) ? s.filter(k => k !== key) : [...s, key]);
+  // Group membership (Batch 1) — applies to every role, since groups are a
+  // targeting label (announcements/chat/callbacks), not an access gate.
+  const allGroups = getGroups();
+  const [groupIds, setGroupIds] = useState(() => getUserGroups(u.id));
+  const toggleGroup = (id) =>
+    setGroupIds(g => g.includes(id) ? g.filter(x => x !== id) : [...g, id]);
+  const myGroups = allGroups.filter(g => groupIds.includes(g.id));
 
   const save = () => {
     onUpdate({ name: name.trim() || u.name, pin, role });
     if (role !== "admin") setUserSections(u.id, sections);
+    setUserGroups(u.id, groupIds);
     setEditing(false);
+    onChanged && onChanged(); // refresh group member counts in the Groups panel
   };
   const cancel = () => {
     setName(u.name); setPin(""); setRole(u.role || "viewer");
-    setSections(getUserSections(u.id)); setEditing(false);
+    setSections(getUserSections(u.id)); setGroupIds(getUserGroups(u.id)); setEditing(false);
   };
 
   if (editing) {
@@ -67,6 +77,29 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
             </div>
           </div>
         )}
+        <div>
+          <div style={lbl({ fontSize: 12, marginBottom: 6 })}>Groups</div>
+          {allGroups.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: C.faint }}>No groups yet — create some in the Groups panel.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {allGroups.map(g => {
+                const on = groupIds.includes(g.id);
+                return (
+                  <button key={g.id} onClick={() => toggleGroup(g.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                      border: `1.5px solid ${on ? (g.color || C.moss) : C.bdr}`, background: on ? C.s2 : C.sur,
+                      color: on ? C.txt : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                    }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 99, background: g.color || C.moss, flexShrink: 0, opacity: on ? 1 : 0.4 }} />
+                    {g.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -80,6 +113,15 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
         <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
           {u.pin ? "PIN " + "•".repeat(String(u.pin).length || 4) : "PIN protected"}
         </div>
+        {myGroups.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
+            {myGroups.map(g => (
+              <span key={g.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: C.txt2, background: C.s2, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "2px 8px" }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: g.color || C.moss }} />{g.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <Pill color={u.role === "admin" ? C.moss : u.role === "editor" ? C.txt2 : C.faint}>{ROLE_LABELS[u.role] || u.role}</Pill>
       <IconBtn icon="edit" title="Edit" onClick={() => setEditing(true)} />
@@ -88,7 +130,7 @@ function UserRow({ u, isSelf, onUpdate, onDelete }) {
   );
 }
 
-function UsersPanel() {
+function UsersPanel({ onChanged }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -147,7 +189,7 @@ function UsersPanel() {
         {loading && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>Loading…</div>}
         {!loading && users.map(u => <UserRow key={u.id} u={u} isSelf={me?.id === u.id}
           onUpdate={c => doUpdate(u, c)}
-          onDelete={() => removeUser(u)} />)}
+          onDelete={() => removeUser(u)} onChanged={onChanged} />)}
         {!loading && users.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No users.</div>}
       </div>
     </div>
@@ -226,6 +268,88 @@ function CategoriesPanel({ bump }) {
           onUpdate={ch => { updateCategory(c.id, ch); triggerSaved(); bump(); }}
           onDelete={() => removeCategory(c)} />)}
         {categories.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No categories.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ─── GROUPS (Batch 1) ───────────────────────────────────────────────
+   Staff groups used to target announcements/chat/callbacks. Membership
+   is assigned per user in the Users panel (each UserRow); this panel just
+   manages the group list itself. */
+function GroupRow({ group, memberCount, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(group.name);
+  const [color, setColor] = useState(group.color);
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 14px", background: C.s2, borderRadius: 10, flexWrap: "wrap" }}>
+        <input value={name} onChange={e => setName(e.target.value)} style={inp({ fontSize: 14, padding: "7px 10px", flex: "1 1 140px" })} />
+        <div style={{ display: "flex", gap: 5 }}>
+          {CATEGORY_COLORS.map(c => (
+            <button key={c} onClick={() => setColor(c)} style={{ width: 22, height: 22, borderRadius: 99, background: c, border: color === c ? `2px solid ${C.txt}` : "2px solid transparent", cursor: "pointer" }} />
+          ))}
+        </div>
+        <IconBtn icon="check" title="Save" onClick={() => { onUpdate({ name: name.trim() || group.name, color }); setEditing(false); }} style={{ color: C.moss }} />
+        <IconBtn icon="close" title="Cancel" onClick={() => { setName(group.name); setColor(group.color); setEditing(false); }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10 }}
+      onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+      <div style={{ width: 14, height: 14, borderRadius: 99, background: group.color, flexShrink: 0 }} />
+      <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: C.txt }}>{group.name}</div>
+      <span style={{ fontSize: 12, color: C.mut }}>{memberCount} {memberCount === 1 ? "member" : "members"}</span>
+      <IconBtn icon="edit" title="Edit" onClick={() => setEditing(true)} />
+      <IconBtn icon="delete" danger title="Delete group" onClick={onDelete} />
+    </div>
+  );
+}
+
+function GroupsPanel({ bump }) {
+  const groups = getGroups();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+
+  const create = () => {
+    if (!name.trim()) return;
+    addGroup(name.trim(), color);
+    triggerSaved();
+    setName(""); setColor(CATEGORY_COLORS[0]); setAdding(false); bump();
+  };
+  const removeGroup = async (group) => {
+    const n = userIdsInGroup(group.id).length;
+    const ok = await confirmDelete(`Delete "${group.name}"?${n ? ` ${n} staff member${n === 1 ? "" : "s"} will lose this label` : ""} — nobody is removed from the hub.`);
+    if (!ok) return;
+    deleteGroup(group.id); triggerSaved(); bump();
+  };
+
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Groups</div>
+        <OBtn onClick={() => setAdding(a => !a)}><Icon name="add" size={16} />Add group</OBtn>
+      </div>
+      {adding && (
+        <div style={{ display: "flex", gap: 10, padding: "12px 18px", background: C.bg, borderBottom: `1.5px solid ${C.bdr}`, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Group name (e.g. Sales)" style={inp({ fontSize: 14, padding: "8px 11px", flex: "1 1 160px" })} />
+          <div style={{ display: "flex", gap: 5 }}>
+            {CATEGORY_COLORS.map(c => (
+              <button key={c} onClick={() => setColor(c)} style={{ width: 24, height: 24, borderRadius: 99, background: c, border: color === c ? `2px solid ${C.txt}` : "2px solid transparent", cursor: "pointer" }} />
+            ))}
+          </div>
+          <Btn onClick={create} disabled={!name.trim()} style={{ padding: "8px 16px" }}>Create</Btn>
+        </div>
+      )}
+      <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+        {groups.map(g => <GroupRow key={g.id} group={g} memberCount={userIdsInGroup(g.id).length}
+          onUpdate={ch => { updateGroup(g.id, ch); triggerSaved(); bump(); }}
+          onDelete={() => removeGroup(g)} />)}
+        {groups.length === 0 && <div style={{ padding: "16px", fontSize: 14, color: C.mut }}>No groups yet. Add one, then assign staff to it from the Users panel.</div>}
       </div>
     </div>
   );
@@ -787,19 +911,123 @@ function DeployPanel() {
   );
 }
 
+/* ─── LOGIN HISTORY (Batch 1) ─────────────────────────────────────────
+   Staff sign-in log. Each row: who, when they logged in, when the session
+   ended (explicit logout, or idle after 30 min of no activity), and how
+   long it ran. A month picker keeps a growing log manageable. */
+const IDLE_MS = 30 * 60 * 1000;
+const parseTs = (s) => {
+  if (!s) return null;
+  // Dev writes ISO (has T/Z); the server writes UTC "YYYY-MM-DD HH:MM:SS".
+  const iso = /[TZ]/.test(s) ? s : s.replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+};
+const SESSION_STATUS = {
+  active: { label: "Active now", color: "#799385" },
+  idle: { label: "Idle (30m+)", color: "#B98A3E" },
+  out: { label: "Signed out", color: null },
+};
+
+function LoginHistoryPanel() {
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [month, setMonth] = useState("");
+
+  const load = () => {
+    setLoading(true); setError("");
+    fetchLoginHistory()
+      .then(setSessions)
+      .catch(e => setError(e.message || "Could not load sign-in history."))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const now = Date.now();
+  const enriched = sessions.map(s => {
+    const login = parseTs(s.login_at);
+    const seen = parseTs(s.last_seen);
+    const logout = parseTs(s.logout_at);
+    let status = "active", endTs = null;
+    if (logout) { status = "out"; endTs = logout; }
+    else if (seen && now - seen.getTime() > IDLE_MS) { status = "idle"; endTs = seen; }
+    const monthKey = login ? `${login.getFullYear()}-${String(login.getMonth() + 1).padStart(2, "0")}` : "";
+    return { ...s, login, endTs, status, monthKey };
+  }).filter(s => s.login);
+
+  const months = Array.from(new Set(enriched.map(s => s.monthKey))); // newest-first (server orders desc)
+  const activeMonth = month && months.includes(month) ? month : (months[0] || "");
+  const rows = enriched.filter(s => s.monthKey === activeMonth);
+
+  const monthLabel = (key) => {
+    const [y, m] = key.split("-");
+    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  };
+  const fmtTime = (d) => d ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+  const fmtDay = (d) => d ? d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) : "";
+  const dur = (a, b) => {
+    const ms = (b ? b.getTime() : now) - a.getTime();
+    if (ms < 60000) return "<1m";
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return mins + "m";
+    return Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+  };
+
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Login History</div>
+        {months.length > 0 && (
+          <select value={activeMonth} onChange={e => setMonth(e.target.value)} style={inp({ fontSize: 13, padding: "6px 10px", width: "auto", flex: "0 0 auto" })}>
+            {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        )}
+        <IconBtn icon="refresh" title="Refresh" onClick={load} />
+      </div>
+      <div style={{ maxHeight: 340, overflowY: "auto", padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+        {loading && <div style={{ padding: 16, fontSize: 14, color: C.mut }}>Loading…</div>}
+        {error && <div style={{ padding: 16, fontSize: 13, color: C.red, fontWeight: 600 }}>{error}</div>}
+        {!loading && !error && rows.length === 0 && (
+          <div style={{ padding: 16, fontSize: 14, color: C.mut }}>No sign-ins recorded yet.</div>
+        )}
+        {!loading && !error && rows.map(s => {
+          const meta = SESSION_STATUS[s.status];
+          return (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 10px", borderRadius: 10 }}
+              onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <Avatar name={s.user_name} size={26} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.user_name || "Unknown"}</div>
+                <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
+                  {fmtDay(s.login)} · {fmtTime(s.login)} → {s.status === "active" ? "now" : fmtTime(s.endTs)}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace", flex: "0 0 auto" }}>{dur(s.login, s.endTs)}</div>
+              <Pill color={meta.color || C.faint}>{meta.label}</Pill>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel() {
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
   return (
     <div className="gk-fade-in">
-      <SectionHeader title="Admin Panel" sub="Manage users, categories, and backups" />
+      <SectionHeader title="Admin Panel" sub="Manage users, groups, categories, and backups" />
       {/* Two-up on desktop (#25). Order pairs Users|Software Update and
-          Categories|Backups per the grid's row flow. */}
-      <div className="gk-admin-grid">
-        <UsersPanel />
+          Groups|Categories per the grid's row flow. */}
+      <div className="gk-admin-grid" key={refresh}>
+        <UsersPanel onChanged={bump} />
         {REMOTE_MODE && <DeployPanel />}
+        <GroupsPanel bump={bump} />
         <CategoriesPanel bump={bump} />
         {REMOTE_MODE && <BackupsPanel />}
+        <LoginHistoryPanel />
         <ExportImportPanel />
       </div>
     </div>
