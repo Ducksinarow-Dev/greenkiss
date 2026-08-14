@@ -1427,14 +1427,15 @@ function addPlaybookRev(label = "") {
    team.thegreenkiss.com). One kv doc {blocks:[…]}, generic kv path, no
    backend changes — same shape as the playbook. Each block is either a
    brand "title" (text + external link) or a free "text" note; every block
-   carries a `letter` used to group A–Z. `letterOf` defaults an unset
-   letter to the title's first letter (non-A–Z falls in the "#" group). */
+   carries a `letter` used to group A–Z (or 0–9 for brands whose name starts
+   with a digit). `letterOf` defaults an unset letter to the title's first
+   character (anything not A–Z or 0–9 falls in the "#" group). */
 const getImageRepo = () => db.getSync("imagerepo") || null;
 const saveImageRepo = (doc) => db.setSync("imagerepo", doc);
 const letterOf = (b) => {
   if (b && b.letter) return b.letter;
   const c = ((b && b.text) || "").trim().charAt(0).toUpperCase();
-  return /[A-Z]/.test(c) ? c : "#";
+  return /[A-Z0-9]/.test(c) ? c : "#";
 };
 
 /* Seed = the real vendor list migrated from the live site. Sub-collections
