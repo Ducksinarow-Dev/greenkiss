@@ -5,7 +5,7 @@ import {
   getContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
   getUsers, confirmDelete, triggerSaved, canEdit, fmtDateShort, isOverdue,
   CAMPAIGN_STATUSES, campaignStatusMeta, CONTENT_CHANNELS, contentChannelMeta,
-  CONTENT_STATUSES, contentStatusMeta, GBP_CTA_TYPES, GBP_CATEGORIES,
+  CONTENT_STATUSES, contentStatusMeta, CONTENT_TYPES, contentTypeLabel, assigneesOf, GBP_CTA_TYPES, GBP_CATEGORIES,
   campaignChannelCounts, processAndStoreImage,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
 } from '../globals.js';
@@ -26,6 +26,17 @@ const VIEW_TABS = [
   { key: "calendar", label: "Calendar" },
   { key: "list", label: "List" },
   { key: "campaigns", label: "Campaigns" },
+  { key: "reports", label: "Reports" },
+];
+
+// Metrics the Reports tab rolls up (Batch 3). These mirror
+// defContentItem().metrics; managers can re-point the charts at any of them.
+const REPORT_METRICS = [
+  { key: "likes", label: "Likes", color: "#799385" },
+  { key: "shares", label: "Shares", color: "#C08A6B" },
+  { key: "clicks", label: "Clicks", color: "#4f6358" },
+  { key: "saves", label: "Saves", color: "#B98A3E" },
+  { key: "sales", label: "Sales", color: "#B63E59" },
 ];
 
 function monthMeta(monthKey) {
@@ -296,7 +307,7 @@ function ListView({ items, users, campaigns, onOpenItem }) {
   ];
   const valueFor = (item, key) => {
     if (key === "campaignId") return campaigns.find(c => c.id === item.campaignId)?.name || "";
-    if (key === "assigneeId") return users.find(u => u.id === item.assigneeId)?.name || "";
+    if (key === "assigneeId") return users.find(u => u.id === assigneesOf(item)[0])?.name || "";
     return item[key] || "";
   };
   const sorted = [...items].sort((a, b) => {
@@ -335,7 +346,7 @@ function ListView({ items, users, campaigns, onOpenItem }) {
             const ch = contentChannelMeta[it.channel] || CONTENT_CHANNELS[0];
             const sm = contentStatusMeta[it.status] || CONTENT_STATUSES[0];
             const campaign = campaigns.find(c => c.id === it.campaignId);
-            const assignee = users.find(u => u.id === it.assigneeId);
+            const itAssignees = assigneesOf(it).map(id => users.find(u => u.id === id)).filter(Boolean);
             const overdue = isOverdue(it.publishDate, it.status === "published");
             return (
               <tr key={it.id} onClick={() => onOpenItem(it)}
@@ -351,13 +362,16 @@ function ListView({ items, users, campaigns, onOpenItem }) {
                   </div>
                 </td>
                 <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 600, color: C.txt, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {contentTypeLabel(it.channel, it.type) && (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: FONT_CAPS, marginRight: 7 }}>{contentTypeLabel(it.channel, it.type)}</span>
+                  )}
                   {it.title || "Untitled"}
                 </td>
                 <td style={{ padding: "10px 14px", fontSize: 12, color: campaign?.color || C.faint, fontWeight: 600, whiteSpace: "nowrap" }}>
                   {campaign?.name || "—"}
                 </td>
                 <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}>
-                  {assignee ? <div style={{ display: "flex", alignItems: "center", gap: 5 }}><Avatar name={assignee.name} size={18} /><span style={{ fontSize: 12, color: C.mut }}>{assignee.name}</span></div> : <span style={{ fontSize: 12, color: C.faint }}>Unassigned</span>}
+                  {itAssignees.length > 0 ? <div style={{ display: "flex", alignItems: "center", gap: 5 }}><Avatar name={itAssignees[0].name} size={18} /><span style={{ fontSize: 12, color: C.mut }}>{itAssignees[0].name}{itAssignees.length > 1 ? ` +${itAssignees.length - 1}` : ""}</span></div> : <span style={{ fontSize: 12, color: C.faint }}>Unassigned</span>}
                 </td>
                 <td style={{ padding: "10px 14px", whiteSpace: "nowrap" }}><Pill color={sm.col}>{sm.label}</Pill></td>
               </tr>
@@ -514,6 +528,14 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
   const [uploading, setUploading] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setMetric = (k, v) => setForm(f => ({ ...f, metrics: { ...(f.metrics || {}), [k]: v } }));
+  // Multi-assignee (Batch 3): assigneeIds is the source of truth; keep the
+  // legacy assigneeId synced to the first entry for older readers/ICS feed.
+  const itemAssigneeIds = form.assigneeIds || (form.assigneeId ? [form.assigneeId] : []);
+  const toggleAssignee = (id) => setForm(f => {
+    const cur = f.assigneeIds || (f.assigneeId ? [f.assigneeId] : []);
+    const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+    return { ...f, assigneeIds: next, assigneeId: next[0] || "" };
+  });
 
   const createCampaign = () => {
     if (!newCampaignName.trim()) return;
@@ -559,7 +581,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
             <label style={lbl()}>Channel</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {CONTENT_CHANNELS.map(ch => (
-                <button key={ch.key} type="button" onClick={() => set("channel", ch.key)}
+                <button key={ch.key} type="button" onClick={() => setForm(f => ({ ...f, channel: ch.key, type: "" }))}
                   style={{
                     display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, cursor: "pointer",
                     fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
@@ -585,6 +607,15 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
                 {CONTENT_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
             </div>
+            {CONTENT_TYPES[form.channel] && (
+              <div style={{ flex: "1 1 140px" }}>
+                <label style={lbl()}>Type</label>
+                <select value={form.type || ""} onChange={e => set("type", e.target.value)} style={inp()}>
+                  <option value="">—</option>
+                  {CONTENT_TYPES[form.channel].map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{ flex: "1 1 140px" }}>
               <label style={lbl()}>Publish date</label>
               <input type="date" value={form.publishDate || ""} onChange={e => set("publishDate", e.target.value)} style={inp()} />
@@ -592,12 +623,21 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
           </div>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 140px" }}>
-              <label style={lbl()}>Assignee</label>
-              <select value={form.assigneeId || ""} onChange={e => set("assigneeId", e.target.value)} style={inp()}>
-                <option value="">Unassigned</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+            <div style={{ flex: "1 1 100%" }}>
+              <label style={lbl()}>Assignees</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {users.map(u => {
+                  const on = itemAssigneeIds.includes(u.id);
+                  return (
+                    <button key={u.id} type="button" onClick={() => toggleAssignee(u.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 9px", borderRadius: 8, cursor: "pointer",
+                        border: `1.5px solid ${on ? C.moss : C.bdr}`, background: on ? C.mossSoft : C.sur, color: on ? C.moss : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+                      <Avatar name={u.name} size={18} />{u.name.split(" ")[0]}{on && <Icon name="check" size={14} />}
+                    </button>
+                  );
+                })}
+                {users.length === 0 && <span style={{ fontSize: 12.5, color: C.faint }}>No staff yet.</span>}
+              </div>
             </div>
             <div style={{ flex: "1 1 140px" }}>
               <label style={lbl()}>Campaign</label>
@@ -900,6 +940,103 @@ function CampaignsView({ campaigns, items, users, editable, onOpenCampaign, onNe
 }
 
 /* ─── ROOT ───────────────────────────────────────────────────────────── */
+/* ─── REPORTS (Batch 3) ───────────────────────────────────────────────
+   Rolls the manually-entered post-publish metrics up into simple SVG-free
+   bar charts (CSS bars — no chart lib, matching the app's zero-dep build).
+   Configurable: date range, channel, and which metric drives the charts —
+   the end user is expected to re-point these. */
+function BarChart({ rows, color }) {
+  const max = Math.max(1, ...rows.map(r => r.value));
+  if (rows.length === 0) return <div style={{ fontSize: 13, color: C.faint, padding: "8px 0" }}>No data in this range yet.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      {rows.map(r => (
+        <div key={r.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 108, fontSize: 12.5, color: C.txt2, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</div>
+          <div style={{ flex: 1, height: 20, background: C.s2, borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ width: `${(r.value / max) * 100}%`, height: "100%", background: r.color || color || C.moss, borderRadius: 6, minWidth: r.value > 0 ? 4 : 0, transition: "width .3s" }} />
+          </div>
+          <div style={{ width: 60, fontSize: 12.5, fontWeight: 700, color: C.txt, textAlign: "right", fontFamily: "'IBM Plex Mono',monospace" }}>{r.value.toLocaleString()}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatTile({ label, value, color, active, onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ flex: "1 1 110px", textAlign: "left", background: active ? C.mossSoft : C.sur, border: `1.5px solid ${active ? C.moss : C.bdr}`, borderRadius: 12, padding: "12px 15px", cursor: "pointer", fontFamily: "inherit" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: color || C.mut, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS }}>{label}</div>
+      <div style={{ fontSize: 23, fontWeight: 800, color: C.txt, marginTop: 4, fontFamily: "'IBM Plex Mono',monospace" }}>{value.toLocaleString()}</div>
+    </button>
+  );
+}
+
+function ReportsView({ items, campaigns }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [channel, setChannel] = useState("");
+  const [metric, setMetric] = useState("clicks");
+  const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+  const filtered = items.filter(i => {
+    if (channel && i.channel !== channel) return false;
+    if (from && (i.publishDate || "") < from) return false;
+    if (to && (i.publishDate || "") > to) return false;
+    return true;
+  });
+  const sumMetric = (list, key) => list.reduce((s, i) => s + num((i.metrics || {})[key]), 0);
+  const totals = Object.fromEntries(REPORT_METRICS.map(m => [m.key, sumMetric(filtered, m.key)]));
+  const metricMeta = REPORT_METRICS.find(m => m.key === metric) || REPORT_METRICS[0];
+
+  const byChannel = CONTENT_CHANNELS
+    .map(ch => ({ key: ch.key, label: ch.label, value: sumMetric(filtered.filter(i => i.channel === ch.key), metric) }))
+    .filter(r => r.value > 0).sort((a, b) => b.value - a.value);
+  const byCampaign = campaigns
+    .map(c => ({ key: c.id, label: c.name || "Untitled", color: c.color, value: sumMetric(filtered.filter(i => i.campaignId === c.id), metric) }))
+    .filter(r => r.value > 0).sort((a, b) => b.value - a.value);
+
+  const cardStyle = { flex: "1 1 320px", minWidth: 0, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: 18 };
+  const chartTitle = { fontSize: 13, fontWeight: 700, color: C.txt2, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS, marginBottom: 14 };
+  const secLabel = { fontSize: 12, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS, marginBottom: 10 };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div><label style={lbl()}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+        <div><label style={lbl()}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+        <div>
+          <label style={lbl()}>Channel</label>
+          <select value={channel} onChange={e => setChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+            <option value="">All channels</option>
+            {CONTENT_CHANNELS.map(ch => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
+          </select>
+        </div>
+        <div style={{ marginLeft: "auto", fontSize: 12.5, color: C.mut }}>{filtered.length} item{filtered.length === 1 ? "" : "s"} in range</div>
+      </div>
+
+      <div>
+        <div style={secLabel}>Totals — click a metric to chart it</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {REPORT_METRICS.map(m => <StatTile key={m.key} label={m.label} value={totals[m.key]} color={m.color} active={metric === m.key} onClick={() => setMetric(m.key)} />)}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <div style={cardStyle}>
+          <div style={chartTitle}>{metricMeta.label} by channel</div>
+          <BarChart rows={byChannel} color={metricMeta.color} />
+        </div>
+        <div style={cardStyle}>
+          <div style={chartTitle}>{metricMeta.label} by campaign</div>
+          <BarChart rows={byCampaign} color={metricMeta.color} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onClearCampaignFocus, onOpenSop, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
@@ -947,7 +1084,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const items = allItems.filter(i => {
     if (filterChannel && i.channel !== filterChannel) return false;
     if (filterCampaign && i.campaignId !== filterCampaign) return false;
-    if (filterAssignee && i.assigneeId !== filterAssignee) return false;
+    if (filterAssignee && !assigneesOf(i).includes(filterAssignee)) return false;
     if (filterStatus && i.status !== filterStatus) return false;
     return true;
   });
@@ -1013,7 +1150,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
         ))}
       </div>
 
-      {tab !== "campaigns" && (
+      {(tab === "calendar" || tab === "list") && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
           <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
             <option value="">All channels</option>
@@ -1058,6 +1195,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
         <CampaignsView campaigns={campaigns} items={allItems} users={users} editable={editable}
           onOpenCampaign={openEditCampaign} onNewCampaign={openNewCampaign} onFilterCampaign={filterByCampaign} />
       )}
+      {tab === "reports" && <ReportsView items={allItems} campaigns={campaigns} />}
 
       {modal && (
         <ContentItemModal initial={modal.item} isNew={modal.isNew} users={users} campaigns={campaigns} nav={nav}

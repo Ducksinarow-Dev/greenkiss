@@ -4,7 +4,8 @@ import {
   getUsers, getSOPs, getProjects, getTags, addTag, getTaskTemplates, deleteTaskTemplate,
   fmtDateShort, fmtDate, nowISO, getCurrentUser, canEdit, isOverdue, CATEGORY_COLORS,
   TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
-  TASK_TYPES, taskType, inp,
+  TASK_TYPES, taskType, inp, assigneesOf,
+  getContentItems, getCampaigns, contentChannelMeta, contentStatusMeta, contentTypeLabel,
   RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet, addAlert,
   emptyTaskShape as emptyForm,
 } from '../globals.js';
@@ -84,7 +85,24 @@ const pickerRowStyle = (active) => ({
   cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: active ? 700 : 500,
 });
 
-function AssigneePopoverContent({ users, value, onSelect }) {
+function AssigneePopoverContent({ users, value, onSelect, multi, valueIds = [], onToggle }) {
+  if (multi) {
+    // Multi-assignee (Batch 3): toggle staff on/off, popover stays open.
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        {users.map(u => {
+          const on = valueIds.includes(u.id);
+          return (
+            <button key={u.id} type="button" onClick={() => onToggle(u.id)} style={pickerRowStyle(on)}>
+              <Avatar name={u.name} size={22} />
+              <span style={{ flex: 1, textAlign: "left" }}>{u.name}</span>
+              {on && <Icon name="check" size={16} style={{ color: C.moss }} />}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <button type="button" onClick={() => onSelect("")} style={pickerRowStyle(!value)}>
@@ -197,7 +215,7 @@ function TagsPopoverContent({ tags, valueIds, onToggle, onCreate, onClose }) {
 /** The four-icon metadata row — assignee/date/priority/tags — shared by
  * task tiles and subtask mini-cards (subtasks pass allowTags={false} and
  * carry no recurrence). Manages its own popover open state. */
-function MetaRow({ entity, users, tags, allowTags = true, onPatch }) {
+function MetaRow({ entity, users, tags, allowTags = true, onPatch, multiAssign = false }) {
   const [openField, setOpenField] = useState(null);
   const [anchorRect, setAnchorRect] = useState(null);
   const openPopover = (field, e) => {
@@ -208,14 +226,17 @@ function MetaRow({ entity, users, tags, allowTags = true, onPatch }) {
   const close = () => setOpenField(null);
 
   const assigneeKey = "assignedTo" in entity ? "assignedTo" : "assigneeId";
-  const assignee = users.find(u => u.id === entity[assigneeKey]);
+  // Multi-assign (tasks) shows all assignees; single (subtasks) shows one.
+  const assigneeIds = multiAssign ? assigneesOf(entity) : (entity[assigneeKey] ? [entity[assigneeKey]] : []);
+  const assigneeUsers = assigneeIds.map(id => users.find(u => u.id === id)).filter(Boolean);
+  const firstAssignee = assigneeUsers[0];
   const pm = taskPriorityMeta[entity.priority] || TASK_PRIORITIES[1];
   const entityTags = allowTags ? (entity.tagIds || []).map(id => tags.find(t => t.id === id)).filter(Boolean) : [];
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }} onClick={e => e.stopPropagation()}>
-      <MetaIconBtn icon="person" label="Assignee" active={!!assignee} onClick={e => openPopover("assignee", e)}>
-        {assignee ? assignee.name.split(" ")[0] : null}
+      <MetaIconBtn icon="person" label="Assignee" active={assigneeUsers.length > 0} onClick={e => openPopover("assignee", e)}>
+        {firstAssignee ? firstAssignee.name.split(" ")[0] + (assigneeUsers.length > 1 ? ` +${assigneeUsers.length - 1}` : "") : null}
       </MetaIconBtn>
       <MetaIconBtn icon="calendar_today" label="Due date" active={!!entity.dueDate} onClick={e => openPopover("date", e)}>
         {entity.dueDate ? fmtDateShort(entity.dueDate) : null}
@@ -229,7 +250,15 @@ function MetaRow({ entity, users, tags, allowTags = true, onPatch }) {
 
       {openField === "assignee" && (
         <Popover anchorRect={anchorRect} onClose={close} width={210}>
-          <AssigneePopoverContent users={users} value={entity[assigneeKey]} onSelect={id => { onPatch({ [assigneeKey]: id }); close(); }} />
+          {multiAssign ? (
+            <AssigneePopoverContent users={users} multi valueIds={assigneeIds}
+              onToggle={id => {
+                const next = assigneeIds.includes(id) ? assigneeIds.filter(x => x !== id) : [...assigneeIds, id];
+                onPatch({ assigneeIds: next, [assigneeKey]: next[0] || "" });
+              }} />
+          ) : (
+            <AssigneePopoverContent users={users} value={entity[assigneeKey]} onSelect={id => { onPatch({ [assigneeKey]: id }); close(); }} />
+          )}
         </Popover>
       )}
       {openField === "date" && (
@@ -329,6 +358,14 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
   const [form, setForm] = useState(initial);
   const [subInput, setSubInput] = useState("");
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Multi-assignee (Batch 3): assigneeIds is the source of truth; keep the
+  // legacy assignedTo synced to the first so older readers still work.
+  const taskAssigneeIds = form.assigneeIds || (form.assignedTo ? [form.assignedTo] : []);
+  const toggleAssignee = (id) => setForm(f => {
+    const cur = f.assigneeIds || (f.assignedTo ? [f.assignedTo] : []);
+    const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id];
+    return { ...f, assigneeIds: next, assignedTo: next[0] || "" };
+  });
   const isSopRun = !!form.fromSopRun;
   const [completing, setCompleting] = useState(false);
   const [runNotes, setRunNotes] = useState("");
@@ -450,12 +487,21 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 140px" }}>
+            <div style={{ flex: "1 1 100%" }}>
               <label style={labelStyle}>Assigned to</label>
-              <select value={form.assignedTo} onChange={e => set("assignedTo", e.target.value)} style={inp()}>
-                <option value="">Unassigned</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {users.map(u => {
+                  const on = taskAssigneeIds.includes(u.id);
+                  return (
+                    <button key={u.id} type="button" onClick={() => toggleAssignee(u.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 9px", borderRadius: 8, cursor: "pointer",
+                        border: `1.5px solid ${on ? C.moss : C.bdr}`, background: on ? C.mossSoft : C.sur, color: on ? C.moss : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+                      <Avatar name={u.name} size={18} />{u.name.split(" ")[0]}{on && <Icon name="check" size={14} />}
+                    </button>
+                  );
+                })}
+                {users.length === 0 && <span style={{ fontSize: 12.5, color: C.faint }}>No staff yet.</span>}
+              </div>
             </div>
             <div style={{ flex: "1 1 140px" }}>
               <label style={labelStyle}>Due date</label>
@@ -554,7 +600,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
                 <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", color: C.faint, padding: "2px 6px 6px" }}>Alert who?</div>
                 {alertTargets.length === 0 && <div style={{ fontSize: 12, color: C.faint, padding: "4px 6px" }}>No other staff to alert.</div>}
                 {alertTargets.map(u => (
-                  <button key={u.id} type="button" onClick={() => sendAlert(u.id)} style={pickerRowStyle(u.id === form.assignedTo)}>
+                  <button key={u.id} type="button" onClick={() => sendAlert(u.id)} style={pickerRowStyle(taskAssigneeIds.includes(u.id))}>
                     <Avatar name={u.name} size={22} />{u.name}
                   </button>
                 ))}
@@ -834,7 +880,7 @@ function TaskCard({ task, users, sops, projects, tags, templates, allTasks, curr
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <MetaRow entity={task} users={users} tags={tags} allowTags onPatch={onPatchTask} />
+        <MetaRow entity={task} users={users} tags={tags} allowTags onPatch={onPatchTask} multiAssign />
       </div>
 
       {overdue && task.dueDate && (
@@ -923,6 +969,73 @@ const TASKS_VIEW_KEY = "gkTasksView";
 const getTasksView = () => { try { return localStorage.getItem(TASKS_VIEW_KEY) || "board"; } catch { return "board"; } };
 const setTasksView = (v) => { try { localStorage.setItem(TASKS_VIEW_KEY, v); } catch { /* private mode */ } };
 
+/* Manager view (Batch 3) — a team-wide oversight list combining open tasks
+   with campaign content, so a manager sees all in-flight work in one place.
+   Respects the assignee filter. Task rows open the task; content rows are
+   read-only here (they live in the Content Calendar). */
+function ManagerView({ users, filterAssignee, onOpenTask }) {
+  const campaigns = getCampaigns();
+  const campaignName = (id) => campaigns.find(c => c.id === id)?.name || "";
+  const userName = (id) => users.find(u => u.id === id)?.name || "?";
+  const matchAssignee = (rec) => !filterAssignee || assigneesOf(rec).includes(filterAssignee);
+
+  const tasks = getTasks().filter(t => !t.archived && t.status !== "done" && matchAssignee(t));
+  const content = getContentItems().filter(c => c.campaignId && c.status !== "published" && matchAssignee(c));
+
+  const rows = [
+    ...tasks.map(t => {
+      const sm = TASK_STATUSES.find(s => s.key === t.status);
+      return { id: "t:" + t.id, kind: "Task", kindColor: C.moss, title: t.title, assignees: assigneesOf(t), date: t.dueDate, group: "", statusLabel: sm?.label || t.status, statusCol: sm?.col || C.mut, onOpen: () => onOpenTask(t) };
+    }),
+    ...content.map(c => {
+      const ch = contentChannelMeta[c.channel];
+      const sm = contentStatusMeta[c.status];
+      const typ = contentTypeLabel(c.channel, c.type);
+      return { id: "c:" + c.id, kind: (ch?.label || "Content") + (typ ? " · " + typ : ""), kindColor: C.clay, title: c.title, assignees: assigneesOf(c), date: c.publishDate, group: campaignName(c.campaignId), statusLabel: sm?.label || c.status, statusCol: sm?.col || C.mut, onOpen: null };
+    }),
+  ].sort((a, b) => (a.date || "9999-99-99").localeCompare(b.date || "9999-99-99"));
+
+  if (rows.length === 0) return <EmptyState icon="supervisor_account" title="Nothing active" sub="Open tasks and campaign content across the team show up here." />;
+
+  const th = { padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em", borderBottom: `1.5px solid ${C.bdr}`, whiteSpace: "nowrap" };
+  const td = { padding: "10px 12px", fontSize: 13, verticalAlign: "middle" };
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, overflow: "hidden" }}>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: C.bg }}>
+              <th style={th}>Date</th><th style={th}>Item</th><th style={th}>Kind</th><th style={th}>Who</th><th style={th}>Campaign</th><th style={th}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.id} onClick={r.onOpen || undefined}
+                style={{ borderBottom: `1px solid ${C.bdr}`, cursor: r.onOpen ? "pointer" : "default", background: i % 2 ? C.bg : C.sur }}
+                onMouseEnter={e => { if (r.onOpen) e.currentTarget.style.background = C.s2; }}
+                onMouseLeave={e => { e.currentTarget.style.background = i % 2 ? C.bg : C.sur; }}>
+                <td style={{ ...td, fontFamily: "'IBM Plex Mono',monospace", color: isOverdue(r.date) ? C.red : C.mut, whiteSpace: "nowrap" }}>{r.date ? fmtDateShort(r.date) : "—"}</td>
+                <td style={{ ...td, fontWeight: 600, color: C.txt, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}>{r.title || "Untitled"}</td>
+                <td style={td}><Pill color={r.kindColor}>{r.kind}</Pill></td>
+                <td style={td}>
+                  {r.assignees.length ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      {r.assignees.slice(0, 3).map(id => <Avatar key={id} name={userName(id)} size={20} />)}
+                      {r.assignees.length > 3 && <span style={{ fontSize: 11, color: C.mut }}>+{r.assignees.length - 3}</span>}
+                    </div>
+                  ) : <span style={{ fontSize: 12, color: C.faint }}>Unassigned</span>}
+                </td>
+                <td style={{ ...td, color: C.txt2 }}>{r.group || "—"}</td>
+                <td style={td}><Pill color={r.statusCol}>{r.statusLabel}</Pill></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
@@ -958,7 +1071,7 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
   const visibleTasks = allTasks.filter(t => !t.archived);
   const filtered = visibleTasks.filter(t => {
     if (hideProjectTasks && t.projectId) return false;
-    if (filterAssignee && t.assignedTo !== filterAssignee) return false;
+    if (filterAssignee && !assigneesOf(t).includes(filterAssignee)) return false;
     if (filterPriority && t.priority !== filterPriority) return false;
     if (filterProject && t.projectId !== filterProject) return false;
     if (filterTag && !(t.tagIds || []).includes(filterTag)) return false;
@@ -1065,7 +1178,7 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
       <SectionHeader title="Task Manager" sub={`${openCount} open task${openCount === 1 ? "" : "s"}`}
         right={<>
           <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-            {[{ key: "board", icon: "view_kanban", label: "Board" }, { key: "list", icon: "view_list", label: "List" }].map(v => (
+            {[{ key: "board", icon: "view_kanban", label: "Board" }, { key: "list", icon: "view_list", label: "List" }, { key: "manager", icon: "supervisor_account", label: "Manager" }].map(v => (
               <button key={v.key} type="button" onClick={() => changeView(v.key)} title={`${v.label} view`}
                 style={{
                   display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
@@ -1120,9 +1233,11 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
         </button>
       </div>
 
-      {visibleTasks.length === 0 ? (
+      {visibleTasks.length === 0 && view !== "manager" ? (
         <EmptyState icon="checklist" title="No tasks yet" sub="Create the first task to get the shift moving."
           action={editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>} />
+      ) : view === "manager" ? (
+        <ManagerView users={users} filterAssignee={filterAssignee} onOpenTask={openEdit} />
       ) : view === "list" ? (
         // R4 D1 — list view: vertical sections per status, same cards laid
         // out in a fluid grid. Sections stay live drop targets like columns.

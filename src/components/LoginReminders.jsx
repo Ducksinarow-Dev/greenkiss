@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTasks, getUsers, getAlerts, deleteAlert, todayLocalISO, isOverdue, fmtDateShort, taskPriorityMeta } from '../globals.js';
+import { C, getTasks, getUsers, getAlerts, deleteAlert, todayLocalISO, isOverdue, fmtDateShort, taskPriorityMeta, isAssignedTo } from '../globals.js';
 import { Icon } from './shared.jsx';
 
 /* Login reminders (R3 #9, R4 D5) — once per session, stacked bottom-right
@@ -84,7 +84,7 @@ function LoginReminders({ user, onOpenTasks, onOpenTask }) {
 
   const today = todayLocalISO();
   const allTasks = getTasks();
-  const mine = allTasks.filter(t => !t.archived && t.assignedTo === user.id && t.status !== "done");
+  const mine = allTasks.filter(t => !t.archived && isAssignedTo(t, user.id) && t.status !== "done");
   const runTasks = mine.filter(t => t.fromSopRun && t.dueDate === today);
   const dueTasks = mine.filter(t => !t.fromSopRun && t.dueDate && (t.dueDate === today || isOverdue(t.dueDate)));
   const users = getUsers();

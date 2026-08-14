@@ -2249,6 +2249,31 @@ const CONTENT_CHANNELS = [
 ];
 const contentChannelMeta = Object.fromEntries(CONTENT_CHANNELS.map(c => [c.key, c]));
 
+// Per-channel content "type" (Batch 3). Instagram is the main driver
+// (post/story/reel); GBP keeps its own `category` field instead, so it's
+// absent here. A channel not in this map simply shows no Type dropdown.
+const CONTENT_TYPES = {
+  instagram: [
+    { key: "post", label: "Post" },
+    { key: "story", label: "Story" },
+    { key: "reel", label: "Reel" },
+    { key: "carousel", label: "Carousel" },
+  ],
+  email: [
+    { key: "newsletter", label: "Newsletter" },
+    { key: "promo", label: "Promo" },
+    { key: "announcement", label: "Announcement" },
+  ],
+  blog: [
+    { key: "article", label: "Article" },
+    { key: "guide", label: "How-to / Guide" },
+    { key: "roundup", label: "Roundup" },
+  ],
+};
+/** Human label for a content item's channel+type, or "" if unset/unknown. */
+const contentTypeLabel = (channel, type) =>
+  (CONTENT_TYPES[channel] || []).find(t => t.key === type)?.label || "";
+
 const CONTENT_STATUSES = [
   { key: "idea", label: "Idea", col: C.faint },
   { key: "draft", label: "Draft", col: C.txt2 },
@@ -2341,7 +2366,7 @@ const deleteContentItem = (id) => {
   saveContentItems(next);
 };
 const defContentItem = (channel = "gbp") => ({
-  id: uid(), campaignId: "", channel, title: "", status: "idea", publishDate: "",
+  id: uid(), campaignId: "", channel, type: "", title: "", status: "idea", publishDate: "",
   assigneeId: "", body: "", images: [], links: [], notes: "",
   ctaType: "", ctaUrl: "", category: "update",
   targetKeyword: "", url: "",
@@ -2359,6 +2384,19 @@ const campaignChannelCounts = (campaignId, items) => {
   (items || []).filter(i => i.campaignId === campaignId).forEach(i => { counts[i.channel] = (counts[i.channel] || 0) + 1; });
   return counts;
 };
+
+/* Multi-assignee (Batch 3). Tasks and content items can now be assigned to
+   several people. New source of truth is `assigneeIds` (array); the legacy
+   single fields (`assignedTo` on tasks, `assigneeId` on content) are kept in
+   sync to their first entry on save so anything still reading them — the
+   dashboard fallbacks, the server ICS feed — keeps working. Subtasks stay
+   single-assignee by design. These readers tolerate either shape. */
+const assigneesOf = (rec) =>
+  Array.isArray(rec?.assigneeIds) ? rec.assigneeIds
+    : rec?.assignedTo ? [rec.assignedTo]
+      : rec?.assigneeId ? [rec.assigneeId]
+        : [];
+const isAssignedTo = (rec, userId) => assigneesOf(rec).includes(userId);
 
 /* ─── USER STORAGE ───────────────────────────────────────────────── *
  * Dev mode: full CRUD against the local "users" list (incl. plaintext
@@ -2549,6 +2587,7 @@ export {
   CAMPAIGN_STATUSES, campaignStatusMeta,
   getContentItems, saveContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
   campaignChannelCounts, CONTENT_CHANNELS, contentChannelMeta, CONTENT_STATUSES, contentStatusMeta,
+  CONTENT_TYPES, contentTypeLabel, assigneesOf, isAssignedTo,
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
   backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,

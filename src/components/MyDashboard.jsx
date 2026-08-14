@@ -5,7 +5,7 @@ import {
   getAlerts, deleteAlert, fmtDate, getAllInstances, formColor, canEdit,
   fetchShopifySales, currentSalesTargets,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
-  announcementsForUser, newsSectionMeta,
+  announcementsForUser, newsSectionMeta, isAssignedTo,
 } from '../globals.js';
 import { Icon, IconBtn, Pill } from './shared.jsx';
 import { Speedometer } from './StoreUpdate.jsx';
@@ -256,7 +256,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
   // My tasks: assigned to me directly. Archived tasks are hidden everywhere,
   // including here (#9).
   const myTaskItems = tasks
-    .filter(t => t.assignedTo === user.id && !t.archived)
+    .filter(t => isAssignedTo(t, user.id) && !t.archived)
     .map(t => ({
       key: "task:" + t.id, kind: "task", task: t, title: t.title, dueDate: t.dueDate,
       group: classify(t.dueDate, t.status === "done"),
@@ -283,7 +283,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
   // and a channel glyph, same shape as tasks/subtasks so they slot into
   // the same grouped list. "Done" means published.
   const myContentItems = contentItems
-    .filter(c => c.assigneeId === user.id)
+    .filter(c => isAssignedTo(c, user.id))
     .map(c => {
       const campaign = campaigns.find(cm => cm.id === c.campaignId);
       const ch = contentChannelMeta[c.channel];
