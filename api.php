@@ -530,6 +530,31 @@ switch ($action) {
         respond(200, ['id' => $id]);
         break;
 
+    case 'chat_dm_open':
+        // Find-or-create a 1:1 DM with another user (Phase 2) so the same pair
+        // never ends up with duplicate threads.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $other = (string)($body['userId'] ?? '');
+        if ($other === '' || $other === $user['id']) respond(400, ['error' => 'Pick another person']);
+        $stmt = $pdo->prepare(
+            "SELECT c.id FROM chat_channels c
+             WHERE c.kind = 'dm' AND c.archived = 0
+               AND (SELECT COUNT(*) FROM chat_members m WHERE m.channel_id = c.id) = 2
+               AND EXISTS (SELECT 1 FROM chat_members m1 WHERE m1.channel_id = c.id AND m1.user_id = ?)
+               AND EXISTS (SELECT 1 FROM chat_members m2 WHERE m2.channel_id = c.id AND m2.user_id = ?)
+             LIMIT 1");
+        $stmt->execute([$user['id'], $other]);
+        $ex = $stmt->fetch();
+        if ($ex) { respond(200, ['id' => $ex['id']]); }
+        $id = 'ch_' . bin2hex(random_bytes(5));
+        $pdo->prepare("INSERT INTO chat_channels (id, name, kind, visibility, created_by) VALUES (?, '', 'dm', 'private', ?)")->execute([$id, $user['id']]);
+        foreach ([$user['id'], $other] as $mid) {
+            $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, 0)")->execute([$id, $mid]);
+        }
+        respond(200, ['id' => $id]);
+        break;
+
     case 'chat_messages':
         $user = requireAuth($pdo, $body);
         ensureChatTables($pdo);

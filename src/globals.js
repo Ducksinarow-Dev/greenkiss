@@ -881,6 +881,15 @@ async function chatChannelCreate({ name, kind = "channel", visibility = "public"
   db.setSync("chatChannels", [..._chatCh(), rec]);
   return id;
 }
+async function chatOpenDM(userId) {
+  if (REMOTE_MODE) { const res = await apiCall("chat_dm_open", { method: "POST", body: { userId } }); return res.id; }
+  const me = getCurrentUser();
+  const existing = _chatCh().find(c => c.kind === "dm" && !c.archived && (c.memberIds || []).length === 2 && c.memberIds.includes(me.id) && c.memberIds.includes(userId));
+  if (existing) return existing.id;
+  const id = "ch_" + uid();
+  db.setSync("chatChannels", [..._chatCh(), { id, name: "", kind: "dm", visibility: "private", createdBy: me.id, memberIds: [me.id, userId], createdAt: nowISO(), archived: false }]);
+  return id;
+}
 async function chatFetchMessages(channelId, beforeId = 0) {
   if (REMOTE_MODE) { const res = await apiCall("chat_messages", { method: "GET", query: { channelId, beforeId } }); return res.messages || []; }
   let cm = _chatMsg().filter(m => m.channelId === channelId);
@@ -2727,7 +2736,7 @@ export {
   getCallbacks, saveCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
   callbackTargetsUser, openCallbacksForUser,
   getCallbackAcks, hasAckedCallback, ackCallback,
-  chatBootstrap, chatChannelCreate, chatFetchMessages, chatSend, chatMarkRead, chatPoll,
+  chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,
