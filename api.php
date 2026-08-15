@@ -486,17 +486,12 @@ switch ($action) {
             $lst->execute([$c['id']]);
             $last = $lst->fetch();
             $lastId = $last ? (int)$last['id'] : 0;
+            // Unread = everything since you last read (no history catch-up).
+            // A member row is created lazily on first read (chat_mark_read).
             $mst = $pdo->prepare("SELECT last_read_msg_id FROM chat_members WHERE channel_id = ? AND user_id = ? LIMIT 1");
             $mst->execute([$c['id'], $me]);
             $mrow = $mst->fetch();
-            if (!$mrow) {
-                // First sight of a public channel → join caught up so old
-                // history doesn't all read as unread.
-                $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?)")->execute([$c['id'], $me, $lastId]);
-                $lastRead = $lastId;
-            } else {
-                $lastRead = (int)$mrow['last_read_msg_id'];
-            }
+            $lastRead = $mrow ? (int)$mrow['last_read_msg_id'] : 0;
             $ust = $pdo->prepare("SELECT COUNT(*) FROM chat_messages WHERE channel_id = ? AND id > ? AND user_id <> ? AND deleted_at IS NULL");
             $ust->execute([$c['id'], $lastRead, $me]);
             $mem = $pdo->prepare("SELECT user_id FROM chat_members WHERE channel_id = ?");
@@ -553,6 +548,27 @@ switch ($action) {
             $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, 0)")->execute([$id, $mid]);
         }
         respond(200, ['id' => $id]);
+        break;
+
+    case 'chat_alerts':
+        // Unread messages worth a toast (Phase 3): anything in a DM/group, plus
+        // @mentions of me in any channel. Client passes a cursor so each one
+        // toasts once.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $me = $user['id'];
+        $since = (int)($_GET['sinceId'] ?? 0);
+        $like = '%(user:' . $me . ')%';
+        $stmt = $pdo->prepare(
+            "SELECT msg.id, msg.channel_id, msg.user_id, msg.body, c.kind AS channel_kind, c.name AS channel_name
+             FROM chat_messages msg
+             JOIN chat_channels c ON c.id = msg.channel_id AND c.archived = 0
+             JOIN chat_members mem ON mem.channel_id = msg.channel_id AND mem.user_id = ?
+             WHERE msg.deleted_at IS NULL AND msg.user_id <> ? AND msg.id > ? AND msg.id > mem.last_read_msg_id
+               AND (c.kind IN ('dm','group') OR msg.body LIKE ?)
+             ORDER BY msg.id DESC LIMIT 10");
+        $stmt->execute([$me, $me, $since, $like]);
+        respond(200, ['messages' => array_reverse($stmt->fetchAll())]);
         break;
 
     case 'chat_messages':

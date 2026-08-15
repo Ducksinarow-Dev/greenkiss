@@ -3,7 +3,7 @@ import {
   C, FONT_CAPS, isAdmin, getUsers, inp,
   chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, triggerSaved,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl, MentionField, MentionText } from './shared.jsx';
 
 /* Staff chat (Phase 1). Two-pane: channel list + message pane. Public
    channels only for now (DMs, group DMs, private channels are Phase 2;
@@ -118,10 +118,16 @@ function NewMessageModal({ users, me, onClose, onOpened }) {
   );
 }
 
-function Chat({ user }) {
+function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
   const admin = isAdmin(user);
   const users = getUsers();
   const userName = (id) => users.find(u => u.id === id)?.name || "Someone";
+  // Clicking an @mention: a person opens a DM with them; anything else (SOP,
+  // task, playbook, form) routes out to the host app's navigator.
+  const handleMention = (kind, id) => {
+    if (kind === "user") { chatOpenDM(id).then(cid => { loadChannels(); setActiveId(cid); }); return; }
+    onNavigate && onNavigate(kind, id);
+  };
   const [channels, setChannels] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -138,6 +144,15 @@ function Chat({ user }) {
     setActiveId(prev => prev || (cs[0]?.id ?? null));
   }).finally(() => setLoading(false));
   useEffect(() => { loadChannels(); /* eslint-disable-next-line */ }, []);
+
+  // Deep-link: a chat toast or the dashboard strip can open a specific channel.
+  useEffect(() => {
+    if (!focusChannelId) return;
+    setActiveId(focusChannelId);
+    loadChannels();
+    onClearFocus && onClearFocus();
+    /* eslint-disable-next-line */
+  }, [focusChannelId]);
 
   // Load history when the active channel changes; mark read.
   useEffect(() => {
@@ -270,7 +285,7 @@ function Chat({ user }) {
                         </div>
                       )}
                       <div style={{ fontSize: 14, color: m.deleted_at ? C.faint : C.txt2, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontStyle: m.deleted_at ? "italic" : "normal" }}>
-                        {m.deleted_at ? "Message deleted" : m.body}
+                        {m.deleted_at ? "Message deleted" : <MentionText text={m.body} onNavigate={handleMention} />}
                       </div>
                     </div>
                   </div>
@@ -278,9 +293,9 @@ function Chat({ user }) {
               })}
             </div>
             <div style={{ padding: "12px 16px", borderTop: `1.5px solid ${C.bdr}`, display: "flex", gap: 10, alignItems: "flex-end" }}>
-              <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
+              <MentionField value={draft} onChange={setDraft} multiline rows={1}
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder={`Message ${channelLabel(active)}…`}
+                placeholder={`Message ${channelLabel(active)}…  (@ to mention)`}
                 style={{ ...inp({ fontSize: 14, padding: "10px 13px", lineHeight: 1.5 }), resize: "none", maxHeight: 140 }} />
               <Btn onClick={send} disabled={!draft.trim()} style={{ padding: "10px 16px", flexShrink: 0 }}><Icon name="send" size={16} /></Btn>
             </div>

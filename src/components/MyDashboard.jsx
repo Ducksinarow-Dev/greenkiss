@@ -270,7 +270,23 @@ function CallbacksStrip({ user, onOpen }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback }) {
+/* Chat unread strip (Batch chat P3) — appears when you have unread messages. */
+function ChatStrip({ count, onOpen }) {
+  if (!count) return null;
+  return (
+    <div onClick={onOpen} role="button" tabIndex={0} onKeyDown={e => { if (e.key === "Enter") onOpen && onOpen(); }}
+      style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 11, padding: "12px 15px", borderRadius: 12, background: C.sur, border: `1.5px solid ${C.moss}`, marginBottom: 22 }}>
+      <Icon name="forum" size={20} style={{ color: C.moss, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: C.txt }}>{count} unread message{count === 1 ? "" : "s"}</div>
+        <div style={{ fontSize: 12.5, color: C.mut }}>Jump into chat to catch up</div>
+      </div>
+      <Icon name="chevron_right" size={20} style={{ color: C.faint }} />
+    </div>
+  );
+}
+
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback, chatUnread = 0, onOpenChat }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -392,6 +408,8 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
       </div>
 
       <CallbacksStrip user={user} onOpen={onOpenCallback} />
+
+      <ChatStrip count={chatUnread} onOpen={onOpenChat} />
 
       <NewsStrip user={user} onOpen={onOpenAnnouncements} />
 

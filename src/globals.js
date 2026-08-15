@@ -853,7 +853,6 @@ const _chatSetRead = (uidv, cid, v) => {
   const r = _chatReads(); r[uidv] = r[uidv] || {}; r[uidv][cid] = Math.max(r[uidv][cid] || 0, v);
   db.setSync("chatReads", r);
 };
-const _chatSeen = (uidv, cid) => ((_chatReads()[uidv] || {})[cid] != null);
 const _chatVisible = (me) => _chatCh().filter(c => !c.archived && (c.visibility === "public" || (c.memberIds || []).includes(me?.id)));
 
 async function chatBootstrap() {
@@ -864,8 +863,7 @@ async function chatBootstrap() {
     const cm = msgs.filter(m => m.channelId === c.id && !m.deletedAt);
     const last = cm[cm.length - 1];
     const lastId = last ? last.id : 0;
-    if (!_chatSeen(me.id, c.id)) _chatSetRead(me.id, c.id, lastId); // first sight → caught up
-    const lr = _chatLastRead(me.id, c.id);
+    const lr = _chatLastRead(me.id, c.id); // unread = everything since you last read (no history catch-up)
     return {
       id: c.id, name: c.name, kind: c.kind, visibility: c.visibility, createdBy: c.createdBy,
       memberIds: c.memberIds || [], lastMsgId: lastId, unread: cm.filter(m => m.id > lr && m.userId !== me.id).length,
@@ -880,6 +878,22 @@ async function chatChannelCreate({ name, kind = "channel", visibility = "public"
   const rec = { id, name: (name || "").trim(), kind, visibility, createdBy: me?.id || "", memberIds: Array.from(new Set([me?.id, ...memberIds].filter(Boolean))), createdAt: nowISO(), archived: false };
   db.setSync("chatChannels", [..._chatCh(), rec]);
   return id;
+}
+/** Unread messages worth a toast: DM/group messages + @mentions of me,
+ * newer than the given cursor. */
+async function chatAlerts(sinceId = 0) {
+  if (REMOTE_MODE) { const res = await apiCall("chat_alerts", { method: "GET", query: { sinceId } }); return res.messages || []; }
+  const me = getCurrentUser();
+  const chById = Object.fromEntries(_chatCh().map(c => [c.id, c]));
+  const like = "(user:" + me.id + ")";
+  return _chatMsg().filter(m => {
+    const c = chById[m.channelId];
+    if (!c || c.archived || !(c.memberIds || []).includes(me.id)) return false;
+    if (m.userId === me.id || m.deletedAt || m.id <= sinceId) return false;
+    if (m.id <= _chatLastRead(me.id, m.channelId)) return false;
+    return c.kind === "dm" || c.kind === "group" || (m.body || "").includes(like);
+  }).sort((a, b) => a.id - b.id).slice(-10)
+    .map(m => ({ id: m.id, channel_id: m.channelId, user_id: m.userId, body: m.body, channel_kind: chById[m.channelId].kind, channel_name: chById[m.channelId].name }));
 }
 async function chatOpenDM(userId) {
   if (REMOTE_MODE) { const res = await apiCall("chat_dm_open", { method: "POST", body: { userId } }); return res.id; }
@@ -1594,7 +1608,7 @@ const formColor = (formId) => {
    maintained reverse index (nothing to keep in sync or drift) — they're
    computed by scanning every document's text at render time, which is
    trivially fast at this data scale (dozens–low hundreds of documents). */
-const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook):([\w-]+)\)/g;
+const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook|user|task):([\w-]+)\)/g;
 
 /** Splits text into {text} and {mention:{kind,id,label}} segments, in order. */
 function parseMentionText(text) {
@@ -1632,11 +1646,19 @@ function getMentionCandidates(query) {
   const q = (query || "").toLowerCase();
   const matches = (s) => !q || (s || "").toLowerCase().includes(q);
   const out = [];
+  // Staff first — @mentioning a person is the most common in chat (and pings
+  // them). Then SOPs, contacts, tasks, playbook.
+  getUsers().forEach(u => {
+    if (matches(u.name)) out.push({ kind: "user", id: u.id, label: u.name, sub: "Staff" });
+  });
   getSOPs().forEach(s => {
     if (matches(s.title)) out.push({ kind: s.kind === "form" ? "form" : "sop", id: s.id, label: s.title || "Untitled", sub: s.kind === "form" ? "Form" : "SOP" });
   });
   getContacts().forEach(c => {
     if (matches(c.name)) out.push({ kind: "contact", id: c.id, label: c.name, sub: c.role || "Contact" });
+  });
+  getTasks().forEach(t => {
+    if (!t.archived && matches(t.title)) out.push({ kind: "task", id: t.id, label: t.title || "Untitled", sub: "Task" });
   });
   const playbook = db.getSync("playbook") || { sections: [] };
   (playbook.sections || []).forEach(s => {
@@ -2736,7 +2758,7 @@ export {
   getCallbacks, saveCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
   callbackTargetsUser, openCallbacksForUser,
   getCallbackAcks, hasAckedCallback, ackCallback,
-  chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll,
+  chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, chatAlerts,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,
