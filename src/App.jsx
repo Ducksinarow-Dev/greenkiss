@@ -42,6 +42,7 @@ function App() {
   const [taskFocus, setTaskFocus] = useState(null); // task id (magnet deep-link)
   const [callbackFocus, setCallbackFocus] = useState(null); // callback id (toast/dashboard deep-link)
   const [chatUnread, setChatUnread] = useState(0); // total unread chat messages, for the sidebar badge
+  const [newTaskPrefill, setNewTaskPrefill] = useState(null); // {title, description} to open a prefilled new task (act-from-item, #47)
   const [chatFocus, setChatFocus] = useState(null); // channel id to open (from a chat toast / dashboard strip)
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
@@ -151,6 +152,8 @@ function App() {
   const goToTask = (id) => { setTaskFocus(id); setSection("tasks"); };
   const goToCallback = (id) => { setCallbackFocus(id); setSection("waitlist"); };
   const goToChat = (channelId) => { setChatFocus(channelId || null); setSection("chat"); };
+  // Create a new task prefilled from another item (#47 act-from-item).
+  const createTaskFrom = (prefill) => { setNewTaskPrefill(prefill); setSection("tasks"); };
   // Shared by both SOPLibrary mounts (library/forms) as onNavigateOut — a
   // mention/magnet pointing at the other kind, a Playbook section, or a task.
   const onNavigateOut = (kind, id, blockId) => {
@@ -176,11 +179,11 @@ function App() {
         {section === "playbook" && (
           <OperationsPlaybook user={user} focusSectionId={playbookFocus} onClearFocus={() => setPlaybookFocus(null)} onNavigateSop={goToSop} onNavigateOut={onNavigateOut} />
         )}
-        {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} onNavigateOut={onNavigateOut} />}
+        {section === "tasks" && <TaskManager user={user} onOpenSop={goToSop} focusTaskId={taskFocus} onClearFocus={() => setTaskFocus(null)} onNavigateOut={onNavigateOut} newTaskPrefill={newTaskPrefill} onConsumePrefill={() => setNewTaskPrefill(null)} />}
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "announcements" && <Announcements user={user} />}
-        {section === "chat" && <Chat user={user} onNavigate={onNavigateOut} focusChannelId={chatFocus} onClearFocus={() => setChatFocus(null)} />}
+        {section === "chat" && <Chat user={user} onNavigate={onNavigateOut} focusChannelId={chatFocus} onClearFocus={() => setChatFocus(null)} onCreateTask={createTaskFrom} />}
         {section === "waitlist" && <Waitlist user={user} focusCallbackId={callbackFocus} onClearFocus={() => setCallbackFocus(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>

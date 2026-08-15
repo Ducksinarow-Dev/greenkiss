@@ -119,7 +119,7 @@ function NewMessageModal({ users, me, onClose, onOpened }) {
   );
 }
 
-function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete }) {
+function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete, onCreateTask }) {
   const [hover, setHover] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(m.body);
@@ -152,17 +152,18 @@ function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete })
           </div>
         )}
       </div>
-      {mine && !deleted && !editing && hover && (
+      {hover && !deleted && !editing && (
         <div style={{ position: "absolute", top: 2, right: 2, display: "flex", gap: 2, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 8, padding: 2, boxShadow: C.shadowSm }}>
-          <IconBtn icon="edit" title="Edit" onClick={() => { setDraft(m.body); setEditing(true); }} />
-          <IconBtn icon="delete" danger title="Delete" onClick={() => onDelete(m)} />
+          <IconBtn icon="add_task" title="Create task from this" onClick={() => onCreateTask(m)} />
+          {mine && <IconBtn icon="edit" title="Edit" onClick={() => { setDraft(m.body); setEditing(true); }} />}
+          {mine && <IconBtn icon="delete" danger title="Delete" onClick={() => onDelete(m)} />}
         </div>
       )}
     </div>
   );
 }
 
-function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
+function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask }) {
   const admin = isAdmin(user);
   const users = getUsers();
   const userName = (id) => users.find(u => u.id === id)?.name || "Someone";
@@ -282,6 +283,13 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
   const channelIcon = (c) => c.kind === "channel" ? (c.visibility === "private" ? "lock" : "tag") : (c.kind === "dm" ? "person" : "group");
   const chChannels = channels.filter(c => c.kind === "channel");
   const chDMs = channels.filter(c => c.kind === "dm" || c.kind === "group");
+  // Act-from-item (#47): spin up a task prefilled from a message.
+  const createTaskFromMessage = (m) => {
+    if (!onCreateTask) return;
+    const body = m.body || "";
+    const firstLine = body.split("\n")[0].slice(0, 80);
+    onCreateTask({ title: firstLine || "Follow-up from chat", description: `${body}\n\n— from ${active ? channelLabel(active) : "chat"} (${userName(m.user_id)})` });
+  };
 
   const ChannelRow = (c) => {
     const on = c.id === activeId;
@@ -351,7 +359,7 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
               {messages.map((m, i) => {
                 const prev = messages[i - 1];
                 const grouped = prev && prev.user_id === m.user_id && (new Date(msgTs(m)) - new Date(msgTs(prev))) < 5 * 60000;
-                return <MessageRow key={m.id} m={m} grouped={grouped} mine={m.user_id === user.id} userName={userName} onMention={handleMention} onEdit={doEdit} onDelete={doDelete} />;
+                return <MessageRow key={m.id} m={m} grouped={grouped} mine={m.user_id === user.id} userName={userName} onMention={handleMention} onEdit={doEdit} onDelete={doDelete} onCreateTask={createTaskFromMessage} />;
               })}
             </div>
             <div style={{ padding: "12px 16px", borderTop: `1.5px solid ${C.bdr}`, display: "flex", gap: 10, alignItems: "flex-end" }}>

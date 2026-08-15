@@ -1036,7 +1036,7 @@ function ManagerView({ users, filterAssignee, onOpenTask }) {
   );
 }
 
-function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut }) {
+function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut, newTaskPrefill, onConsumePrefill }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const [view, setView] = useState(getTasksView); // Board / List (R4 D1), persisted per-browser
@@ -1050,6 +1050,12 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
     if (t) setModal({ task: { ...t }, isNew: false });
     onClearFocus && onClearFocus();
   }, [focusTaskId, onClearFocus]);
+  // Act-from-item (#47): open a new-task modal prefilled from another item.
+  useEffect(() => {
+    if (!newTaskPrefill) return;
+    setModal({ task: { ...emptyForm(), assignedTo: user?.id || "", ...newTaskPrefill }, isNew: true });
+    onConsumePrefill && onConsumePrefill();
+  }, [newTaskPrefill, onConsumePrefill, user]);
   const [showDone, setShowDone] = useState(false);
   const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
