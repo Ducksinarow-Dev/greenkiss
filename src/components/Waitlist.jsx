@@ -7,9 +7,9 @@ import {
   getWaitlist, addWaitlistEntry, updateWaitlistEntry, deleteWaitlistEntry, waitlistForProduct,
   getCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
   callbackTargetsUser, hasAckedCallback, ackCallback, getCallbackAcks,
-  confirmDelete, triggerSaved,
+  confirmDelete, triggerSaved, linkifyMagnets,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText } from './shared.jsx';
 
 /* Waitlist & Callbacks (Batch 4). Clients waitlist for out-of-stock products;
    when stock lands, ops logs a callback that alerts sales staff/group (see
@@ -259,7 +259,7 @@ function WaitlistTab({ clients, products, waitlist, editor, bump }) {
                     <Avatar name={clientName(clients, e.clientId)} size={24} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, textDecoration: e.fulfilled ? "line-through" : "none" }}>{clientName(clients, e.clientId)}</div>
-                      {e.note && <div style={{ fontSize: 12, color: C.mut }}>{e.note}</div>}
+                      {e.note && <div style={{ fontSize: 12, color: C.mut }}><MentionText text={linkifyMagnets(e.note)} /></div>}
                     </div>
                     {editor && (
                       <>
@@ -351,7 +351,7 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
           <Pill color={callback.status === "done" ? C.moss : C.clay}>{callback.status === "done" ? "Closed" : `${remaining} to call`}</Pill>
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
-        {callback.note && <div style={{ fontSize: 13.5, color: C.txt2, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 10, padding: "10px 12px" }}>{callback.note}</div>}
+        {callback.note && <div style={{ fontSize: 13.5, color: C.txt2, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 10, padding: "10px 12px", whiteSpace: "pre-wrap" }}><MentionText text={linkifyMagnets(callback.note)} /></div>}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: C.mut }}>For:</span>
           {assignees.map(u => <span key={u.id} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: C.txt2 }}><Avatar name={u.name} size={18} />{u.name}{acks[u.id] && <Icon name="check" size={13} style={{ color: C.moss }} />}</span>)}

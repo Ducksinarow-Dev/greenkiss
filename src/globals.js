@@ -1722,16 +1722,27 @@ function copyMagnet(kind, id, blockId) {
   triggerToast("Magnet link copied");
   return link;
 }
-/** One resolver for clicking any magnet link. `nav` is App.jsx's navigation
- * surface: { goToSop(id, blockId), goToTask(id), goToPlaybookSection(id) }. */
+/* App-wide navigation surface (Aug 2026). App registers one navigate(kind,id,
+   blockId) function here, so a magnet/mention pill is clickable ANYWHERE it's
+   rendered without threading nav callbacks through every component. */
+let _magnetNav = null;
+const setMagnetNav = (fn) => { _magnetNav = fn; };
+/** Navigate to an internal item by (kind, id) via the registered surface. */
+function navigateItem(kind, id, blockId) {
+  if (_magnetNav) { _magnetNav(kind, id, blockId); return true; }
+  return false;
+}
+/** One resolver for clicking any magnet link. Falls back to the app-wide nav
+ * surface when an explicit `nav` object isn't passed. */
 function openMagnet(url, nav) {
   const m = parseMagnet(url);
-  if (!m || !nav) return false;
-  if (m.kind === "sop" && nav.goToSop) nav.goToSop(m.id, m.blockId);
-  else if (m.kind === "task" && nav.goToTask) nav.goToTask(m.id);
-  else if (m.kind === "playbook" && nav.goToPlaybookSection) nav.goToPlaybookSection(m.id);
-  else return false;
-  return true;
+  if (!m) return false;
+  if (nav) {
+    if (m.kind === "sop" && nav.goToSop) { nav.goToSop(m.id, m.blockId); return true; }
+    if (m.kind === "task" && nav.goToTask) { nav.goToTask(m.id); return true; }
+    if (m.kind === "playbook" && nav.goToPlaybookSection) { nav.goToPlaybookSection(m.id); return true; }
+  }
+  return navigateItem(m.kind, m.id, m.blockId);
 }
 
 /** Search over every internal linkable target for the link popover:
@@ -2793,7 +2804,7 @@ export {
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
   getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
-  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
+  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,

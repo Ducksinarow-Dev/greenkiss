@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, inp } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, inp } from '../globals.js';
 
 /* Design intent:
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -270,7 +270,7 @@ function MentionText({ text, onNavigate }) {
           <span key={i} role="button" tabIndex={0}
             onClick={e => {
               if (kind === "contact") setContactCard({ contact: getContacts().find(c => c.id === id), anchorRect: e.currentTarget.getBoundingClientRect() });
-              else onNavigate && onNavigate(kind, id);
+              else (onNavigate || navigateItem)(kind, id);
             }}
             onKeyDown={e => { if (e.key === "Enter") e.currentTarget.click(); }}
             style={{ display: "inline-flex", padding: "0 6px", borderRadius: 5, background: C.mossSoft, color: C.moss, fontWeight: 600, cursor: "pointer", fontSize: "0.94em" }}

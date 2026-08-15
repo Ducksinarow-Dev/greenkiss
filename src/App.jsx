@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -101,6 +101,21 @@ function App() {
     const t = setInterval(tick, 12000);
     return () => { alive = false; clearInterval(t); };
   }, [user]);
+
+  // Register the app-wide navigation surface so magnet/mention pills are
+  // clickable anywhere (chat, notes, etc.). Uses the stable state setters so
+  // it works for every internal item kind without threading nav props.
+  useEffect(() => {
+    setMagnetNav((kind, id, blockId) => {
+      if (kind === "sop" || kind === "form") { setSopFocus({ id, mode: "view", blockId: blockId || null }); setSection(getSOP(id)?.kind === "form" ? "forms" : "library"); }
+      else if (kind === "task") { setTaskFocus(id); setSection("tasks"); }
+      else if (kind === "playbook") { setPlaybookFocus(id); setSection("playbook"); }
+      else if (kind === "content") { setContentFocus(id); setSection("calendar"); }
+      else if (kind === "campaign") { setCampaignFocus(id); setSection("calendar"); }
+      else if (kind === "callback") { setCallbackFocus(id); setSection("waitlist"); }
+      else if (kind === "user") setSection("chat");
+    });
+  }, []);
 
   if (!user) {
     return <Login onLogin={() => { setUser(getCurrentUser()); setBooting(false); }} />;
