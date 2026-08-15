@@ -449,6 +449,24 @@ switch ($action) {
         respond(200, ['ok' => true, 'acks' => $acks]);
         break;
 
+    case 'callback_ack_save':
+        // Any authenticated user may acknowledge a callback aimed at them
+        // (Batch 4). Merged server-side into callbackAcks, same as announcements.
+        $user = requireAuth($pdo, $body);
+        $callbackId = (string)($body['callbackId'] ?? '');
+        $userId = (string)($body['userId'] ?? '');
+        if ($callbackId === '' || $userId === '') respond(400, ['error' => 'Missing callbackId/userId']);
+        $at = $body['at'] ?? gmdate('c');
+        maybeAutoBackup($pdo);
+        $acks = kvMutate($pdo, 'callbackAcks', function ($acks) use ($callbackId, $userId, $at) {
+            if (!is_array($acks)) $acks = [];
+            if (!isset($acks[$callbackId]) || !is_array($acks[$callbackId])) $acks[$callbackId] = [];
+            $acks[$callbackId][$userId] = ['at' => $at];
+            return $acks;
+        });
+        respond(200, ['ok' => true, 'acks' => $acks]);
+        break;
+
     case 'revisions_list':
         requireAuth($pdo, $body);
         $sopId = $_GET['sop_id'] ?? '';
