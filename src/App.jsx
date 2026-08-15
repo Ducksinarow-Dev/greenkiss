@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav, chatOpenDM } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -113,7 +113,8 @@ function App() {
       else if (kind === "content") { setContentFocus(id); setSection("calendar"); }
       else if (kind === "campaign") { setCampaignFocus(id); setSection("calendar"); }
       else if (kind === "callback") { setCallbackFocus(id); setSection("waitlist"); }
-      else if (kind === "user") setSection("chat");
+      else if (kind === "product" || kind === "client") setSection("waitlist");
+      else if (kind === "user") { chatOpenDM(id).then(cid => { setChatFocus(cid); setSection("chat"); }).catch(() => setSection("chat")); }
     });
   }, []);
 

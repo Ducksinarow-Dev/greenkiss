@@ -1622,7 +1622,7 @@ const formColor = (formId) => {
    maintained reverse index (nothing to keep in sync or drift) — they're
    computed by scanning every document's text at render time, which is
    trivially fast at this data scale (dozens–low hundreds of documents). */
-const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook|user|task):([\w-]+)\)/g;
+const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook|user|task|product|client|content|campaign|callback):([\w-]+)\)/g;
 
 /** Splits text into {text} and {mention:{kind,id,label}} segments, in order. */
 function parseMentionText(text) {
@@ -1678,6 +1678,11 @@ function getMentionCandidates(query) {
   (playbook.sections || []).forEach(s => {
     if (matches(s.title)) out.push({ kind: "playbook", id: s.id, label: s.title, sub: "Playbook" });
   });
+  // Waitlist products/clients + content/campaigns are referenceable too (#47).
+  getProducts().forEach(p => { if (matches(p.name)) out.push({ kind: "product", id: p.id, label: p.name, sub: "Product" }); });
+  getClients().forEach(c => { if (matches(c.name)) out.push({ kind: "client", id: c.id, label: c.name, sub: "Client" }); });
+  getContentItems().forEach(c => { if (matches(c.title)) out.push({ kind: "content", id: c.id, label: c.title || "Untitled", sub: "Content" }); });
+  getCampaigns().forEach(c => { if (matches(c.name)) out.push({ kind: "campaign", id: c.id, label: c.name || "Untitled", sub: "Campaign" }); });
   return out.slice(0, 8);
 }
 
@@ -1693,7 +1698,7 @@ function getMentionCandidates(query) {
 const isMagnet = (url) => typeof url === "string" && url.startsWith("gk:");
 /** @returns {{kind:"sop"|"task"|"playbook", id:string, blockId?:string}|null} */
 function parseMagnet(url) {
-  const m = /^gk:(sop|task|playbook):([\w-]+)(?::([\w-]+))?$/.exec(url || "");
+  const m = /^gk:(sop|task|playbook|product|client|content|campaign|callback|user):([\w-]+)(?::([\w-]+))?$/.exec(url || "");
   return m ? { kind: m[1], id: m[2], blockId: m[3] || "" } : null;
 }
 const magnetFor = (kind, id, blockId) => `gk:${kind}:${id}${blockId ? ":" + blockId : ""}`;
@@ -1701,11 +1706,17 @@ const magnetFor = (kind, id, blockId) => `gk:${kind}:${id}${blockId ? ":" + bloc
  * pasted link renders as a human-readable pill (e.g. "gk:task:h58z7" → the
  * task's title) instead of a cryptic id. Used when rendering chat messages. */
 function linkifyMagnets(text) {
-  return (text || "").replace(/gk:(sop|task|playbook):([\w-]+)(?::[\w-]+)?/g, (_whole, kind, id) => {
+  return (text || "").replace(/gk:(sop|task|playbook|product|client|content|campaign|callback|user):([\w-]+)(?::[\w-]+)?/g, (_whole, kind, id) => {
     let label = "";
     if (kind === "task") label = getTasks().find(t => t.id === id)?.title || "Task";
     else if (kind === "sop") label = getSOP(id)?.title || "SOP";
     else if (kind === "playbook") label = ((db.getSync("playbook") || {}).sections || []).find(s => s.id === id)?.title || "Playbook";
+    else if (kind === "product") label = getProducts().find(p => p.id === id)?.name || "Product";
+    else if (kind === "client") label = getClients().find(c => c.id === id)?.name || "Client";
+    else if (kind === "content") label = getContentItems().find(c => c.id === id)?.title || "Content";
+    else if (kind === "campaign") label = getCampaigns().find(c => c.id === id)?.name || "Campaign";
+    else if (kind === "callback") { const cb = getCallbacks().find(c => c.id === id); label = cb ? (getProducts().find(p => p.id === cb.productId)?.name || "Callback") : "Callback"; }
+    else if (kind === "user") label = getUsers().find(u => u.id === id)?.name || "Staff";
     return `@[${(label || "link").replace(/[[\]]/g, "")}](${kind}:${id})`;
   });
 }
