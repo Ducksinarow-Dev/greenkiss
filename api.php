@@ -602,6 +602,42 @@ switch ($action) {
         respond(200, ['message' => ['id' => $mid, 'user_id' => $user['id'], 'body' => $text, 'created_at' => gmdate('Y-m-d H:i:s')]]);
         break;
 
+    case 'chat_edit':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $id = (int)($body['id'] ?? 0);
+        $text = trim((string)($body['body'] ?? ''));
+        if ($id <= 0 || $text === '') respond(400, ['error' => 'Missing id/body']);
+        if (mb_strlen($text) > 8000) $text = mb_substr($text, 0, 8000);
+        $pdo->prepare("UPDATE chat_messages SET body = ?, edited_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+            ->execute([$text, $id, $user['id']]);
+        respond(200, ['ok' => true]);
+        break;
+
+    case 'chat_delete':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $id = (int)($body['id'] ?? 0);
+        if ($id <= 0) respond(400, ['error' => 'Missing id']);
+        $pdo->prepare("UPDATE chat_messages SET deleted_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ?")->execute([$id, $user['id']]);
+        respond(200, ['ok' => true]);
+        break;
+
+    case 'chat_channel_archive':
+        // Admins archive channels; DM/group members can archive their own.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $channelId = (string)($body['channelId'] ?? '');
+        $cs = $pdo->prepare("SELECT kind FROM chat_channels WHERE id = ? LIMIT 1");
+        $cs->execute([$channelId]);
+        $crow = $cs->fetch();
+        if (!$crow) respond(404, ['error' => 'Channel not found']);
+        if ($crow['kind'] === 'channel') requireRole($user, ['admin']);
+        elseif (!chatCanSee($pdo, $channelId, $user['id'])) respond(403, ['error' => 'No access']);
+        $pdo->prepare("UPDATE chat_channels SET archived = 1 WHERE id = ?")->execute([$channelId]);
+        respond(200, ['ok' => true]);
+        break;
+
     case 'chat_mark_read':
         $user = requireAuth($pdo, $body);
         ensureChatTables($pdo);

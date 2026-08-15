@@ -922,6 +922,20 @@ async function chatSend(channelId, body) {
   _chatSetRead(me.id, channelId, id);
   return { id, user_id: msg.userId, body: text, created_at: msg.createdAt };
 }
+async function chatEditMessage(id, body) {
+  const text = (body || "").trim();
+  if (!text) return;
+  if (REMOTE_MODE) { await apiCall("chat_edit", { method: "POST", body: { id, body: text } }); return; }
+  db.setSync("chatMessages", _chatMsg().map(m => m.id === id ? { ...m, body: text, editedAt: nowISO() } : m));
+}
+async function chatDeleteMessage(id) {
+  if (REMOTE_MODE) { await apiCall("chat_delete", { method: "POST", body: { id } }); return; }
+  db.setSync("chatMessages", _chatMsg().map(m => m.id === id ? { ...m, deletedAt: nowISO() } : m));
+}
+async function chatArchiveChannel(channelId) {
+  if (REMOTE_MODE) { await apiCall("chat_channel_archive", { method: "POST", body: { channelId } }); return; }
+  db.setSync("chatChannels", _chatCh().map(c => c.id === channelId ? { ...c, archived: true } : c));
+}
 async function chatMarkRead(channelId, upToMsgId = 0) {
   if (REMOTE_MODE) { await apiCall("chat_mark_read", { method: "POST", body: { channelId, upToMsgId } }); return; }
   const me = getCurrentUser();
@@ -2759,6 +2773,7 @@ export {
   callbackTargetsUser, openCallbacksForUser,
   getCallbackAcks, hasAckedCallback, ackCallback,
   chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, chatAlerts,
+  chatEditMessage, chatDeleteMessage, chatArchiveChannel,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,

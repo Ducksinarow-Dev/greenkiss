@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   C, FONT_CAPS, isAdmin, getUsers, inp,
   chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, triggerSaved,
+  chatEditMessage, chatDeleteMessage, chatArchiveChannel, confirmDelete,
 } from '../globals.js';
 import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl, MentionField, MentionText } from './shared.jsx';
 
@@ -118,6 +119,49 @@ function NewMessageModal({ users, me, onClose, onOpened }) {
   );
 }
 
+function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete }) {
+  const [hover, setHover] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(m.body);
+  const edited = m.edited_at || m.editedAt;
+  const deleted = m.deleted_at || m.deletedAt;
+  const saveEdit = () => { const t = draft.trim(); if (t && t !== m.body) onEdit(m.id, t); setEditing(false); };
+  return (
+    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", gap: 10, padding: grouped ? "1px 0" : "8px 0 1px", position: "relative" }}>
+      <div style={{ width: 32, flexShrink: 0 }}>{!grouped && <Avatar name={userName(m.user_id)} size={32} />}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {!grouped && (
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: mine ? C.moss : C.txt }}>{userName(m.user_id)}</span>
+            <span style={{ fontSize: 11, color: C.faint, fontFamily: "'IBM Plex Mono',monospace" }}>{msgTime(m.created_at)}</span>
+          </div>
+        )}
+        {editing ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+            <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)} rows={1}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEdit(); } if (e.key === "Escape") { setEditing(false); setDraft(m.body); } }}
+              style={{ ...inp({ fontSize: 14, padding: "6px 10px" }), resize: "none", flex: 1 }} />
+            <IconBtn icon="check" title="Save" onClick={saveEdit} style={{ color: C.moss }} />
+            <IconBtn icon="close" title="Cancel" onClick={() => { setEditing(false); setDraft(m.body); }} />
+          </div>
+        ) : (
+          <div style={{ fontSize: 14, color: deleted ? C.faint : C.txt2, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontStyle: deleted ? "italic" : "normal" }}>
+            {deleted ? "Message deleted" : <MentionText text={m.body} onNavigate={onMention} />}
+            {edited && !deleted && <span style={{ fontSize: 11, color: C.faint, marginLeft: 6 }}>(edited)</span>}
+          </div>
+        )}
+      </div>
+      {mine && !deleted && !editing && hover && (
+        <div style={{ position: "absolute", top: 2, right: 2, display: "flex", gap: 2, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 8, padding: 2, boxShadow: C.shadowSm }}>
+          <IconBtn icon="edit" title="Edit" onClick={() => { setDraft(m.body); setEditing(true); }} />
+          <IconBtn icon="delete" danger title="Delete" onClick={() => onDelete(m)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
   const admin = isAdmin(user);
   const users = getUsers();
@@ -134,6 +178,7 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
   const [draft, setDraft] = useState("");
   const [modal, setModal] = useState(null); // "channel" | "message"
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const cursorRef = useRef(0);
   const scrollRef = useRef(null);
   const activeRef = useRef(null);
@@ -161,6 +206,7 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
     chatFetchMessages(activeId).then(ms => {
       if (!alive) return;
       setMessages(ms);
+      setHasMore(ms.length >= 50);
       cursorRef.current = ms.length ? ms[ms.length - 1].id : 0;
       chatMarkRead(activeId).then(loadChannels);
     });
@@ -188,9 +234,10 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
     return () => clearInterval(t);
   }, []);
 
-  // Keep the message list pinned to the bottom by scrolling the CONTAINER
-  // (not scrollIntoView, which would scroll the whole page).
-  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages.length, activeId]);
+  // Keep pinned to the bottom by scrolling the CONTAINER when a NEW message
+  // lands (the last id grows) — not on prepend of older history.
+  const lastId = messages.length ? messages[messages.length - 1].id : 0;
+  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [lastId, activeId]);
 
   const send = async () => {
     const text = draft.trim();
@@ -198,6 +245,29 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
     setDraft("");
     const msg = await chatSend(activeId, text);
     if (msg) { setMessages(prev => [...prev, msg]); cursorRef.current = Math.max(cursorRef.current, msg.id); }
+    loadChannels();
+  };
+  const loadEarlier = async () => {
+    if (!messages.length) return;
+    const older = await chatFetchMessages(activeId, messages[0].id);
+    if (older.length < 50) setHasMore(false);
+    if (older.length) setMessages(prev => [...older, ...prev]);
+  };
+  const doEdit = (id, text) => {
+    chatEditMessage(id, text);
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, body: text, edited_at: new Date().toISOString() } : m));
+  };
+  const doDelete = async (m) => {
+    if (!(await confirmDelete("Delete this message?"))) return;
+    chatDeleteMessage(m.id);
+    setMessages(prev => prev.map(x => x.id === m.id ? { ...x, deleted_at: new Date().toISOString() } : x));
+  };
+  const doArchive = async () => {
+    if (!active) return;
+    if (!(await confirmDelete(`Archive ${channelLabel(active)}? It'll be hidden for everyone.`))) return;
+    await chatArchiveChannel(active.id);
+    triggerSaved();
+    setActiveId(null);
     loadChannels();
   };
 
@@ -267,29 +337,21 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus }) {
               <Icon name={channelIcon(active)} size={18} style={{ color: C.moss }} />
               <div style={{ fontSize: 16, fontWeight: 800, color: C.txt }}>{channelLabel(active)}</div>
               {active.kind === "group" && <span style={{ fontSize: 12, color: C.mut }}>· {(active.memberIds || []).length} people</span>}
+              <div style={{ flex: 1 }} />
+              {(active.kind !== "channel" || admin) && <IconBtn icon="archive" title="Archive conversation" onClick={doArchive} />}
             </div>
             <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "16px 18px", display: "flex", flexDirection: "column", gap: 2 }}>
+              {hasMore && (
+                <button type="button" onClick={loadEarlier}
+                  style={{ alignSelf: "center", margin: "4px 0 10px", background: C.s2, border: `1.5px solid ${C.bdr}`, borderRadius: 8, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, color: C.mut, cursor: "pointer", fontFamily: "inherit" }}>
+                  Load earlier messages
+                </button>
+              )}
               {messages.length === 0 && <div style={{ margin: "auto", fontSize: 13.5, color: C.faint }}>No messages yet — say hello 👋</div>}
               {messages.map((m, i) => {
                 const prev = messages[i - 1];
                 const grouped = prev && prev.user_id === m.user_id && (new Date(msgTs(m)) - new Date(msgTs(prev))) < 5 * 60000;
-                const mine = m.user_id === user.id;
-                return (
-                  <div key={m.id} style={{ display: "flex", gap: 10, padding: grouped ? "1px 0" : "8px 0 1px" }}>
-                    <div style={{ width: 32, flexShrink: 0 }}>{!grouped && <Avatar name={userName(m.user_id)} size={32} />}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {!grouped && (
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
-                          <span style={{ fontSize: 13.5, fontWeight: 800, color: mine ? C.moss : C.txt }}>{userName(m.user_id)}</span>
-                          <span style={{ fontSize: 11, color: C.faint, fontFamily: "'IBM Plex Mono',monospace" }}>{msgTime(m.created_at)}</span>
-                        </div>
-                      )}
-                      <div style={{ fontSize: 14, color: m.deleted_at ? C.faint : C.txt2, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontStyle: m.deleted_at ? "italic" : "normal" }}>
-                        {m.deleted_at ? "Message deleted" : <MentionText text={m.body} onNavigate={handleMention} />}
-                      </div>
-                    </div>
-                  </div>
-                );
+                return <MessageRow key={m.id} m={m} grouped={grouped} mine={m.user_id === user.id} userName={userName} onMention={handleMention} onEdit={doEdit} onDelete={doDelete} />;
               })}
             </div>
             <div style={{ padding: "12px 16px", borderTop: `1.5px solid ${C.bdr}`, display: "flex", gap: 10, alignItems: "flex-end" }}>
