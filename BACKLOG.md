@@ -33,6 +33,7 @@ Development backlog for the greenkiss ops tool itself (features, bugs). Numbered
 ### Design / theming
 - ~~#2: Light mode switch.~~ — shipped 2026-07-16, see top of file.
 - ~~#3: Typography pass~~ — shipped 2026-07-16, see top of file.
+- #44: Floating Save / Done button while editing. In any editor with a long/scrolling form (task & content modals, callback modals, Image Repository edit mode, SOP editor), the Save (or Done) action should float and stay accessible without scrolling to the bottom — a sticky modal footer or a floating action button. Noticed while editing in a short viewport: the footer Save was below the fold.
 
 ### SOP Library
 - ~~#4: Add new categories inline from the SOP editor~~ — shipped 2026-07-16, see top of file.

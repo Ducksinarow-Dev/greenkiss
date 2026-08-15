@@ -552,6 +552,7 @@ const isAdmin = (user) => user && user.role === "admin";
    user). */
 const NAV_ITEMS = [
   { key: "dashboard", label: "My Dashboard", icon: "dashboard" },
+  { key: "chat", label: "Chat", icon: "forum" },
   { key: "store", label: "Store Goals", icon: "speed" },
   { divider: true },
   { key: "tasks", label: "Task Manager", icon: "checklist" },
@@ -837,6 +838,87 @@ function ackCallback(id, userId) {
     return;
   }
   db.setSync("callbackAcks", next);
+}
+
+/* ─── STAFF CHAT (Phase 1) ────────────────────────────────────────────
+   Remote mode talks to the chat_* endpoints (messages live in real tables,
+   not kv). Dev mode mirrors the same shape in localStorage kv so the whole
+   UI works in the preview without a server — low volume, fine for testing.
+   Built as a self-contained slice so it can be lifted into DuckTracks. */
+const _chatCh = () => db.getSync("chatChannels") || [];
+const _chatMsg = () => db.getSync("chatMessages") || [];
+const _chatReads = () => db.getSync("chatReads") || {};
+const _chatLastRead = (uidv, cid) => (_chatReads()[uidv] || {})[cid] || 0;
+const _chatSetRead = (uidv, cid, v) => {
+  const r = _chatReads(); r[uidv] = r[uidv] || {}; r[uidv][cid] = Math.max(r[uidv][cid] || 0, v);
+  db.setSync("chatReads", r);
+};
+const _chatSeen = (uidv, cid) => ((_chatReads()[uidv] || {})[cid] != null);
+const _chatVisible = (me) => _chatCh().filter(c => !c.archived && (c.visibility === "public" || (c.memberIds || []).includes(me?.id)));
+
+async function chatBootstrap() {
+  if (REMOTE_MODE) { const res = await apiCall("chat_bootstrap", { method: "GET" }); return res.channels || []; }
+  const me = getCurrentUser();
+  const msgs = _chatMsg();
+  return _chatVisible(me).map(c => {
+    const cm = msgs.filter(m => m.channelId === c.id && !m.deletedAt);
+    const last = cm[cm.length - 1];
+    const lastId = last ? last.id : 0;
+    if (!_chatSeen(me.id, c.id)) _chatSetRead(me.id, c.id, lastId); // first sight → caught up
+    const lr = _chatLastRead(me.id, c.id);
+    return {
+      id: c.id, name: c.name, kind: c.kind, visibility: c.visibility, createdBy: c.createdBy,
+      memberIds: c.memberIds || [], lastMsgId: lastId, unread: cm.filter(m => m.id > lr && m.userId !== me.id).length,
+      lastMessage: last ? { userId: last.userId, body: last.body, createdAt: last.createdAt } : null,
+    };
+  });
+}
+async function chatChannelCreate({ name, kind = "channel", visibility = "public", memberIds = [] }) {
+  if (REMOTE_MODE) { const res = await apiCall("chat_channel_create", { method: "POST", body: { name, kind, visibility, memberIds } }); return res.id; }
+  const me = getCurrentUser();
+  const id = "ch_" + uid();
+  const rec = { id, name: (name || "").trim(), kind, visibility, createdBy: me?.id || "", memberIds: Array.from(new Set([me?.id, ...memberIds].filter(Boolean))), createdAt: nowISO(), archived: false };
+  db.setSync("chatChannels", [..._chatCh(), rec]);
+  return id;
+}
+async function chatFetchMessages(channelId, beforeId = 0) {
+  if (REMOTE_MODE) { const res = await apiCall("chat_messages", { method: "GET", query: { channelId, beforeId } }); return res.messages || []; }
+  let cm = _chatMsg().filter(m => m.channelId === channelId);
+  if (beforeId > 0) cm = cm.filter(m => m.id < beforeId);
+  return cm.slice(-50).map(m => ({ id: m.id, user_id: m.userId, body: m.body, created_at: m.createdAt, edited_at: m.editedAt || null, deleted_at: m.deletedAt || null }));
+}
+async function chatSend(channelId, body) {
+  const text = (body || "").trim();
+  if (!text) return null;
+  if (REMOTE_MODE) { const res = await apiCall("chat_send", { method: "POST", body: { channelId, body: text } }); return res.message; }
+  const me = getCurrentUser();
+  const all = _chatMsg();
+  const id = all.reduce((mx, m) => Math.max(mx, m.id), 0) + 1;
+  const msg = { id, channelId, userId: me?.id || "", body: text, createdAt: nowISO() };
+  db.setSync("chatMessages", [...all, msg]);
+  _chatSetRead(me.id, channelId, id);
+  return { id, user_id: msg.userId, body: text, created_at: msg.createdAt };
+}
+async function chatMarkRead(channelId, upToMsgId = 0) {
+  if (REMOTE_MODE) { await apiCall("chat_mark_read", { method: "POST", body: { channelId, upToMsgId } }); return; }
+  const me = getCurrentUser();
+  let upTo = upToMsgId;
+  if (!upTo) { const cm = _chatMsg().filter(m => m.channelId === channelId); upTo = cm.length ? cm[cm.length - 1].id : 0; }
+  _chatSetRead(me.id, channelId, upTo);
+}
+async function chatPoll(openChannelId = "", sinceId = 0) {
+  if (REMOTE_MODE) { const res = await apiCall("chat_poll", { method: "GET", query: { openChannelId, sinceId } }); return { channels: res.channels || [], newMessages: res.newMessages || [] }; }
+  const me = getCurrentUser();
+  const msgs = _chatMsg();
+  const channels = _chatVisible(me).map(c => {
+    const cm = msgs.filter(m => m.channelId === c.id && !m.deletedAt);
+    const lr = _chatLastRead(me.id, c.id);
+    return { id: c.id, lastMsgId: cm.length ? cm[cm.length - 1].id : 0, unread: cm.filter(m => m.id > lr && m.userId !== me.id).length };
+  });
+  const newMessages = openChannelId
+    ? msgs.filter(m => m.channelId === openChannelId && m.id > sinceId).map(m => ({ id: m.id, user_id: m.userId, body: m.body, created_at: m.createdAt }))
+    : [];
+  return { channels, newMessages };
 }
 
 /* ─── SEED DATA (dev mode only — remote mode is seeded once via schema.sql) ─
@@ -2645,6 +2727,7 @@ export {
   getCallbacks, saveCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
   callbackTargetsUser, openCallbacksForUser,
   getCallbackAcks, hasAckedCallback, ackCallback,
+  chatBootstrap, chatChannelCreate, chatFetchMessages, chatSend, chatMarkRead, chatPoll,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,

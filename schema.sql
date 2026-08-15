@@ -79,6 +79,42 @@ CREATE TABLE IF NOT EXISTS login_sessions (
   INDEX idx_login_sessions_token (token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── chat (staff chat — Slack-meets-Messages) ──────────────────────────
+-- Real tables (not kv): chat is append-heavy, so a JSON blob per channel
+-- would rewrite every message. api.php creates these lazily
+-- (ensureChatTables) so an already-live DB picks them up on the next deploy
+-- without a manual import. Built as a self-contained slice so it can be
+-- lifted into DuckTracks later.
+CREATE TABLE IF NOT EXISTS chat_channels (
+  id         VARCHAR(16)  NOT NULL PRIMARY KEY,
+  name       VARCHAR(120) NULL,
+  kind       ENUM('channel','dm','group') NOT NULL DEFAULT 'channel',
+  visibility ENUM('public','private')     NOT NULL DEFAULT 'public',
+  created_by VARCHAR(16)  NULL,
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  archived   TINYINT(1)   NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_members (
+  channel_id       VARCHAR(16) NOT NULL,
+  user_id          VARCHAR(16) NOT NULL,
+  last_read_msg_id BIGINT      NOT NULL DEFAULT 0,
+  joined_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (channel_id, user_id),
+  INDEX idx_chat_members_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+  channel_id VARCHAR(16)  NOT NULL,
+  user_id    VARCHAR(16)  NOT NULL,
+  body       TEXT         NOT NULL,
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  edited_at  DATETIME     NULL,
+  deleted_at DATETIME     NULL,
+  INDEX idx_chat_messages_channel (channel_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── revisions ────────────────────────────────────────────────────────
 -- SOP version history. Capped at 20 snapshots per sop_id (oldest pruned on
 -- insert — see sop_save / revision_restore in api.php).

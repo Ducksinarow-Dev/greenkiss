@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -14,6 +14,7 @@ import StoreUpdate from './components/StoreUpdate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import Announcements from './components/Announcements.jsx';
 import Waitlist from './components/Waitlist.jsx';
+import Chat from './components/Chat.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
 import LoginReminders from './components/LoginReminders.jsx';
 import AnnouncementDelivery from './components/AnnouncementDelivery.jsx';
@@ -39,6 +40,7 @@ function App() {
   const [playbookFocus, setPlaybookFocus] = useState(null); // playbook section id
   const [taskFocus, setTaskFocus] = useState(null); // task id (magnet deep-link)
   const [callbackFocus, setCallbackFocus] = useState(null); // callback id (toast/dashboard deep-link)
+  const [chatUnread, setChatUnread] = useState(0); // total unread chat messages, for the sidebar badge
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
   // in place — it doesn't trigger React re-renders on its own. themeVersion is
@@ -85,6 +87,19 @@ function App() {
     };
   }, []);
 
+  // Background chat-unread poll feeding the sidebar badge (Phase 1). Only runs
+  // for users who can see the Chat section; every 12s, cheap.
+  useEffect(() => {
+    if (!user || !sectionsForUser(user).includes("chat")) { setChatUnread(0); return; }
+    let alive = true;
+    const tick = () => chatPoll("", 0)
+      .then(({ channels }) => { if (alive) setChatUnread(channels.reduce((s, c) => s + (c.unread || 0), 0)); })
+      .catch(() => {});
+    tick();
+    const t = setInterval(tick, 12000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+
   if (!user) {
     return <Login onLogin={() => { setUser(getCurrentUser()); setBooting(false); }} />;
   }
@@ -127,7 +142,7 @@ function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
-      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
+      <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} chatUnread={chatUnread} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
         {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} onOpenCallback={goToCallback} />}
         {section === "store" && <StoreUpdate user={user} />}
@@ -146,6 +161,7 @@ function App() {
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "announcements" && <Announcements user={user} />}
+        {section === "chat" && <Chat user={user} />}
         {section === "waitlist" && <Waitlist user={user} focusCallbackId={callbackFocus} onClearFocus={() => setCallbackFocus(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>

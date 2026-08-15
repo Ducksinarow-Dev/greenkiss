@@ -141,11 +141,16 @@ function CalendarSyncModal({ onClose }) {
   );
 }
 
-function NavButton({ it, active, onClick, collapsed }) {
+function NavButton({ it, active, onClick, collapsed, badge = 0 }) {
+  const badgeEl = badge > 0 && (
+    <span style={{ background: C.red, color: "#fff", fontSize: 10.5, fontWeight: 700, borderRadius: 99, padding: "1px 6px", minWidth: 17, textAlign: "center", lineHeight: 1.5 }}>
+      {badge > 99 ? "99+" : badge}
+    </span>
+  );
   return (
     <button onClick={onClick} title={collapsed ? it.label : undefined}
       style={{
-        display: "flex", alignItems: "center", gap: 11,
+        display: "flex", alignItems: "center", gap: 11, position: "relative",
         padding: collapsed ? "10px 0" : "10px 12px", justifyContent: collapsed ? "center" : "flex-start",
         borderRadius: 9, border: "none", cursor: "pointer", textAlign: "left", width: "100%",
         background: active ? C.mossSoft : "transparent",
@@ -157,12 +162,15 @@ function NavButton({ it, active, onClick, collapsed }) {
       onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
     >
       <Icon name={it.icon} size={20} style={{ color: active ? C.moss : C.faint, flexShrink: 0 }} />
-      {!collapsed && it.label}
+      {!collapsed && <span style={{ flex: 1 }}>{it.label}</span>}
+      {collapsed
+        ? (badge > 0 && <span style={{ position: "absolute", top: 5, right: 8, width: 8, height: 8, borderRadius: 99, background: C.red }} />)
+        : badgeEl}
     </button>
   );
 }
 
-function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
+function Sidebar({ section, setSection, user, onLogout, onToggleTheme, chatUnread = 0 }) {
   const [showPinModal, setShowPinModal] = useState(false);
   const [showCalSync, setShowCalSync] = useState(false);
   // Collapse the sidebar to icon-only (Batch 1). Persisted per browser so it
@@ -214,7 +222,7 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme }) {
       <nav style={{ padding: collapsed ? "8px 8px" : "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
         {visibleNav(user).map((it, i) => it.divider
           ? <div key={"div" + i} style={{ height: 1, background: C.bdr, margin: collapsed ? "7px 6px" : "7px 10px" }} />
-          : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} collapsed={collapsed} />
+          : <NavButton key={it.key} it={it} active={section === it.key} onClick={() => setSection(it.key)} collapsed={collapsed} badge={it.key === "chat" ? chatUnread : 0} />
         )}
       </nav>
 
