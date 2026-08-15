@@ -486,17 +486,12 @@ switch ($action) {
             $lst->execute([$c['id']]);
             $last = $lst->fetch();
             $lastId = $last ? (int)$last['id'] : 0;
+            // Unread = everything since you last read (no history catch-up).
+            // A member row is created lazily on first read (chat_mark_read).
             $mst = $pdo->prepare("SELECT last_read_msg_id FROM chat_members WHERE channel_id = ? AND user_id = ? LIMIT 1");
             $mst->execute([$c['id'], $me]);
             $mrow = $mst->fetch();
-            if (!$mrow) {
-                // First sight of a public channel → join caught up so old
-                // history doesn't all read as unread.
-                $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?)")->execute([$c['id'], $me, $lastId]);
-                $lastRead = $lastId;
-            } else {
-                $lastRead = (int)$mrow['last_read_msg_id'];
-            }
+            $lastRead = $mrow ? (int)$mrow['last_read_msg_id'] : 0;
             $ust = $pdo->prepare("SELECT COUNT(*) FROM chat_messages WHERE channel_id = ? AND id > ? AND user_id <> ? AND deleted_at IS NULL");
             $ust->execute([$c['id'], $lastRead, $me]);
             $mem = $pdo->prepare("SELECT user_id FROM chat_members WHERE channel_id = ?");
@@ -530,6 +525,52 @@ switch ($action) {
         respond(200, ['id' => $id]);
         break;
 
+    case 'chat_dm_open':
+        // Find-or-create a 1:1 DM with another user (Phase 2) so the same pair
+        // never ends up with duplicate threads.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $other = (string)($body['userId'] ?? '');
+        if ($other === '' || $other === $user['id']) respond(400, ['error' => 'Pick another person']);
+        $stmt = $pdo->prepare(
+            "SELECT c.id FROM chat_channels c
+             WHERE c.kind = 'dm' AND c.archived = 0
+               AND (SELECT COUNT(*) FROM chat_members m WHERE m.channel_id = c.id) = 2
+               AND EXISTS (SELECT 1 FROM chat_members m1 WHERE m1.channel_id = c.id AND m1.user_id = ?)
+               AND EXISTS (SELECT 1 FROM chat_members m2 WHERE m2.channel_id = c.id AND m2.user_id = ?)
+             LIMIT 1");
+        $stmt->execute([$user['id'], $other]);
+        $ex = $stmt->fetch();
+        if ($ex) { respond(200, ['id' => $ex['id']]); }
+        $id = 'ch_' . bin2hex(random_bytes(5));
+        $pdo->prepare("INSERT INTO chat_channels (id, name, kind, visibility, created_by) VALUES (?, '', 'dm', 'private', ?)")->execute([$id, $user['id']]);
+        foreach ([$user['id'], $other] as $mid) {
+            $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, 0)")->execute([$id, $mid]);
+        }
+        respond(200, ['id' => $id]);
+        break;
+
+    case 'chat_alerts':
+        // Unread messages worth a toast (Phase 3): anything in a DM/group, plus
+        // @mentions of me in any channel. Client passes a cursor so each one
+        // toasts once.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $me = $user['id'];
+        $since = (int)($_GET['sinceId'] ?? 0);
+        $like = '%(user:' . $me . ')%';
+        $stmt = $pdo->prepare(
+            "SELECT msg.id, msg.channel_id, msg.user_id, msg.body, c.kind AS channel_kind, c.name AS channel_name
+             FROM chat_messages msg
+             JOIN chat_channels c ON c.id = msg.channel_id AND c.archived = 0
+             JOIN chat_members mem ON mem.channel_id = msg.channel_id AND mem.user_id = ?
+             WHERE msg.deleted_at IS NULL AND msg.user_id <> ? AND msg.id > ? AND msg.id > mem.last_read_msg_id
+               AND (c.kind IN ('dm','group') OR msg.body LIKE ?)
+             ORDER BY msg.id DESC LIMIT 10");
+        $stmt->execute([$me, $me, $since, $like]);
+        respond(200, ['messages' => array_reverse($stmt->fetchAll())]);
+        break;
+
     case 'chat_messages':
         $user = requireAuth($pdo, $body);
         ensureChatTables($pdo);
@@ -559,6 +600,42 @@ switch ($action) {
         $pdo->prepare("INSERT INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_read_msg_id = GREATEST(last_read_msg_id, VALUES(last_read_msg_id))")
             ->execute([$channelId, $user['id'], $mid]);
         respond(200, ['message' => ['id' => $mid, 'user_id' => $user['id'], 'body' => $text, 'created_at' => gmdate('Y-m-d H:i:s')]]);
+        break;
+
+    case 'chat_edit':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $id = (int)($body['id'] ?? 0);
+        $text = trim((string)($body['body'] ?? ''));
+        if ($id <= 0 || $text === '') respond(400, ['error' => 'Missing id/body']);
+        if (mb_strlen($text) > 8000) $text = mb_substr($text, 0, 8000);
+        $pdo->prepare("UPDATE chat_messages SET body = ?, edited_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ? AND deleted_at IS NULL")
+            ->execute([$text, $id, $user['id']]);
+        respond(200, ['ok' => true]);
+        break;
+
+    case 'chat_delete':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $id = (int)($body['id'] ?? 0);
+        if ($id <= 0) respond(400, ['error' => 'Missing id']);
+        $pdo->prepare("UPDATE chat_messages SET deleted_at = UTC_TIMESTAMP() WHERE id = ? AND user_id = ?")->execute([$id, $user['id']]);
+        respond(200, ['ok' => true]);
+        break;
+
+    case 'chat_channel_archive':
+        // Admins archive channels; DM/group members can archive their own.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $channelId = (string)($body['channelId'] ?? '');
+        $cs = $pdo->prepare("SELECT kind FROM chat_channels WHERE id = ? LIMIT 1");
+        $cs->execute([$channelId]);
+        $crow = $cs->fetch();
+        if (!$crow) respond(404, ['error' => 'Channel not found']);
+        if ($crow['kind'] === 'channel') requireRole($user, ['admin']);
+        elseif (!chatCanSee($pdo, $channelId, $user['id'])) respond(403, ['error' => 'No access']);
+        $pdo->prepare("UPDATE chat_channels SET archived = 1 WHERE id = ?")->execute([$channelId]);
+        respond(200, ['ok' => true]);
         break;
 
     case 'chat_mark_read':
