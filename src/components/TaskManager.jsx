@@ -504,11 +504,21 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
                 {users.length === 0 && <span style={{ fontSize: 12.5, color: C.faint }}>No staff yet.</span>}
               </div>
             </div>
-            <div style={{ flex: "1 1 140px" }}>
+            <div style={{ flex: "1 1 120px" }}>
+              <label style={labelStyle}>Start date</label>
+              <input type="date" value={form.startDate || ""} onChange={e => set("startDate", e.target.value)} max={form.dueDate || undefined} style={inp()} />
+            </div>
+            <div style={{ flex: "1 1 120px" }}>
               <label style={labelStyle}>Due date</label>
-              <input type="date" value={form.dueDate} onChange={e => set("dueDate", e.target.value)} style={inp()} />
+              <input type="date" value={form.dueDate} onChange={e => set("dueDate", e.target.value)} min={form.startDate || undefined} style={inp()} />
             </div>
           </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13.5, color: C.txt2 }}>
+            <input type="checkbox" checked={!!form.onCalendar} onChange={e => set("onCalendar", e.target.checked)} />
+            <Icon name="event" size={16} style={{ color: C.moss }} />
+            Show this task on the calendar
+          </label>
 
           <div>
             <label style={labelStyle}>Recurring</label>

@@ -502,6 +502,47 @@ async function fetchLoginHistory() {
   }));
 }
 
+/* Presence (#49). A user is "online" if their session last_seen is within
+   ONLINE_MS. Server advances last_seen on every authed request (requireAuth),
+   so the window is a live activity clock. Cached module-side + refreshed by a
+   poll in App; components read isUserOnline() synchronously. */
+const PRESENCE_ONLINE_MS = 5 * 60 * 1000;
+let _presence = {}; // userId -> last_seen ISO (most recent open session)
+const _presenceSubs = new Set(); // components re-render on each presence refresh
+const subscribePresence = (fn) => { _presenceSubs.add(fn); return () => _presenceSubs.delete(fn); };
+/** Fetch presence (per-user latest last_seen) and cache it. Dev mode derives
+ * it from the local loginHistory mirror so the indicator works offline too. */
+async function refreshPresence() {
+  try {
+    let rows;
+    if (REMOTE_MODE) {
+      const res = await apiCall("presence", { method: "GET" });
+      rows = res.presence || [];
+    } else {
+      const map = {};
+      (db.getSync("loginHistory") || []).forEach(s => {
+        if (s.logoutAt) return;
+        if (!map[s.userId] || s.lastSeen > map[s.userId]) map[s.userId] = s.lastSeen;
+      });
+      // The current user is active right now (their local session is live).
+      const me = getCurrentUser();
+      if (me) map[me.id] = nowISO();
+      rows = Object.entries(map).map(([user_id, last_seen]) => ({ user_id, last_seen }));
+    }
+    const next = {};
+    rows.forEach(r => { if (r.user_id && r.last_seen) next[r.user_id] = r.last_seen; });
+    _presence = next;
+  } catch { /* leave last-known presence on a failed poll */ }
+  _presenceSubs.forEach(fn => { try { fn(); } catch { /* ignore */ } });
+  return _presence;
+}
+/** Synchronous read of the cached presence: true if seen within ONLINE_MS. */
+function isUserOnline(userId) {
+  const seen = _presence[userId];
+  if (!seen) return false;
+  return (Date.now() - new Date(seen).getTime()) < PRESENCE_ONLINE_MS;
+}
+
 /** Remote login: POSTs {name, pin}, stores token+user, warms the cache.
  * Throws with a user-facing message on failure. */
 async function remoteLogin(name, pin) {
@@ -2398,8 +2439,14 @@ function convertTaskToSubtask(task, targetTask) {
 }
 const emptyTaskShape = () => ({
   title: "", description: "", status: "todo", priority: "medium", type: "task",
-  assignedTo: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [], tagIds: [], recurrence: "none", links: [],
+  assignedTo: "", startDate: "", dueDate: "", relatedSopId: "", projectId: "", subTasks: [], tagIds: [], recurrence: "none", links: [],
+  onCalendar: false, // #53: surface this task on the visual calendar / ICS feed
 });
+/** #53: a task shows on the calendar if it opts in itself, OR its project does.
+ * `proj` is the task's Project record (or null). */
+function taskOnCalendar(task, proj) {
+  return !!(task && (task.onCalendar || (proj && proj.includeTasksOnCalendar)));
+}
 
 /** Favourited-by-this-user tasks sort first, then priority (urgent→low),
  * then newest first — shared by every board that lists tasks (Task Manager
@@ -2498,7 +2545,7 @@ const deleteProject = (id) => {
 };
 const defProject = () => ({
   id: uid(), name: "", description: "", status: "upcoming", startDate: "", dueDate: "",
-  leadId: "", memberIds: [], color: C.moss, createdAt: nowISO(), updatedAt: nowISO(),
+  leadId: "", memberIds: [], color: C.moss, includeTasksOnCalendar: false, createdAt: nowISO(), updatedAt: nowISO(),
 });
 
 const PROJECT_STATUSES = [
@@ -2825,8 +2872,8 @@ async function importAllData(parsed) {
 export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
   REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall, refreshCache,
-  db, uid, nowISO, fmtDate, fmtDateShort,
-  getCurrentUser, setCurrentUser, clearCurrentUser, fetchLoginHistory,
+  db, uid, nowISO, fmtDate, fmtDateShort, parseDate,
+  getCurrentUser, setCurrentUser, clearCurrentUser, fetchLoginHistory, refreshPresence, isUserOnline, subscribePresence,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   NAV_ITEMS, NAV_SECTIONS, getUserSections, setUserSections, sectionsForUser,
   getGroups, saveGroups, addGroup, updateGroup, deleteGroup,
@@ -2867,7 +2914,7 @@ export {
   getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskTypeMeta, taskType,
   RECURRENCE_OPTIONS, advanceDate, completeTaskWithRecurrence,
-  toggleFavourite, duplicateTask, mergeTaskInto, convertTaskToProject, convertTaskToSubtask, emptyTaskShape,
+  toggleFavourite, duplicateTask, mergeTaskInto, convertTaskToProject, convertTaskToSubtask, emptyTaskShape, taskOnCalendar,
   sortTasksForUser, dispatchTaskAction,
   isOverdue, isDueToday, isDueThisWeek,
   getProjects, saveProjects, addProject, updateProject, deleteProject, defProject,

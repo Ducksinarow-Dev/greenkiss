@@ -177,6 +177,20 @@ switch ($action) {
         respond(200, ['sessions' => $stmt->fetchAll()]);
         break;
 
+    case 'presence':
+        // Online/offline presence (#49). Any authed user may read it (for the
+        // chat window + admin area). Returns the latest last_seen per user from
+        // still-open sessions; the client decides "online" via a time window.
+        requireAuth($pdo, $body);
+        ensureLoginSessionsTable($pdo);
+        $stmt = $pdo->query(
+            "SELECT user_id, MAX(last_seen) AS last_seen
+             FROM login_sessions WHERE logout_at IS NULL
+             GROUP BY user_id"
+        );
+        respond(200, ['presence' => $stmt->fetchAll()]);
+        break;
+
     case 'kv_all':
         requireAuth($pdo, $body);
         $rows = $pdo->query("SELECT k, v FROM kv_store");
@@ -1050,6 +1064,32 @@ switch ($action) {
             $lines[] = 'DTEND;VALUE=DATE:' . str_replace('-', '', gmdate('Y-m-d', strtotime($ce . ' +1 day')));
             $lines[] = 'SUMMARY:' . icsEscape(($c['name'] ?? 'Campaign') . ' (campaign)');
             if (!empty($c['description'])) $lines[] = 'DESCRIPTION:' . icsEscape($c['description']);
+            $lines[] = 'END:VEVENT';
+        }
+        // Tasks the user opted onto the calendar (#53) — per-task flag OR the
+        // task's project flag; only tasks assigned to this user, keyed on due
+        // date (spanning from start date when one is set).
+        $tasks = kvGet($pdo, 'tasks') ?: [];
+        $projects = kvGet($pdo, 'projects') ?: [];
+        $projCal = [];
+        foreach ($projects as $p) { $projCal[$p['id'] ?? ''] = !empty($p['includeTasksOnCalendar']); }
+        foreach ($tasks as $t) {
+            if (!empty($t['archived'])) continue;
+            $onCal = !empty($t['onCalendar']) || ($projCal[$t['projectId'] ?? ''] ?? false);
+            if (!$onCal) continue;
+            if (($t['assignedTo'] ?? '') !== $userId) continue;
+            $due = $t['dueDate'] ?? '';
+            $startD = $t['startDate'] ?? '';
+            $anchor = preg_match('/^\d{4}-\d{2}-\d{2}$/', $due) ? $due : $startD;
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $anchor)) continue;
+            $spanStart = (preg_match('/^\d{4}-\d{2}-\d{2}$/', $startD) && $startD <= $anchor) ? $startD : $anchor;
+            $lines[] = 'BEGIN:VEVENT';
+            $lines[] = 'UID:gk-task-' . ($t['id'] ?? uniqid()) . '@thegreenkiss';
+            $lines[] = 'DTSTAMP:' . $stamp;
+            $lines[] = 'DTSTART;VALUE=DATE:' . str_replace('-', '', $spanStart);
+            $lines[] = 'DTEND;VALUE=DATE:' . str_replace('-', '', gmdate('Y-m-d', strtotime($anchor . ' +1 day')));
+            $lines[] = 'SUMMARY:' . icsEscape(($t['title'] ?? 'Task') . ' (task)');
+            if (!empty($t['description'])) $lines[] = 'DESCRIPTION:' . icsEscape($t['description']);
             $lines[] = 'END:VEVENT';
         }
         $lines[] = 'END:VCALENDAR';

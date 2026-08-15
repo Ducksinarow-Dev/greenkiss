@@ -8,6 +8,41 @@ import { Icon, IconBtn, Btn, OBtn, SectionHeader, EmptyState, ItemLink } from '.
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const DIGITS = "0123456789".split("");
 
+/* Shared 0–9 / A–Z jump bar (#50). Used by the viewer AND edit mode so a long
+   list stays navigable while editing instead of being a garbled wall of rows.
+   `has(l)` marks letters that have entries; `active` is the current filter. */
+function LetterFinder({ groups, has, active, setActive }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+      <button onClick={() => setActive(null)} title="Show all brands"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
+          borderRadius: 7, border: `1.5px solid ${active === null ? C.moss : C.bdr}`,
+          background: active === null ? C.mossSoft : C.sur, color: active === null ? C.moss : C.mut,
+          cursor: "pointer", marginRight: 4,
+        }}>
+        <Icon name="restart_alt" size={17} />
+      </button>
+      {groups.map(l => {
+        const on = has(l), sel = active === l;
+        return (
+          <button key={l} onClick={() => setActive(l)}
+            style={{
+              width: 26, height: 30, borderRadius: 7, border: "none", cursor: "pointer",
+              background: sel ? C.moss : "transparent",
+              color: sel ? "#fff" : (on ? C.txt : C.faint),
+              fontFamily: FONT_CAPS, fontWeight: on ? 700 : 400, fontSize: 13.5,
+              opacity: on ? 1 : 0.5, transition: "all .12s",
+            }}
+            onMouseEnter={e => { if (!sel) e.currentTarget.style.background = C.s2; }}
+            onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}
+          >{l}</button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* Per-brand login credentials (migrated from the live site) — some vendor
    portals are login-gated, so the brand's link is useless without these.
    Password is masked with a reveal toggle; both fields copy to clipboard. */
@@ -111,33 +146,8 @@ function ImageRepository({ user }) {
           <div style={{
             position: "sticky", top: 0, zIndex: 20, background: C.bg,
             borderBottom: `1.5px solid ${C.bdr}`, padding: "10px 0", marginBottom: 8,
-            display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4,
           }}>
-            <button onClick={() => setActive(null)} title="Show all brands"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
-                borderRadius: 7, border: `1.5px solid ${active === null ? C.moss : C.bdr}`,
-                background: active === null ? C.mossSoft : C.sur, color: active === null ? C.moss : C.mut,
-                cursor: "pointer", marginRight: 4,
-              }}>
-              <Icon name="restart_alt" size={17} />
-            </button>
-            {groups.map(l => {
-              const on = has(l), sel = active === l;
-              return (
-                <button key={l} onClick={() => setActive(l)} disabled={false}
-                  style={{
-                    width: 26, height: 30, borderRadius: 7, border: "none", cursor: "pointer",
-                    background: sel ? C.moss : "transparent",
-                    color: sel ? "#fff" : (on ? C.txt : C.faint),
-                    fontFamily: FONT_CAPS, fontWeight: on ? 700 : 400, fontSize: 13.5,
-                    opacity: on ? 1 : 0.5, transition: "all .12s",
-                  }}
-                  onMouseEnter={e => { if (!sel) e.currentTarget.style.background = C.s2; }}
-                  onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "transparent"; }}
-                >{l}</button>
-              );
-            })}
+            <LetterFinder groups={groups} has={has} active={active} setActive={setActive} />
           </div>
 
           <div style={{ maxWidth: 760 }}>
@@ -204,6 +214,12 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
   // only, never persisted to the saved doc.
   const [noteOpen, setNoteOpen] = useState({});
   const [loginOpen, setLoginOpen] = useState({});
+  // Letter Finder in edit mode (#50) — filter the flat edit list to one letter
+  // so a long A–Z repository isn't a garbled wall of rows while editing.
+  const [active, setActive] = useState(null);
+  const has = (l) => blocks.some(b => letterOf(b) === l);
+  const groups = [...DIGITS.filter(has), ...LETTERS];
+  const shown = active === null ? blocks : blocks.filter(b => letterOf(b) === active);
   const letterSelect = (b) => (
     <select value={letterOf(b)} onChange={e => onPatch(b.id, { letter: e.target.value })}
       title="Letter" style={inp({ width: 62, flex: "0 0 auto", fontSize: 13, padding: "8px 6px" })}>
@@ -221,14 +237,19 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
       <div style={{
         position: "sticky", top: 0, zIndex: 20, background: C.bg,
         borderBottom: `1.5px solid ${C.bdr}`, padding: "10px 0", marginBottom: 12,
-        display: "flex", gap: 10, flexWrap: "wrap",
+        display: "flex", flexDirection: "column", gap: 10,
       }}>
-        <OBtn onClick={() => onAdd("title")}><Icon name="add_link" size={16} />Add brand</OBtn>
-        <OBtn onClick={() => onAdd("text")}><Icon name="add" size={16} />Add note</OBtn>
-        {onDone && <Btn onClick={onDone} style={{ marginLeft: "auto" }}><Icon name="done" size={16} />Done</Btn>}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <OBtn onClick={() => onAdd("title")}><Icon name="add_link" size={16} />Add brand</OBtn>
+          <OBtn onClick={() => onAdd("text")}><Icon name="add" size={16} />Add note</OBtn>
+          {onDone && <Btn onClick={onDone} style={{ marginLeft: "auto" }}><Icon name="done" size={16} />Done</Btn>}
+        </div>
+        {/* Keep the Letter Finder in the header while editing (#50). */}
+        <LetterFinder groups={groups} has={has} active={active} setActive={setActive} />
       </div>
+      {active !== null && <div style={{ fontSize: 12.5, color: C.mut, marginBottom: 8 }}>Showing letter <strong>{active}</strong> · {shown.length} {shown.length === 1 ? "entry" : "entries"} — <button onClick={() => setActive(null)} style={{ background: "none", border: "none", color: C.moss, cursor: "pointer", fontWeight: 600, fontFamily: "inherit", padding: 0 }}>show all</button></div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {blocks.map(b => (
+        {shown.map(b => (
           <div key={b.id} style={{
             display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap",
             background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 10, padding: "10px 12px",

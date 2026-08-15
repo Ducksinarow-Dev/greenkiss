@@ -1,5 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, linkifyMagnets, inp } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, linkifyMagnets, isUserOnline, subscribePresence, inp } from '../globals.js';
+
+/** Small online/offline presence dot for a user (#49). Reads the cached
+ * presence map and re-renders whenever the app's presence poll refreshes it. */
+function PresenceDot({ userId, size = 9, style }) {
+  const [, force] = useState(0);
+  useEffect(() => subscribePresence(() => force(n => n + 1)), []);
+  const online = isUserOnline(userId);
+  return (
+    <span title={online ? "Online" : "Offline"} style={{
+      width: size, height: size, borderRadius: "50%", flexShrink: 0, display: "inline-block",
+      background: online ? "#2Fb463" : "transparent",
+      border: online ? "none" : `1.5px solid ${C.bdr2}`,
+      boxShadow: online ? `0 0 0 2px ${C.sur}` : "none", ...style,
+    }} />
+  );
+}
 
 /** Paste handler for any text input/textarea: if the pasted text contains a
  * raw `gk:kind:id` magnet code, convert it in place to a readable
@@ -447,4 +463,4 @@ function LinkPopover({ anchorRect, initial, onSet, onClose }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste };
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste, PresenceDot };

@@ -3,7 +3,7 @@ import {
   C, FONT_CAPS, getProjects, addProject, updateProject, deleteProject, defProject,
   getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, getTags, getTaskTemplates, confirmDelete, triggerSaved,
   canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
-  TASK_BOARD_STATUSES, inp, sortTasksForUser, completeTaskWithRecurrence, dispatchTaskAction,
+  TASK_BOARD_STATUSES, inp, sortTasksForUser, completeTaskWithRecurrence, dispatchTaskAction, parseDate, todayLocalISO,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver } from './shared.jsx';
 import { TaskCard, TaskModal, emptyForm as emptyTaskForm } from './TaskManager.jsx';
@@ -117,6 +117,12 @@ function ProjectModal({ initial, users, onSave, onDelete, onClose, isNew }) {
             </div>
           </div>
 
+          <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", fontSize: 13.5, color: C.txt2 }}>
+            <input type="checkbox" checked={!!form.includeTasksOnCalendar} onChange={e => set("includeTasksOnCalendar", e.target.checked)} />
+            <Icon name="event" size={16} style={{ color: C.moss }} />
+            Include this project's tasks on the calendar
+          </label>
+
           <div>
             <label style={lbl()}>Members</label>
             <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto", border: `1.5px solid ${C.bdr}`, borderRadius: 9, padding: 8 }}>
@@ -134,7 +140,7 @@ function ProjectModal({ initial, users, onSave, onDelete, onClose, isNew }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, margin: "24px -28px -28px", padding: "16px 28px", background: C.sur, borderTop: `1.5px solid ${C.bdr}`, zIndex: 3 }}>
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={() => onSave(form)} disabled={!form.name.trim()}>Save</Btn>
         </div>
@@ -228,10 +234,154 @@ function TimelineStrip({ project, tasks }) {
   );
 }
 
+/* Per-project task Kanban (#53) — the 4 board columns, drag-enabled, scoped
+   to one project. Mirrors the TaskManager board's drop-to-restatus so the two
+   behave identically. */
+function ProjectTasksBoard({ tasks, currentUser, cardProps, onOpenTask, onQuickToggle, onPatchTask, onAction, onRestatus }) {
+  const [dragId, setDragId] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+  const drop = (status) => { if (dragId) onRestatus(dragId, status); setDragId(null); setOverCol(null); };
+  return (
+    <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
+      {TASK_BOARD_STATUSES.map(s => {
+        const items = sortTasksForUser(tasks.filter(t => t.status === s.key), currentUser?.id || "");
+        return (
+          <div key={s.key}
+            onDragOver={e => { e.preventDefault(); setOverCol(s.key); }} onDrop={() => drop(s.key)}
+            style={{ flex: "1 1 260px", minWidth: 240, background: overCol === s.key ? C.mossSoft : C.bg, border: `1.5px solid ${overCol === s.key ? C.moss : C.bdr}`, borderRadius: 13, padding: 12, transition: "background .12s, border-color .12s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+              <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
+              <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{items.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {items.map(t => (
+                <TaskCard key={t.id} task={t} {...cardProps}
+                  onOpen={() => onOpenTask(t)} onDragStart={(e) => { setDragId(t.id); if (e?.dataTransfer) e.dataTransfer.effectAllowed = "move"; }} onDragOver={() => {}} isDragOver={false}
+                  onQuickToggle={() => onQuickToggle(t)} onPatchTask={patch => onPatchTask(t, patch)}
+                  onAction={(action, extra) => onAction(t, action, extra)} />
+              ))}
+              {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>Drop here</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const MS_DAY = 86400000;
+const daysBetween = (a, b) => Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / MS_DAY);
+const addDaysISO = (iso, n) => { const d = parseDate(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const ZOOMS = [{ key: "week", label: "Week", px: 30 }, { key: "month", label: "Month", px: 11 }, { key: "quarter", label: "Quarter", px: 4.6 }];
+
+/* Notion-style Timeline (#53): left = Task + Owner columns; right = a scrollable
+   date track where each task is a bar spanning startDate→dueDate (single-day
+   marker if only a due date), with the assignee's avatar and a Today line.
+   Zoom by Week / Month / Quarter changes the day width. */
+function ProjectTimeline({ project, tasks, users, onOpenTask }) {
+  const [zoom, setZoom] = useState("month");
+  const px = ZOOMS.find(z => z.key === zoom).px;
+  const today = todayLocalISO();
+  // Only tasks with at least a due date sit on the timeline.
+  const dated = tasks.filter(t => t.dueDate || t.startDate);
+  if (dated.length === 0) {
+    return <EmptyState icon="calendar_view_week" title="Nothing scheduled yet" sub="Give tasks a start and/or due date to see them on the timeline." />;
+  }
+  // Range = earliest start to latest due, padded, and covering the project span + today.
+  const lo = [project.startDate, today, ...dated.map(t => t.startDate || t.dueDate)].filter(Boolean).sort()[0];
+  const hi = [project.dueDate, today, ...dated.map(t => t.dueDate || t.startDate)].filter(Boolean).sort().slice(-1)[0];
+  const rangeStart = addDaysISO(lo, -3);
+  const rangeEnd = addDaysISO(hi, 4);
+  const totalDays = Math.max(daysBetween(rangeStart, rangeEnd), 1);
+  const trackW = totalDays * px;
+  const xOf = (iso) => daysBetween(rangeStart, iso) * px;
+
+  // Month header segments across the range.
+  const months = [];
+  { let cur = rangeStart.slice(0, 8) + "01";
+    if (parseDate(cur) < parseDate(rangeStart)) cur = rangeStart;
+    let guard = 0;
+    while (parseDate(cur) <= parseDate(rangeEnd) && guard++ < 120) {
+      const d = parseDate(cur);
+      const monthStartISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+      const nextMonthISO = addDaysISO(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`, 32).slice(0, 8) + "01";
+      const segStart = parseDate(monthStartISO) < parseDate(rangeStart) ? rangeStart : monthStartISO;
+      const segEnd = parseDate(nextMonthISO) > parseDate(rangeEnd) ? rangeEnd : nextMonthISO;
+      months.push({ label: `${MONTHS_ABBR[d.getMonth()]} ${d.getFullYear()}`, left: xOf(segStart), width: Math.max(daysBetween(segStart, segEnd) * px, 0) });
+      cur = nextMonthISO;
+    }
+  }
+
+  const rows = sortTasksForUser(dated, "");
+  const NAME_W = 230, ROW_H = 38;
+
+  return (
+    <div style={{ border: `1.5px solid ${C.bdr}`, borderRadius: 13, overflow: "hidden", background: C.sur }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1.5px solid ${C.bdr}` }}>
+        <Icon name="calendar_view_week" size={16} style={{ color: C.moss }} />
+        <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.txt }}>Timeline</div>
+        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 3, border: `1.5px solid ${C.bdr}` }}>
+          {ZOOMS.map(z => (
+            <button key={z.key} onClick={() => setZoom(z.key)} style={{ padding: "5px 11px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: FONT_CAPS, fontSize: 11.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", background: zoom === z.key ? C.sur : "transparent", color: zoom === z.key ? C.moss : C.mut, boxShadow: zoom === z.key ? C.shadowSm : "none" }}>{z.label}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth: NAME_W + trackW }}>
+          {/* Month header */}
+          <div style={{ display: "flex", position: "relative", height: 26, borderBottom: `1.5px solid ${C.bdr}` }}>
+            <div style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}` }} />
+            <div style={{ position: "relative", width: trackW }}>
+              {months.map((m, i) => (
+                <div key={i} style={{ position: "absolute", left: m.left, width: m.width, top: 0, height: 26, borderLeft: `1px solid ${C.bdr}`, fontSize: 11, fontWeight: 700, color: C.mut, fontFamily: FONT_CAPS, textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 0 0 6px", overflow: "hidden", whiteSpace: "nowrap" }}>{m.label}</div>
+              ))}
+            </div>
+          </div>
+          {/* Rows */}
+          <div style={{ position: "relative" }}>
+            {/* Today line spanning all rows */}
+            <div style={{ position: "absolute", left: NAME_W + xOf(today), top: 0, bottom: 0, width: 2, background: C.clay, zIndex: 1, pointerEvents: "none" }} />
+            {rows.map(t => {
+              const owner = users.find(u => u.id === t.assignedTo);
+              const hasSpan = t.startDate && t.dueDate && t.dueDate >= t.startDate;
+              const barStart = hasSpan ? t.startDate : (t.dueDate || t.startDate);
+              const barEnd = hasSpan ? t.dueDate : (t.dueDate || t.startDate);
+              const left = xOf(barStart);
+              const width = Math.max((daysBetween(barStart, barEnd) + 1) * px, 14);
+              const overdue = isOverdue(t.dueDate, t.status === "done");
+              const done = t.status === "done";
+              const barColor = done ? C.moss : (overdue ? C.red : (project.color || C.moss));
+              return (
+                <div key={t.id} style={{ display: "flex", height: ROW_H, borderBottom: `1px solid ${C.bdr}` }}>
+                  <div onClick={() => onOpenTask(t)} title={t.title} style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 7, padding: "0 10px", cursor: "pointer", overflow: "hidden" }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none", opacity: done ? 0.6 : 1 }}>{t.title}</span>
+                    {owner ? <Avatar name={owner.name} size={20} /> : <span style={{ width: 20, height: 20, borderRadius: 99, border: `1.5px dashed ${C.bdr2}`, flexShrink: 0 }} />}
+                  </div>
+                  <div style={{ position: "relative", width: trackW }}>
+                    <div onClick={() => onOpenTask(t)} title={`${t.title}${hasSpan ? ` · ${fmtDateShort(barStart)} – ${fmtDateShort(barEnd)}` : ` · ${fmtDateShort(barEnd)}`}`}
+                      style={{ position: "absolute", left, top: 8, height: ROW_H - 16, width, background: barColor, opacity: done ? 0.55 : 1, borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "0 6px", overflow: "hidden" }}>
+                      {owner && <Avatar name={owner.name} size={16} />}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectDetail({ project, users, sops, allProjects, editable, currentUser, onBack, onBump, onOpenSop }) {
   const [editing, setEditing] = useState(false);
   const [taskModal, setTaskModal] = useState(null); // {task, isNew}
   const [showDone, setShowDone] = useState(false);
+  const [taskView, setTaskView] = useState(() => { try { return localStorage.getItem("gkProjectTaskView") || "board"; } catch { return "board"; } }); // board | timeline (#53)
+  const setView = (v) => { setTaskView(v); try { localStorage.setItem("gkProjectTaskView", v); } catch { /* private */ } };
   const allTasks = getTasks();
   const tags = getTags();
   const templates = getTaskTemplates();
@@ -297,9 +447,17 @@ function ProjectDetail({ project, users, sops, allProjects, editable, currentUse
         <TimelineStrip project={project} tasks={tasks} />
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt, flex: 1 }}>Tasks</div>
-        <OBtn onClick={() => setShowDone(true)} style={{ marginRight: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>Tasks</div>
+        <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 3, border: `1.5px solid ${C.bdr}` }}>
+          {[{ key: "board", label: "Board", icon: "view_kanban" }, { key: "timeline", label: "Timeline", icon: "calendar_view_week" }].map(v => (
+            <button key={v.key} onClick={() => setView(v.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", background: taskView === v.key ? C.sur : "transparent", color: taskView === v.key ? C.moss : C.mut, boxShadow: taskView === v.key ? C.shadowSm : "none" }}>
+              <Icon name={v.icon} size={15} />{v.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
+        <OBtn onClick={() => setShowDone(true)}>
           <Icon name="task_alt" size={16} />Done ({tasks.filter(t => t.status === "done").length})
         </OBtn>
         {editable && <Btn onClick={openNewTask}><Icon name="add" size={17} />New Task</Btn>}
@@ -308,30 +466,12 @@ function ProjectDetail({ project, users, sops, allProjects, editable, currentUse
       {tasks.length === 0 ? (
         <EmptyState icon="checklist" title="No tasks in this project yet" sub="Create the first task to get moving."
           action={editable && <Btn onClick={openNewTask}><Icon name="add" size={17} />New Task</Btn>} />
+      ) : taskView === "timeline" ? (
+        <ProjectTimeline project={project} tasks={tasks.filter(t => t.status !== "done")} users={users} onOpenTask={openEditTask} />
       ) : (
-        <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
-          {TASK_BOARD_STATUSES.map(s => {
-            const items = sortTasksForUser(tasks.filter(t => t.status === s.key), currentUser?.id || "");
-            return (
-              <div key={s.key} style={{ flex: "1 1 260px", minWidth: 240, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
-                  <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
-                  <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
-                  <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{items.length}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  {items.map(t => (
-                    <TaskCard key={t.id} task={t} {...cardProps}
-                      onOpen={() => openEditTask(t)} onDragStart={() => {}} onDragOver={() => {}} isDragOver={false}
-                      onQuickToggle={() => quickToggle(t)} onPatchTask={patch => patchTask(t, patch)}
-                      onAction={(action, extra) => taskAction(t, action, extra)} />
-                  ))}
-                  {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>No tasks</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <ProjectTasksBoard tasks={tasks} currentUser={currentUser} cardProps={cardProps}
+          onOpenTask={openEditTask} onQuickToggle={quickToggle} onPatchTask={patchTask} onAction={taskAction}
+          onRestatus={(id, status) => { const t = tasks.find(x => x.id === id); if (t && t.status !== status) patchTask(t, { status }); }} />
       )}
 
       {editing && (

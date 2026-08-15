@@ -8,6 +8,7 @@ import {
   CONTENT_STATUSES, contentStatusMeta, CONTENT_TYPES, contentTypeLabel, assigneesOf, GBP_CTA_TYPES, GBP_CATEGORIES,
   campaignChannelCounts, processAndStoreImage, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem,
+  getTasks, getProjects, taskOnCalendar, navigateItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste } from './shared.jsx';
@@ -130,7 +131,7 @@ function weekBands(cells, bandCampaigns) {
   return { lanes: segs.filter(s => s.lane !== undefined), overflow };
 }
 
-function CalendarView({ items, campaigns, bandCampaigns, monthKey, setMonthKey, onOpenItem, onNewAt, onFilterCampaign }) {
+function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpenTask, monthKey, setMonthKey, onOpenItem, onNewAt, onFilterCampaign }) {
   const { y, m, daysInMonth, days } = monthMeta(monthKey);
   const byDay = {};
   items.forEach(i => { if (i.publishDate) (byDay[i.publishDate] = byDay[i.publishDate] || []).push(i); });
@@ -171,6 +172,7 @@ function CalendarView({ items, campaigns, bandCampaigns, monthKey, setMonthKey, 
                 {cells.map((cell, ci) => {
                   if (!cell) return <div key={"e" + ci} style={{ minHeight: 92, borderRight: ci < 6 ? `1px solid ${C.bdr}` : "none", borderBottom: `1px solid ${C.bdr}`, background: C.bg }} />;
                   const dayItems = byDay[cell.ds] || [];
+                  const dayTasks = tasksByDay[cell.ds] || [];
                   const isToday = cell.ds === today;
                   return (
                     <div key={cell.ds} onClick={() => onNewAt(cell.ds)}
@@ -189,6 +191,14 @@ function CalendarView({ items, campaigns, bandCampaigns, monthKey, setMonthKey, 
                             onClick={(e) => { e && e.stopPropagation && e.stopPropagation(); onOpenItem(it); }} />
                         ))}
                         {dayItems.length > 3 && <div style={{ fontSize: 10, color: C.faint, paddingLeft: 4 }}>+{dayItems.length - 3} more</div>}
+                        {dayTasks.slice(0, 2).map(t => (
+                          <div key={t.id} onClick={(e) => { e.stopPropagation(); onOpenTask && onOpenTask(t); }} title={t.title}
+                            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10.5, padding: "2px 5px", borderRadius: 5, cursor: "pointer", background: C.bg, border: `1px solid ${C.bdr}`, color: C.txt2, overflow: "hidden", whiteSpace: "nowrap" }}>
+                            <Icon name="task_alt" size={11} style={{ color: t.status === "done" ? C.moss : C.faint, flexShrink: 0 }} />
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", textDecoration: t.status === "done" ? "line-through" : "none" }}>{t.title}</span>
+                          </div>
+                        ))}
+                        {dayTasks.length > 2 && <div style={{ fontSize: 10, color: C.faint, paddingLeft: 4 }}>+{dayTasks.length - 2} task{dayTasks.length - 2 > 1 ? "s" : ""}</div>}
                       </div>
                     </div>
                   );
@@ -1046,6 +1056,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const [refresh, setRefresh] = useState(0);
   const bump = () => setRefresh(r => r + 1);
   const [tab, setTab] = useState("calendar");
+  const [addAnchor, setAddAnchor] = useState(null); // "Add +" menu (#52)
   const [monthKey, setMonthKey] = useState(() => nowISO().slice(0, 7));
   const [modal, setModal] = useState(null); // {item, isNew}
   const [campaignModal, setCampaignModal] = useState(null); // {campaign, isNew}
@@ -1058,6 +1069,16 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const campaigns = getCampaigns();
   const allItems = getContentItems();
   const editable = canEdit(user);
+  // Tasks opted onto the calendar (#53) — per-task flag OR their project's flag,
+  // keyed by dueDate for the month grid.
+  const projById = {};
+  getProjects().forEach(p => { projById[p.id] = p; });
+  const tasksByDay = {};
+  getTasks().forEach(t => {
+    if (t.archived || !t.dueDate) return;
+    if (!taskOnCalendar(t, projById[t.projectId])) return;
+    (tasksByDay[t.dueDate] = tasksByDay[t.dueDate] || []).push(t);
+  });
 
   // Magnet-link navigation for content links — mirrors TaskManager's nav.
   const nav = {
@@ -1147,7 +1168,28 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
           </span>
         }
         sub={`${allItems.length} content item${allItems.length === 1 ? "" : "s"} · ${upcoming} upcoming`}
-        right={editable && <Btn onClick={() => openNew()}><Icon name="add" size={17} />New Content</Btn>} />
+        right={editable && (
+          <>
+            <Btn onClick={e => setAddAnchor(e.currentTarget.getBoundingClientRect())}><Icon name="add" size={17} />Add</Btn>
+            {addAnchor && (
+              <Popover anchorRect={addAnchor} onClose={() => setAddAnchor(null)} width={190}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  {[
+                    { icon: "post_add", label: "Content", onClick: () => openNew() },
+                    { icon: "campaign", label: "Campaign", onClick: () => openNewCampaign() },
+                    { icon: "insights", label: "Report", onClick: () => setTab("reports") },
+                  ].map(o => (
+                    <button key={o.label} type="button" onClick={() => { setAddAnchor(null); o.onClick(); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 11px", background: "none", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: C.txt, textAlign: "left" }}
+                      onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <Icon name={o.icon} size={17} style={{ color: C.moss }} />{o.label}
+                    </button>
+                  ))}
+                </div>
+              </Popover>
+            )}
+          </>
+        )} />
 
       <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
         {VIEW_TABS.map(t => (
@@ -1187,6 +1229,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 520px", minWidth: 0 }}>
             <CalendarView items={items} campaigns={campaigns} bandCampaigns={activeCampaign ? [activeCampaign] : campaigns}
+              tasksByDay={tasksByDay} onOpenTask={(t) => navigateItem("task", t.id)}
               monthKey={monthKey} setMonthKey={setMonthKey} onOpenItem={openEdit}
               onNewAt={editable ? openNew : () => {}} onFilterCampaign={filterByCampaign} />
           </div>

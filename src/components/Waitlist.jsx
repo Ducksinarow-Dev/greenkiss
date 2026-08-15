@@ -329,8 +329,8 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved, initial
     if (draft.assigneeIds.length === 0 && draft.groupIds.length === 0) return;
     addCallback(draft); triggerSaved(); onSaved(); onClose();
   };
-  const chip = (on, color, labelText, onClick) => (
-    <button type="button" onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${on ? (color || C.moss) : C.bdr}`, background: on ? C.s2 : C.sur, color: on ? C.txt : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+  const chip = (on, color, labelText, onClick, keyId) => (
+    <button key={keyId} type="button" onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, cursor: "pointer", border: `1.5px solid ${on ? (color || C.moss) : C.bdr}`, background: on ? C.s2 : C.sur, color: on ? C.txt : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
       {color && <span style={{ width: 9, height: 9, borderRadius: 99, background: color, opacity: on ? 1 : 0.4 }} />}{labelText}
     </button>
   );
@@ -347,12 +347,12 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved, initial
           subFor={p => { const n = waitlistForProduct(p.id).filter(e => !e.fulfilled).length; return n ? `${n} waiting` : ""; }} />
         <div>
           <label style={lbl()}>Assign to staff</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{users.map(u => chip(draft.assigneeIds.includes(u.id), null, u.name, () => toggle("assigneeIds", u.id)))}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{users.map(u => chip(draft.assigneeIds.includes(u.id), null, u.name, () => toggle("assigneeIds", u.id), u.id))}</div>
         </div>
         <div>
           <label style={lbl()}>…and/or groups</label>
           {groups.length === 0 ? <div style={{ fontSize: 12.5, color: C.faint }}>No groups yet.</div> : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{groups.map(g => chip(draft.groupIds.includes(g.id), g.color, g.name, () => toggle("groupIds", g.id)))}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{groups.map(g => chip(draft.groupIds.includes(g.id), g.color, g.name, () => toggle("groupIds", g.id), g.id))}</div>
           )}
         </div>
         <div>

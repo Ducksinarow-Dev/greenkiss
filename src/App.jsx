@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav, setTaskCreator, setCallbackStarter, chatOpenDM } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav, setTaskCreator, setCallbackStarter, chatOpenDM, refreshPresence } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -102,6 +102,17 @@ function App() {
       .catch(() => {});
     tick();
     const t = setInterval(tick, 12000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+
+  // Presence poll (#49) — refresh the cached online/offline map every 30s so
+  // presence dots (chat + admin) stay live. Cheap; runs for any signed-in user.
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const tick = () => { if (alive) refreshPresence(); };
+    tick();
+    const t = setInterval(tick, 30000);
     return () => { alive = false; clearInterval(t); };
   }, [user]);
 

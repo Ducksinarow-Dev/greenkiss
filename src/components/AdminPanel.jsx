@@ -9,7 +9,7 @@ import {
   exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
   releaseList, releaseRollback,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, SectionHeader, Avatar, lbl, PresenceDot } from './shared.jsx';
 
 /* ─── USERS ──────────────────────────────────────────────────────── */
 function UserRow({ u, isSelf, onUpdate, onDelete, onChanged }) {
@@ -107,7 +107,10 @@ function UserRow({ u, isSelf, onUpdate, onDelete, onChanged }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10 }}
       onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-      <Avatar name={u.name} size={28} />
+      <span style={{ position: "relative", display: "flex", flexShrink: 0 }}>
+        <Avatar name={u.name} size={28} />
+        <PresenceDot userId={u.id} size={10} style={{ position: "absolute", bottom: 0, right: 0 }} />
+      </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>{u.name}{isSelf && <span style={{ fontSize: 12, color: C.mut, fontWeight: 500 }}> (you)</span>}</div>
         <div style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>

@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   C, FONT_CAPS, isAdmin, getUsers, inp,
   chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, triggerSaved,
-  chatEditMessage, chatDeleteMessage, chatArchiveChannel, confirmDelete, linkifyMagnets,
+  chatEditMessage, chatDeleteMessage, chatArchiveChannel, confirmDelete, linkifyMagnets, isUserOnline,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl, MentionField, MentionText } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl, MentionField, MentionText, PresenceDot } from './shared.jsx';
 
 /* Staff chat (Phase 1). Two-pane: channel list + message pane. Public
    channels only for now (DMs, group DMs, private channels are Phase 2;
@@ -174,6 +174,9 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, em
     onNavigate && onNavigate(kind, id);
   };
   const [channels, setChannels] = useState([]);
+  // Collapsible list sections (#48), persisted per-browser.
+  const [collapsed, setCollapsed] = useState(() => { try { return JSON.parse(localStorage.getItem("gkChatCollapsed") || "{}"); } catch { return {}; } });
+  const toggleSection = (k) => setCollapsed(c => { const n = { ...c, [k]: !c[k] }; try { localStorage.setItem("gkChatCollapsed", JSON.stringify(n)); } catch { /* private mode */ } return n; });
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
@@ -281,6 +284,7 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, em
     return c.name || (others.map(userName).join(", ") || "Group");
   };
   const channelIcon = (c) => c.kind === "channel" ? (c.visibility === "private" ? "lock" : "tag") : (c.kind === "dm" ? "person" : "group");
+  const dmOtherId = (c) => c && c.kind === "dm" ? (c.memberIds || []).filter(id => id !== user.id)[0] : null;
   const chChannels = channels.filter(c => c.kind === "channel");
   const chDMs = channels.filter(c => c.kind === "dm" || c.kind === "group");
   // Act-from-item (#47): spin up a task prefilled from a message.
@@ -298,18 +302,30 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, em
       <button key={c.id} onClick={() => setActiveId(c.id)}
         style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 9, border: "none", cursor: "pointer", textAlign: "left", width: "100%", background: on ? C.mossSoft : "transparent", fontFamily: "inherit" }}
         onMouseEnter={e => { if (!on) e.currentTarget.style.background = C.s2; }} onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-        <Icon name={channelIcon(c)} size={16} style={{ color: on ? C.moss : C.faint, flexShrink: 0 }} />
+        <span style={{ position: "relative", display: "flex", flexShrink: 0 }}>
+          <Icon name={channelIcon(c)} size={16} style={{ color: on ? C.moss : C.faint }} />
+          {dmOtherId(c) && <PresenceDot userId={dmOtherId(c)} size={8} style={{ position: "absolute", bottom: -2, right: -3 }} />}
+        </span>
         <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: unread ? 800 : (on ? 700 : 500), color: on ? C.moss : C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{channelLabel(c)}</span>
         {unread > 0 && <span style={{ background: C.red, color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 99, padding: "1px 7px", minWidth: 18, textAlign: "center" }}>{unread > 99 ? "99+" : unread}</span>}
       </button>
     );
   };
-  const listHeader = (label, onAdd, addTitle) => (
-    <div style={{ display: "flex", alignItems: "center", padding: "10px 12px 4px" }}>
-      <div style={{ flex: 1, fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: FONT_CAPS }}>{label}</div>
-      {onAdd && <IconBtn icon="add" title={addTitle} onClick={onAdd} />}
-    </div>
-  );
+  const listHeader = (key, label, onAdd, addTitle, count) => {
+    const isCollapsed = !!collapsed[key];
+    return (
+      <div style={{ display: "flex", alignItems: "center", padding: "10px 6px 4px 4px" }}>
+        <button type="button" onClick={() => toggleSection(key)} title={isCollapsed ? "Expand" : "Collapse"}
+          style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 6, fontFamily: FONT_CAPS, textAlign: "left" }}
+          onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+          <Icon name={isCollapsed ? "chevron_right" : "expand_more"} size={16} style={{ color: C.faint, flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
+          {count != null && <span style={{ fontSize: 11, color: C.faint, fontWeight: 600 }}>{count}</span>}
+        </button>
+        {onAdd && <IconBtn icon="add" title={addTitle} onClick={onAdd} />}
+      </div>
+    );
+  };
 
   return (
     <div className="gk-fade-in" style={{ display: "flex", gap: embedded ? 10 : 16, height: embedded ? "100%" : "calc(100vh - 64px)", minHeight: 0 }}>
@@ -322,12 +338,12 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, em
           {loading && <div style={{ padding: 12, fontSize: 13, color: C.mut }}>Loading…</div>}
           {!loading && (
             <>
-              {listHeader("Channels", admin ? () => setModal("channel") : null, "New channel")}
-              {chChannels.length === 0 && <div style={{ padding: "4px 12px 8px", fontSize: 12.5, color: C.faint }}>{admin ? "Create a channel." : "No channels yet."}</div>}
-              {chChannels.map(ChannelRow)}
-              {listHeader("Direct Messages", () => setModal("message"), "New message")}
-              {chDMs.length === 0 && <div style={{ padding: "4px 12px 8px", fontSize: 12.5, color: C.faint }}>No direct messages yet.</div>}
-              {chDMs.map(ChannelRow)}
+              {listHeader("channels", "Channels", admin ? () => setModal("channel") : null, "New channel", chChannels.length)}
+              {!collapsed.channels && chChannels.length === 0 && <div style={{ padding: "4px 12px 8px", fontSize: 12.5, color: C.faint }}>{admin ? "Create a channel." : "No channels yet."}</div>}
+              {!collapsed.channels && chChannels.map(ChannelRow)}
+              {listHeader("dms", "Direct Messages", () => setModal("message"), "New message", chDMs.length)}
+              {!collapsed.dms && chDMs.length === 0 && <div style={{ padding: "4px 12px 8px", fontSize: 12.5, color: C.faint }}>No direct messages yet.</div>}
+              {!collapsed.dms && chDMs.map(ChannelRow)}
             </>
           )}
         </div>
@@ -344,6 +360,8 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, em
             <div style={{ padding: "13px 18px", borderBottom: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name={channelIcon(active)} size={18} style={{ color: C.moss }} />
               <div style={{ fontSize: 16, fontWeight: 800, color: C.txt }}>{channelLabel(active)}</div>
+              {dmOtherId(active) && <PresenceDot userId={dmOtherId(active)} size={9} />}
+              {dmOtherId(active) && <span style={{ fontSize: 12, color: C.mut }}>{isUserOnline(dmOtherId(active)) ? "Online" : "Offline"}</span>}
               {active.kind === "group" && <span style={{ fontSize: 12, color: C.mut }}>· {(active.memberIds || []).length} people</span>}
               <div style={{ flex: 1 }} />
               {(active.kind !== "channel" || admin) && <IconBtn icon="archive" title="Archive conversation" onClick={doArchive} />}
