@@ -6,6 +6,7 @@ import {
   fetchShopifySales, currentSalesTargets,
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
   announcementsForUser, newsSectionMeta, isAssignedTo,
+  openCallbacksForUser, hasAckedCallback, getProducts, waitlistForProduct,
 } from '../globals.js';
 import { Icon, IconBtn, Pill } from './shared.jsx';
 import { Speedometer } from './StoreUpdate.jsx';
@@ -238,7 +239,38 @@ function NewsStrip({ user, onOpen }) {
   );
 }
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements }) {
+/* Callbacks strip (Batch 4) — open callbacks aimed at this user (named or via
+   a group). Rose-flagged until acknowledged. Clicking opens the callback to
+   work its waitlist. */
+function CallbacksStrip({ user, onOpen }) {
+  const callbacks = openCallbacksForUser(user);
+  if (callbacks.length === 0) return null;
+  const products = getProducts();
+  const productName = (id) => products.find(p => p.id === id)?.name || "A product";
+  return (
+    <div style={{ marginBottom: 22, display: "flex", flexDirection: "column", gap: 8 }}>
+      {callbacks.map(c => {
+        const acked = hasAckedCallback(c.id, user.id);
+        const remaining = waitlistForProduct(c.productId).filter(e => !e.fulfilled).length;
+        return (
+          <div key={c.id} onClick={() => onOpen && onOpen(c.id)} role="button" tabIndex={0}
+            onKeyDown={e => { if (e.key === "Enter") onOpen && onOpen(c.id); }}
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 11, padding: "12px 15px", borderRadius: 12, background: C.sur, border: `1.5px solid ${acked ? C.bdr : C.clay}` }}>
+            <Icon name="inventory_2" size={20} style={{ color: C.clay, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 700, color: C.txt }}>Stock in — call your waitlist</div>
+              <div style={{ fontSize: 12.5, color: C.mut }}>{productName(c.productId)} · {remaining} to call</div>
+            </div>
+            {!acked && <span style={{ fontSize: 11, fontWeight: 700, color: C.clay, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>New</span>}
+            <Icon name="chevron_right" size={20} style={{ color: C.faint }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -358,6 +390,8 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
         <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>{greeting}, {user.name}</div>
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
+
+      <CallbacksStrip user={user} onOpen={onOpenCallback} />
 
       <NewsStrip user={user} onOpen={onOpenAnnouncements} />
 

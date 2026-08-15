@@ -13,9 +13,11 @@ import ContentCalendar from './components/ContentCalendar.jsx';
 import StoreUpdate from './components/StoreUpdate.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import Announcements from './components/Announcements.jsx';
+import Waitlist from './components/Waitlist.jsx';
 import { ConfirmDialog, SavedToast, OfflineIndicator } from './components/ConfirmDialog.jsx';
 import LoginReminders from './components/LoginReminders.jsx';
 import AnnouncementDelivery from './components/AnnouncementDelivery.jsx';
+import CallbackDelivery from './components/CallbackDelivery.jsx';
 
 function BootScreen() {
   return (
@@ -36,6 +38,7 @@ function App() {
   const [campaignFocus, setCampaignFocus] = useState(null); // campaign id (dashboard → calendar filter)
   const [playbookFocus, setPlaybookFocus] = useState(null); // playbook section id
   const [taskFocus, setTaskFocus] = useState(null); // task id (magnet deep-link)
+  const [callbackFocus, setCallbackFocus] = useState(null); // callback id (toast/dashboard deep-link)
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
   // in place — it doesn't trigger React re-renders on its own. themeVersion is
@@ -113,6 +116,7 @@ function App() {
   const goToCampaign = (id) => { setCampaignFocus(id); setSection("calendar"); };
   const goToPlaybookSection = (id) => { setPlaybookFocus(id); setSection("playbook"); };
   const goToTask = (id) => { setTaskFocus(id); setSection("tasks"); };
+  const goToCallback = (id) => { setCallbackFocus(id); setSection("waitlist"); };
   // Shared by both SOPLibrary mounts (library/forms) as onNavigateOut — a
   // mention/magnet pointing at the other kind, a Playbook section, or a task.
   const onNavigateOut = (kind, id, blockId) => {
@@ -125,7 +129,7 @@ function App() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
       <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
-        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} />}
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} onOpenCallback={goToCallback} />}
         {section === "store" && <StoreUpdate user={user} />}
         {section === "library" && (
           <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />
@@ -142,6 +146,7 @@ function App() {
         {section === "projects" && <Projects user={user} onOpenSop={goToSop} focusProjectId={projectFocus} onClearFocus={() => setProjectFocus(null)} />}
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "announcements" && <Announcements user={user} />}
+        {section === "waitlist" && <Waitlist user={user} focusCallbackId={callbackFocus} onClearFocus={() => setCallbackFocus(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />
@@ -149,6 +154,7 @@ function App() {
       <OfflineIndicator />
       <LoginReminders user={user} onOpenTasks={() => setSection("tasks")} onOpenTask={goToTask} />
       <AnnouncementDelivery user={user} onOpen={() => setSection("announcements")} />
+      <CallbackDelivery user={user} onOpen={goToCallback} />
     </div>
   );
 }

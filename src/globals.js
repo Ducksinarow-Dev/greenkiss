@@ -565,6 +565,7 @@ const NAV_ITEMS = [
   { divider: true },
   { key: "playbook", label: "Operations Playbook", icon: "import_contacts" },
   { key: "announcements", label: "Announcements", icon: "campaign" },
+  { key: "waitlist", label: "Waitlist", icon: "support_agent" },
 ];
 const NAV_SECTIONS = NAV_ITEMS.filter(it => !it.divider); // toggleable {key,label,icon}
 const DEFAULT_NAV_ACCESS = ["imagerepo"];
@@ -753,6 +754,89 @@ function ackAnnouncement(id, userId) {
     return;
   }
   db.setSync("announcementAcks", next);
+}
+
+/* ─── WAITLIST + CALLBACKS (Batch 4) ─────────────────────────────────
+   Clients waitlist for out-of-stock products. When stock lands, ops logs a
+   callback that targets sales staff and/or a group; those people get a
+   must-acknowledge toast + a dashboard strip, then work the waitlist for
+   that product (call each client, mark fulfilled) and close the callback.
+   Generic kv docs; callbackAcks merges server-side like announcement acks. */
+// Clients ------------------------------------------------------------------
+const getClients = () => db.getSync("clients") || [];
+const saveClients = (l) => db.setSync("clients", l);
+const addClient = (c) => {
+  const rec = { id: uid(), name: (c.name || "").trim(), phone: c.phone || "", email: c.email || "", notes: c.notes || "", createdAt: nowISO() };
+  saveClients([...getClients(), rec]);
+  return rec;
+};
+const updateClient = (id, ch) => saveClients(getClients().map(c => c.id === id ? { ...c, ...ch } : c));
+const deleteClient = (id) => saveClients(getClients().filter(c => c.id !== id));
+// Products (manual, each with a list of links) -----------------------------
+const getProducts = () => db.getSync("products") || [];
+const saveProducts = (l) => db.setSync("products", l);
+const addProduct = (p) => {
+  const rec = { id: uid(), name: (p.name || "").trim(), collection: p.collection || "", links: p.links || [], createdAt: nowISO() };
+  saveProducts([...getProducts(), rec]);
+  return rec;
+};
+const updateProduct = (id, ch) => saveProducts(getProducts().map(p => p.id === id ? { ...p, ...ch } : p));
+const deleteProduct = (id) => saveProducts(getProducts().filter(p => p.id !== id));
+// Waitlist entries (client wants product) ----------------------------------
+const getWaitlist = () => db.getSync("waitlist") || [];
+const saveWaitlist = (l) => db.setSync("waitlist", l);
+const addWaitlistEntry = (e) => {
+  const rec = { id: uid(), clientId: e.clientId, productId: e.productId, note: e.note || "", fulfilled: false, fulfilledAt: null, createdAt: nowISO() };
+  saveWaitlist([rec, ...getWaitlist()]);
+  return rec;
+};
+const updateWaitlistEntry = (id, ch) => saveWaitlist(getWaitlist().map(e => e.id === id ? { ...e, ...ch } : e));
+const deleteWaitlistEntry = (id) => saveWaitlist(getWaitlist().filter(e => e.id !== id));
+const waitlistForProduct = (productId) => getWaitlist().filter(e => e.productId === productId);
+// Callbacks ----------------------------------------------------------------
+const getCallbacks = () => db.getSync("callbacks") || [];
+const saveCallbacks = (l) => db.setSync("callbacks", l);
+const defCallback = (user) => ({
+  id: uid(), productId: "", assigneeIds: [], groupIds: [], status: "open", note: "",
+  createdBy: user?.id || "", createdByName: user?.name || "", createdAt: nowISO(), doneAt: null,
+});
+const addCallback = (c) => {
+  const rec = { ...c, id: c.id || uid(), createdAt: c.createdAt || nowISO() };
+  saveCallbacks([rec, ...getCallbacks()]);
+  return rec;
+};
+const updateCallback = (id, ch) => saveCallbacks(getCallbacks().map(c => c.id === id ? { ...c, ...ch } : c));
+const deleteCallback = (id) => {
+  saveCallbacks(getCallbacks().filter(c => c.id !== id));
+  const a = getCallbackAcks();
+  if (a[id]) { const n = { ...a }; delete n[id]; db.setSync("callbackAcks", n); }
+};
+/** Does this callback target the given user (named assignee or via a group)? */
+const callbackTargetsUser = (cb, user) => {
+  if (!user) return false;
+  if ((cb.assigneeIds || []).includes(user.id)) return true;
+  const mine = new Set(getUserGroups(user.id));
+  return (cb.groupIds || []).some(g => mine.has(g));
+};
+const openCallbacksForUser = (user) => getCallbacks().filter(c => c.status === "open" && callbackTargetsUser(c, user));
+// Callback acknowledgements (merged server-side, same as announcement acks)-
+const getCallbackAcks = () => db.getSync("callbackAcks") || {};
+const hasAckedCallback = (id, userId) => !!(getCallbackAcks()[id] || {})[userId];
+function ackCallback(id, userId) {
+  const at = nowISO();
+  const acks = getCallbackAcks();
+  const forC = { ...(acks[id] || {}) };
+  forC[userId] = { at };
+  const next = { ...acks, [id]: forC };
+  if (REMOTE_MODE) {
+    _cache.set("callbackAcks", next);
+    apiCall("callback_ack_save", { method: "POST", body: { callbackId: id, userId, at } }).then(res => {
+      if (res && res.acks) _cache.set("callbackAcks", res.acks);
+      _setOffline(false);
+    }).catch(() => _setOffline(true));
+    return;
+  }
+  db.setSync("callbackAcks", next);
 }
 
 /* ─── SEED DATA (dev mode only — remote mode is seeded once via schema.sql) ─
@@ -2523,6 +2607,7 @@ const EXPORT_KEYS = [
   "contacts", "instances", "playbook", "playbookRevs", "tags", "alerts",
   "taskTemplates", "imagerepo", "toolsPrompts", "navAccess", "salesTargets",
   "groups", "userGroups", "announcements", "announcementAcks",
+  "clients", "products", "waitlist", "callbacks", "callbackAcks",
 ];
 /** Everything the app knows about, as one importable JSON object. */
 function exportAllData() {
@@ -2554,6 +2639,12 @@ export {
   getAnnouncements, saveAnnouncements, defAnnouncement, addAnnouncement, updateAnnouncement, deleteAnnouncement,
   announcementIsLive, announcementTargetsUser, announcementsForUser, announcementRecipientIds,
   getAnnouncementAcks, hasAckedAnnouncement, announcementAckList, ackAnnouncement,
+  getClients, saveClients, addClient, updateClient, deleteClient,
+  getProducts, saveProducts, addProduct, updateProduct, deleteProduct,
+  getWaitlist, saveWaitlist, addWaitlistEntry, updateWaitlistEntry, deleteWaitlistEntry, waitlistForProduct,
+  getCallbacks, saveCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
+  callbackTargetsUser, openCallbacksForUser,
+  getCallbackAcks, hasAckedCallback, ackCallback,
   seedIfEmpty,
   getCategories, saveCategories, addCategory, updateCategory, deleteCategory,
   getTags, saveTags, addTag,
