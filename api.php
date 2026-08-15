@@ -467,6 +467,139 @@ switch ($action) {
         respond(200, ['ok' => true, 'acks' => $acks]);
         break;
 
+    // ─── Staff chat (Phase 1) ─────────────────────────────────────────
+    case 'chat_bootstrap':
+        // Channels the user can see, with unread counts + last-message preview.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $me = $user['id'];
+        $stmt = $pdo->prepare(
+            "SELECT c.* FROM chat_channels c
+             WHERE c.archived = 0 AND (
+               c.visibility = 'public'
+               OR EXISTS (SELECT 1 FROM chat_members m WHERE m.channel_id = c.id AND m.user_id = ?)
+             ) ORDER BY c.kind, c.name");
+        $stmt->execute([$me]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $c) {
+            $lst = $pdo->prepare("SELECT id, user_id, body, created_at FROM chat_messages WHERE channel_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1");
+            $lst->execute([$c['id']]);
+            $last = $lst->fetch();
+            $lastId = $last ? (int)$last['id'] : 0;
+            $mst = $pdo->prepare("SELECT last_read_msg_id FROM chat_members WHERE channel_id = ? AND user_id = ? LIMIT 1");
+            $mst->execute([$c['id'], $me]);
+            $mrow = $mst->fetch();
+            if (!$mrow) {
+                // First sight of a public channel → join caught up so old
+                // history doesn't all read as unread.
+                $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?)")->execute([$c['id'], $me, $lastId]);
+                $lastRead = $lastId;
+            } else {
+                $lastRead = (int)$mrow['last_read_msg_id'];
+            }
+            $ust = $pdo->prepare("SELECT COUNT(*) FROM chat_messages WHERE channel_id = ? AND id > ? AND user_id <> ? AND deleted_at IS NULL");
+            $ust->execute([$c['id'], $lastRead, $me]);
+            $mem = $pdo->prepare("SELECT user_id FROM chat_members WHERE channel_id = ?");
+            $mem->execute([$c['id']]);
+            $out[] = [
+                'id' => $c['id'], 'name' => $c['name'], 'kind' => $c['kind'], 'visibility' => $c['visibility'],
+                'createdBy' => $c['created_by'], 'lastMsgId' => $lastId, 'unread' => (int)$ust->fetchColumn(),
+                'memberIds' => array_column($mem->fetchAll(), 'user_id'),
+                'lastMessage' => $last ? ['userId' => $last['user_id'], 'body' => $last['body'], 'createdAt' => $last['created_at']] : null,
+            ];
+        }
+        respond(200, ['channels' => $out]);
+        break;
+
+    case 'chat_channel_create':
+        // Admin-managed channels (Phase 1). dm/group creation lands in Phase 2.
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $kind = in_array(($body['kind'] ?? 'channel'), ['channel', 'dm', 'group'], true) ? $body['kind'] : 'channel';
+        if ($kind === 'channel') requireRole($user, ['admin']);
+        $vis = ($body['visibility'] ?? 'public') === 'private' ? 'private' : 'public';
+        $name = trim($body['name'] ?? '');
+        if ($kind === 'channel' && $name === '') respond(400, ['error' => 'Channel name required']);
+        $id = 'ch_' . bin2hex(random_bytes(5));
+        $pdo->prepare("INSERT INTO chat_channels (id, name, kind, visibility, created_by) VALUES (?, ?, ?, ?, ?)")
+            ->execute([$id, $name, $kind, $vis, $user['id']]);
+        $memberIds = is_array($body['memberIds'] ?? null) ? $body['memberIds'] : [];
+        foreach (array_unique(array_merge([$user['id']], $memberIds)) as $mid) {
+            $pdo->prepare("INSERT IGNORE INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, 0)")->execute([$id, (string)$mid]);
+        }
+        respond(200, ['id' => $id]);
+        break;
+
+    case 'chat_messages':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $channelId = (string)($_GET['channelId'] ?? ($body['channelId'] ?? ''));
+        if (!chatCanSee($pdo, $channelId, $user['id'])) respond(403, ['error' => 'No access to this channel']);
+        $beforeId = (int)($_GET['beforeId'] ?? 0);
+        if ($beforeId > 0) {
+            $stmt = $pdo->prepare("SELECT id, user_id, body, created_at, edited_at, deleted_at FROM chat_messages WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT 50");
+            $stmt->execute([$channelId, $beforeId]);
+        } else {
+            $stmt = $pdo->prepare("SELECT id, user_id, body, created_at, edited_at, deleted_at FROM chat_messages WHERE channel_id = ? ORDER BY id DESC LIMIT 50");
+            $stmt->execute([$channelId]);
+        }
+        respond(200, ['messages' => array_reverse($stmt->fetchAll())]);
+        break;
+
+    case 'chat_send':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $channelId = (string)($body['channelId'] ?? '');
+        $text = trim((string)($body['body'] ?? ''));
+        if ($channelId === '' || $text === '') respond(400, ['error' => 'Missing channel or body']);
+        if (!chatCanSee($pdo, $channelId, $user['id'])) respond(403, ['error' => 'No access to this channel']);
+        if (mb_strlen($text) > 8000) $text = mb_substr($text, 0, 8000);
+        $pdo->prepare("INSERT INTO chat_messages (channel_id, user_id, body) VALUES (?, ?, ?)")->execute([$channelId, $user['id'], $text]);
+        $mid = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_read_msg_id = GREATEST(last_read_msg_id, VALUES(last_read_msg_id))")
+            ->execute([$channelId, $user['id'], $mid]);
+        respond(200, ['message' => ['id' => $mid, 'user_id' => $user['id'], 'body' => $text, 'created_at' => gmdate('Y-m-d H:i:s')]]);
+        break;
+
+    case 'chat_mark_read':
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $channelId = (string)($body['channelId'] ?? '');
+        if ($channelId === '') respond(400, ['error' => 'Missing channel']);
+        $upTo = (int)($body['upToMsgId'] ?? 0);
+        if ($upTo <= 0) { $s = $pdo->prepare("SELECT COALESCE(MAX(id),0) FROM chat_messages WHERE channel_id = ?"); $s->execute([$channelId]); $upTo = (int)$s->fetchColumn(); }
+        $pdo->prepare("INSERT INTO chat_members (channel_id, user_id, last_read_msg_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE last_read_msg_id = GREATEST(last_read_msg_id, VALUES(last_read_msg_id))")
+            ->execute([$channelId, $user['id'], $upTo]);
+        respond(200, ['ok' => true, 'lastRead' => $upTo]);
+        break;
+
+    case 'chat_poll':
+        // Cheap short-poll: per-channel unread + newest id, plus new messages
+        // for the currently-open channel (since a client cursor).
+        $user = requireAuth($pdo, $body);
+        ensureChatTables($pdo);
+        $me = $user['id'];
+        $stmt = $pdo->prepare(
+            "SELECT c.id,
+               (SELECT COALESCE(MAX(mm.id),0) FROM chat_messages mm WHERE mm.channel_id = c.id AND mm.deleted_at IS NULL) AS last_msg_id,
+               (SELECT COUNT(*) FROM chat_messages um WHERE um.channel_id = c.id AND um.user_id <> ? AND um.deleted_at IS NULL
+                  AND um.id > (SELECT COALESCE(m.last_read_msg_id,0) FROM chat_members m WHERE m.channel_id = c.id AND m.user_id = ?)) AS unread
+             FROM chat_channels c
+             WHERE c.archived = 0 AND (c.visibility = 'public' OR EXISTS (SELECT 1 FROM chat_members mx WHERE mx.channel_id = c.id AND mx.user_id = ?))");
+        $stmt->execute([$me, $me, $me]);
+        $channels = [];
+        foreach ($stmt->fetchAll() as $r) $channels[] = ['id' => $r['id'], 'lastMsgId' => (int)$r['last_msg_id'], 'unread' => (int)$r['unread']];
+        $newMessages = [];
+        $openChannel = (string)($_GET['openChannelId'] ?? '');
+        $sinceId = (int)($_GET['sinceId'] ?? 0);
+        if ($openChannel !== '' && chatCanSee($pdo, $openChannel, $me)) {
+            $ms = $pdo->prepare("SELECT id, user_id, body, created_at, edited_at, deleted_at FROM chat_messages WHERE channel_id = ? AND id > ? ORDER BY id ASC LIMIT 100");
+            $ms->execute([$openChannel, $sinceId]);
+            $newMessages = $ms->fetchAll();
+        }
+        respond(200, ['channels' => $channels, 'newMessages' => $newMessages]);
+        break;
+
     case 'revisions_list':
         requireAuth($pdo, $body);
         $sopId = $_GET['sop_id'] ?? '';
@@ -1017,6 +1150,45 @@ function ensureLoginSessionsTable($pdo) {
             INDEX idx_login_sessions_token (token)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
+}
+
+// Lazily create the chat tables (Phase 1) so a live DB picks up staff chat on
+// the next deploy — no manual import. Idempotent + static-guarded.
+function ensureChatTables($pdo) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    $pdo->exec("CREATE TABLE IF NOT EXISTS chat_channels (
+        id VARCHAR(16) NOT NULL PRIMARY KEY, name VARCHAR(120) NULL,
+        kind ENUM('channel','dm','group') NOT NULL DEFAULT 'channel',
+        visibility ENUM('public','private') NOT NULL DEFAULT 'public',
+        created_by VARCHAR(16) NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        archived TINYINT(1) NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS chat_members (
+        channel_id VARCHAR(16) NOT NULL, user_id VARCHAR(16) NOT NULL,
+        last_read_msg_id BIGINT NOT NULL DEFAULT 0, joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (channel_id, user_id), INDEX idx_chat_members_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS chat_messages (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY, channel_id VARCHAR(16) NOT NULL, user_id VARCHAR(16) NOT NULL,
+        body TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        edited_at DATETIME NULL, deleted_at DATETIME NULL, INDEX idx_chat_messages_channel (channel_id, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+// Can this user see the channel? Public channels are visible to all; others
+// require a chat_members row. Archived channels are hidden.
+function chatCanSee($pdo, $channelId, $userId) {
+    if ($channelId === '') return false;
+    $s = $pdo->prepare("SELECT visibility FROM chat_channels WHERE id = ? AND archived = 0 LIMIT 1");
+    $s->execute([$channelId]);
+    $c = $s->fetch();
+    if (!$c) return false;
+    if ($c['visibility'] === 'public') return true;
+    $m = $pdo->prepare("SELECT 1 FROM chat_members WHERE channel_id = ? AND user_id = ? LIMIT 1");
+    $m->execute([$channelId, $userId]);
+    return (bool)$m->fetch();
 }
 
 function kvGet($pdo, $key) {
