@@ -218,6 +218,17 @@ function Sidebar({ section, setSection, user, onLogout, onToggleTheme, chatUnrea
         <Icon name={collapsed ? "chevron_right" : "chevron_left"} size={18} />
       </button>
 
+      {/* System-wide search (#55) — also opens with Cmd/Ctrl+K anywhere. */}
+      <div style={{ padding: collapsed ? "0 8px 6px" : "0 12px 6px" }}>
+        <button onClick={() => window.dispatchEvent(new Event("gk:open-search"))} title="Search everything (⌘K)"
+          style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: collapsed ? "9px 0" : "9px 11px", justifyContent: collapsed ? "center" : "flex-start", borderRadius: 9, border: `1.5px solid ${C.bdr}`, background: C.bg, cursor: "pointer", color: C.mut, fontFamily: "inherit" }}
+          onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = C.bg}>
+          <Icon name="search" size={17} />
+          {!collapsed && <span style={{ flex: 1, textAlign: "left", fontSize: 13 }}>Search…</span>}
+          {!collapsed && <span style={{ fontSize: 10.5, color: C.faint, fontFamily: FONT_CAPS, border: `1px solid ${C.bdr}`, borderRadius: 5, padding: "1px 5px" }}>⌘K</span>}
+        </button>
+      </div>
+
       {/* Nav */}
       <nav style={{ padding: collapsed ? "8px 8px" : "8px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
         {visibleNav(user).map((it, i) => it.divider

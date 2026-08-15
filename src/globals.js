@@ -1865,6 +1865,37 @@ function getLinkSearchCandidates(query) {
   return out.slice(0, 12);
 }
 
+/* ─── SYSTEM-WIDE SEARCH (#55) ────────────────────────────────────────
+   One query fanned across every entity, returned as groups the command
+   palette renders. Each item carries {kind,id,label,sub[,blockId]} and is
+   navigated via the app-wide navigateItem() surface (extended in App to
+   cover project + imagerepo). Matching reuses the same substring rule as
+   the mention/link pickers; per-group caps keep the palette scannable. */
+function globalSearch(query, perGroup = 6) {
+  const q = (query || "").toLowerCase().trim();
+  if (!q) return [];
+  const m = (...fields) => fields.some(f => (f || "").toLowerCase().includes(q));
+  const groups = [];
+  const add = (label, icon, kind, items) => { if (items.length) groups.push({ label, icon, kind, items: items.slice(0, perGroup) }); };
+
+  const sops = getSOPs();
+  add("SOPs", "menu_book", "sop", sops.filter(s => s.kind !== "form" && m(s.title, s.code)).map(s => ({ kind: "sop", id: s.id, label: s.title || "Untitled", sub: s.code || "SOP" })));
+  add("Forms", "assignment", "form", sops.filter(s => s.kind === "form" && m(s.title, s.code)).map(s => ({ kind: "form", id: s.id, label: s.title || "Untitled", sub: s.code || "Form" })));
+  add("Tasks", "check_circle", "task", getTasks().filter(t => !t.archived && m(t.title)).map(t => ({ kind: "task", id: t.id, label: t.title || "Untitled task", sub: "Task" })));
+  add("Projects", "folder", "project", getProjects().filter(p => m(p.name, p.description)).map(p => ({ kind: "project", id: p.id, label: p.name || "Untitled project", sub: "Project" })));
+  add("Content", "photo_camera", "content", getContentItems().filter(c => m(c.title, c.body)).map(c => ({ kind: "content", id: c.id, label: c.title || "Untitled", sub: "Content" })));
+  add("Campaigns", "campaign", "campaign", getCampaigns().filter(c => m(c.name, c.description)).map(c => ({ kind: "campaign", id: c.id, label: c.name || "Untitled campaign", sub: "Campaign" })));
+  add("Clients", "person", "client", getClients().filter(c => m(c.name, c.email, c.phone)).map(c => ({ kind: "client", id: c.id, label: c.name || "Unnamed", sub: "Client" })));
+  add("Products", "inventory_2", "product", getProducts().filter(p => m(p.name, p.collection)).map(p => ({ kind: "product", id: p.id, label: p.name || "Untitled product", sub: p.collection || "Product" })));
+  add("Callbacks", "notifications_active", "callback", getCallbacks().map(cb => ({ cb, pn: getProducts().find(p => p.id === cb.productId)?.name || "Callback" })).filter(x => m(x.pn, x.cb.note)).map(x => ({ kind: "callback", id: x.cb.id, label: x.pn, sub: x.cb.status === "done" ? "Callback · closed" : "Callback" })));
+  const playbook = db.getSync("playbook") || { sections: [] };
+  add("Playbook", "auto_stories", "playbook", (playbook.sections || []).filter(s => m(s.title)).map(s => ({ kind: "playbook", id: s.id, label: s.title || "Untitled", sub: "Playbook" })));
+  const repo = getImageRepo();
+  add("Image Repository", "photo_library", "imagerepo", ((repo && repo.blocks) || []).filter(b => b.type !== "text" && m(b.text)).map(b => ({ kind: "imagerepo", id: b.id, label: b.text || "Brand", sub: "Image library" })));
+  add("Staff", "badge", "user", getUsers().filter(u => m(u.name)).map(u => ({ kind: "user", id: u.id, label: u.name, sub: "Open a DM" })));
+  return groups;
+}
+
 /* ─── RICH TEXT (R3 B3) ───────────────────────────────────────────────
    WYSIWYG text blocks store sanitized HTML in block.html alongside the
    synced plain block.text (innerText), so search/excerpts/taskFromSop
@@ -2897,7 +2928,7 @@ export {
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
   getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
-  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, setTaskCreator, createTaskFromItem, taskPrefillFromItem, setCallbackStarter, startCallbackForProduct, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
+  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, setTaskCreator, createTaskFromItem, taskPrefillFromItem, setCallbackStarter, startCallbackForProduct, getLinkSearchCandidates, globalSearch, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,

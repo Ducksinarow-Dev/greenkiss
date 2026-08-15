@@ -450,7 +450,7 @@ function ProjectDetail({ project, users, sops, allProjects, editable, currentUse
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>Tasks</div>
         <div style={{ display: "flex", background: C.s2, borderRadius: 8, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-          {[{ key: "board", label: "Board", icon: "view_kanban" }, { key: "timeline", label: "Timeline", icon: "calendar_view_week" }].map(v => (
+          {[{ key: "board", label: "Board", icon: "view_kanban" }, { key: "timeline", label: "Timeline", icon: "calendar_view_week" }, { key: "split", label: "Split", icon: "view_agenda" }].map(v => (
             <button key={v.key} onClick={() => setView(v.key)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 6, border: "none", cursor: "pointer", fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", background: taskView === v.key ? C.sur : "transparent", color: taskView === v.key ? C.moss : C.mut, boxShadow: taskView === v.key ? C.shadowSm : "none" }}>
               <Icon name={v.icon} size={15} />{v.label}
             </button>
@@ -468,6 +468,13 @@ function ProjectDetail({ project, users, sops, allProjects, editable, currentUse
           action={editable && <Btn onClick={openNewTask}><Icon name="add" size={17} />New Task</Btn>} />
       ) : taskView === "timeline" ? (
         <ProjectTimeline project={project} tasks={tasks.filter(t => t.status !== "done")} users={users} onOpenTask={openEditTask} />
+      ) : taskView === "split" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <ProjectTimeline project={project} tasks={tasks.filter(t => t.status !== "done")} users={users} onOpenTask={openEditTask} />
+          <ProjectTasksBoard tasks={tasks} currentUser={currentUser} cardProps={cardProps}
+            onOpenTask={openEditTask} onQuickToggle={quickToggle} onPatchTask={patchTask} onAction={taskAction}
+            onRestatus={(id, status) => { const t = tasks.find(x => x.id === id); if (t && t.status !== status) patchTask(t, { status }); }} />
+        </div>
       ) : (
         <ProjectTasksBoard tasks={tasks} currentUser={currentUser} cardProps={cardProps}
           onOpenTask={openEditTask} onQuickToggle={quickToggle} onPatchTask={patchTask} onAction={taskAction}

@@ -21,6 +21,7 @@ import AnnouncementDelivery from './components/AnnouncementDelivery.jsx';
 import CallbackDelivery from './components/CallbackDelivery.jsx';
 import ChatDelivery from './components/ChatDelivery.jsx';
 import ChatDock from './components/ChatDock.jsx';
+import GlobalSearch from './components/GlobalSearch.jsx';
 
 function BootScreen() {
   return (
@@ -128,6 +129,8 @@ function App() {
       else if (kind === "campaign") { setCampaignFocus(id); setSection("calendar"); }
       else if (kind === "callback") { setCallbackFocus(id); setSection("waitlist"); }
       else if (kind === "product" || kind === "client") setSection("waitlist");
+      else if (kind === "project") { setProjectFocus(id); setSection("projects"); }
+      else if (kind === "imagerepo") setSection("imagerepo");
       else if (kind === "user") { chatOpenDM(id).then(cid => { setChatFocus(cid); setSection("chat"); }).catch(() => setSection("chat")); }
     });
     // #47: let any item view create a task / start a callback via the app surface.
@@ -211,6 +214,7 @@ function App() {
       <CallbackDelivery user={user} onOpen={goToCallback} />
       <ChatDelivery onOpen={goToChat} />
       {canView("chat") && section !== "chat" && <ChatDock user={user} chatUnread={chatUnread} onNavigate={onNavigateOut} onCreateTask={createTaskFrom} />}
+      <GlobalSearch />
     </div>
   );
 }
