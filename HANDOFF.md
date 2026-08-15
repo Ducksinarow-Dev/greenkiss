@@ -6,7 +6,7 @@ Snapshot for a new chat picking up work on this repo. Pair with `BACKLOG.md`, `D
 The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content calendar, image repository, announcements, waitlist/callbacks, and staff chat. Replaces Notion + scattered tools.
 - **Repo:** `Ducksinarow-Dev/greenkiss` (cloned at `/Users/super-dad/Projects/GK Hub/greenkiss`)
 - **Production:** https://hub.thegreenkiss.com · **Old tool being replaced:** https://team.thegreenkiss.com
-- **Latest release:** `v0.1.37` (on the `release` branch)
+- **Latest release:** `v0.1.38` (on the `release` branch)
 
 ## Stack & architecture
 - **Frontend:** React 18 + Vite, no router — `src/App.jsx` switches "sections" (nav keys). Components in `src/components/`. All shared state/data + helpers live in `src/globals.js` (~2.9k lines). Shared UI kit in `src/components/shared.jsx`.
@@ -34,12 +34,17 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **Track X (needs external setup):** PWA + Web Push (biggest buildable win; iOS needs "Add to Home Screen"); GBP posting API (needs Google Cloud OAuth — see `GBP_PUSH.md`); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.
 
-## Shipped Aug 2026 (this session — on `release` as v0.1.37; awaits the Update Now click)
+## Shipped Aug 2026 (this session — on `release` as v0.1.38; awaits the Update Now click)
 - **#47 create/act-from-item (complete):** "Create task from this" on products/clients/content/campaigns/callbacks + a task-overflow row (chat already had it); "Start callback" from a product; link-popover search extended to the new kinds. App-wide surfaces `createTaskFromItem`/`startCallbackForProduct` + `taskPrefillFromItem` in globals, registered in App alongside `setMagnetNav`.
 - **Magnets on task tiles + paste bug:** tiles render title/description mentions as clickable pills + a copy-magnet button; pasting a raw `gk:` code auto-converts to a mention token (`onMagnetPaste`), and bare codes resolve to pills everywhere via `linkifyMagnets`. MentionText pills now `stopPropagation`. Task description is now a `MentionField` (gains `@`-mention).
 - **#44 floating Save/Done:** sticky modal footers (Task/Campaign/Callback) + a Done button in Image Repository's sticky edit toolbar.
 - **#45 waitlist email/phone:** captured in the add form, written back to the client record, shown on rows.
 - **#46 chat bubble:** `ChatDock.jsx` launcher + docked `<Chat embedded />` panel, full-screen on mobile; nav section retained; hidden while on the chat section.
+- **#48 collapsible chat headers** (persisted `gkChatCollapsed`).
+- **#49 presence dots** (chat DMs + admin): api.php `presence` action, `refreshPresence`/`isUserOnline` (5-min window) + `subscribePresence`, 30s poll in App. Dev derives from the login-history mirror.
+- **#50 Image Repository Letter Finder in edit mode** — shared `LetterFinder` filters the flat edit list to one letter.
+- **#52 Content Calendar "Add" menu** (Content / Campaign / Report) replacing "New Content".
+- **#53 Notion-style per-project views:** Board (drag Kanban) | Timeline (Gantt) toggle in `ProjectDetail`; tasks gained `startDate` + `onCalendar`, projects gained `includeTasksOnCalendar` (`taskOnCalendar()` = either); calendar-flagged tasks render on the Content Calendar + ICS feed. **NOTE for a follow-up:** #51 (saved dynamic-range reports) is still backlog.
 
 ## Post-deploy TODOs on the production DB (seed only applies to fresh DBs)
 - Add **Jessica & Liz** via Admin Panel → Users (or the `INSERT`s in `schema.sql`).
