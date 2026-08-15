@@ -6,9 +6,9 @@ import {
   getAnnouncements, defAnnouncement, addAnnouncement, updateAnnouncement, deleteAnnouncement,
   announcementIsLive, announcementTargetsUser, announcementRecipientIds,
   hasAckedAnnouncement, announcementAckList, ackAnnouncement,
-  confirmDelete, triggerSaved,
+  confirmDelete, triggerSaved, linkifyMagnets,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText } from './shared.jsx';
 
 /* Announcements + Current News (Batch 2). One page, two kinds: active
    announcements (toast / full-screen, acknowledge-tracked) and passive news
@@ -232,7 +232,7 @@ function AnnouncementCard({ a, user, editor, onEdit, onDelete, onChange }) {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}>{a.title}</div>
-          {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{a.body}</div>}
+          {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}><MentionText text={linkifyMagnets(a.body)} /></div>}
         </div>
         {editor && (
           <div style={{ display: "flex", flexShrink: 0 }}>
@@ -271,7 +271,7 @@ function NewsCard({ a, editor, onEdit, onDelete }) {
             {!live && <Pill color={C.faint}>Expired</Pill>}
           </div>
           <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}>{a.title}</div>
-          {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{a.body}</div>}
+          {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}><MentionText text={linkifyMagnets(a.body)} /></div>}
           {a.expiresAt && <div style={{ fontSize: 12, color: C.faint, marginTop: 8 }}>Expires {fmtDate(a.expiresAt)}</div>}
         </div>
         {editor && (
