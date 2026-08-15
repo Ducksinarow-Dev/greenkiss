@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   C, FONT_CAPS, isAdmin, getUsers, inp,
   chatBootstrap, chatChannelCreate, chatOpenDM, chatFetchMessages, chatSend, chatMarkRead, chatPoll, triggerSaved,
-  chatEditMessage, chatDeleteMessage, chatArchiveChannel, confirmDelete,
+  chatEditMessage, chatDeleteMessage, chatArchiveChannel, confirmDelete, linkifyMagnets,
 } from '../globals.js';
 import { Icon, Btn, OBtn, IconBtn, Avatar, EmptyState, lbl, MentionField, MentionText } from './shared.jsx';
 
@@ -147,7 +147,7 @@ function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete })
           </div>
         ) : (
           <div style={{ fontSize: 14, color: deleted ? C.faint : C.txt2, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", fontStyle: deleted ? "italic" : "normal" }}>
-            {deleted ? "Message deleted" : <MentionText text={m.body} onNavigate={onMention} />}
+            {deleted ? "Message deleted" : <MentionText text={linkifyMagnets(m.body)} onNavigate={onMention} />}
             {edited && !deleted && <span style={{ fontSize: 11, color: C.faint, marginLeft: 6 }}>(edited)</span>}
           </div>
         )}

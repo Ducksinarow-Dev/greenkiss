@@ -1697,6 +1697,18 @@ function parseMagnet(url) {
   return m ? { kind: m[1], id: m[2], blockId: m[3] || "" } : null;
 }
 const magnetFor = (kind, id, blockId) => `gk:${kind}:${id}${blockId ? ":" + blockId : ""}`;
+/** Turn raw gk: magnet URLs in free text into resolved @mention tokens, so a
+ * pasted link renders as a human-readable pill (e.g. "gk:task:h58z7" → the
+ * task's title) instead of a cryptic id. Used when rendering chat messages. */
+function linkifyMagnets(text) {
+  return (text || "").replace(/gk:(sop|task|playbook):([\w-]+)(?::[\w-]+)?/g, (_whole, kind, id) => {
+    let label = "";
+    if (kind === "task") label = getTasks().find(t => t.id === id)?.title || "Task";
+    else if (kind === "sop") label = getSOP(id)?.title || "SOP";
+    else if (kind === "playbook") label = ((db.getSync("playbook") || {}).sections || []).find(s => s.id === id)?.title || "Playbook";
+    return `@[${(label || "link").replace(/[[\]]/g, "")}](${kind}:${id})`;
+  });
+}
 /** Copies a magnet link to the clipboard and toasts. */
 function copyMagnet(kind, id, blockId) {
   const link = magnetFor(kind, id, blockId);
@@ -2781,7 +2793,7 @@ export {
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
   getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
-  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
+  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,

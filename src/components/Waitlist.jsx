@@ -19,29 +19,59 @@ import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl,
 const clientName = (clients, id) => clients.find(c => c.id === id)?.name || "Unknown client";
 const productName = (products, id) => products.find(p => p.id === id)?.name || "Unknown product";
 
-/* ─── small reselect-or-add picker ─────────────────────────────────── */
-function PickerAdd({ label, options, value, onChange, onCreate, placeholder }) {
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
-  const create = () => { if (!name.trim()) return; const rec = onCreate(name.trim()); onChange(rec.id); setName(""); setAdding(false); };
-  return (
-    <div>
-      <label style={lbl()}>{label}</label>
-      {adding ? (
-        <div style={{ display: "flex", gap: 6 }}>
-          <input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder={placeholder}
-            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); create(); } }}
-            style={inp({ fontSize: 14, padding: "8px 11px" })} />
-          <IconBtn icon="check" title="Create" onClick={create} style={{ color: C.moss }} />
-          <IconBtn icon="close" title="Cancel" onClick={() => { setAdding(false); setName(""); }} />
+/* ─── type-ahead picker: search existing OR create new inline ──────────
+   Start typing → matching records autocomplete; if there's no match you can
+   create one right there (which also adds it to the Clients & Products
+   repository). `subFor(option)` optionally renders a dim sub-label (e.g. a
+   product's waiting count). */
+function TypeaheadAdd({ label, options, value, onChange, onCreate, placeholder, subFor }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = options.find(o => o.id === value);
+  const q = query.trim().toLowerCase();
+  const matches = (q ? options.filter(o => (o.name || "").toLowerCase().includes(q)) : options).slice(0, 6);
+  const exact = options.find(o => (o.name || "").trim().toLowerCase() === q);
+  const pick = (id) => { onChange(id); setQuery(""); setOpen(false); };
+  const create = () => { const name = query.trim(); if (!name) return; const rec = onCreate(name); pick(rec.id); };
+
+  if (selected) {
+    return (
+      <div>
+        <label style={lbl()}>{label}</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 11px", border: `1.5px solid ${C.bdr}`, borderRadius: 9, background: C.inset }}>
+          <Avatar name={selected.name} size={22} />
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.name}</span>
+          <IconBtn icon="close" title="Change" onClick={() => onChange("")} />
         </div>
-      ) : (
-        <div style={{ display: "flex", gap: 6 }}>
-          <select value={value} onChange={e => onChange(e.target.value)} style={inp()}>
-            <option value="">Select…</option>
-            {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-          <IconBtn icon="add" title={`New ${label.toLowerCase()}`} onClick={() => setAdding(true)} />
+      </div>
+    );
+  }
+  return (
+    <div style={{ position: "relative" }}>
+      <label style={lbl()}>{label}</label>
+      <input value={query} onChange={e => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder={placeholder} style={inp()} />
+      {open && (matches.length > 0 || (q && !exact)) && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 30, marginTop: 4, background: C.sur, border: `1.5px solid ${C.bdr2}`, borderRadius: 10, boxShadow: C.shadowMd, maxHeight: 240, overflowY: "auto", padding: 6 }}>
+          {matches.map(o => {
+            const sub = subFor && subFor(o);
+            return (
+              <button key={o.id} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pick(o.id)}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 9px", background: "none", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <Avatar name={o.name} size={20} />
+                <span style={{ flex: 1, fontSize: 14, color: C.txt }}>{o.name}</span>
+                {sub && <span style={{ fontSize: 12, color: C.mut }}>{sub}</span>}
+              </button>
+            );
+          })}
+          {q && !exact && (
+            <button type="button" onMouseDown={e => e.preventDefault()} onClick={create}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 9px", background: "none", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left", color: C.moss, fontWeight: 600 }}
+              onMouseEnter={e => e.currentTarget.style.background = C.mossSoft} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <Icon name="add" size={16} />Create "{query.trim()}"
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -199,8 +229,8 @@ function WaitlistTab({ clients, products, waitlist, editor, bump }) {
       {adding && (
         <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: 16, marginBottom: 18, display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 200px" }}><PickerAdd label="Client" options={clients} value={clientId} onChange={setClientId} onCreate={name => addClient({ name })} placeholder="Client name…" /></div>
-            <div style={{ flex: "1 1 200px" }}><PickerAdd label="Product" options={products} value={productId} onChange={setProductId} onCreate={name => addProduct({ name })} placeholder="Product name…" /></div>
+            <div style={{ flex: "1 1 200px" }}><TypeaheadAdd label="Client" options={clients} value={clientId} onChange={setClientId} onCreate={name => addClient({ name })} placeholder="Type a client's name…" /></div>
+            <div style={{ flex: "1 1 200px" }}><TypeaheadAdd label="Product" options={products} value={productId} onChange={setProductId} onCreate={name => addProduct({ name })} placeholder="Type a product name…" /></div>
           </div>
           <div>
             <label style={lbl()}>Note (optional)</label>
@@ -274,13 +304,10 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved }) {
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>New callback</div>
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
-        <div>
-          <label style={lbl()}>Product that arrived</label>
-          <select value={draft.productId} onChange={e => set({ productId: e.target.value })} style={inp()}>
-            <option value="">Select a product…</option>
-            {products.map(p => { const n = waitlistForProduct(p.id).filter(e => !e.fulfilled).length; return <option key={p.id} value={p.id}>{p.name}{n ? ` — ${n} waiting` : ""}</option>; })}
-          </select>
-        </div>
+        <TypeaheadAdd label="Product that arrived" options={products} value={draft.productId}
+          onChange={id => set({ productId: id })} onCreate={name => addProduct({ name })}
+          placeholder="Type a product name…"
+          subFor={p => { const n = waitlistForProduct(p.id).filter(e => !e.fulfilled).length; return n ? `${n} waiting` : ""; }} />
         <div>
           <label style={lbl()}>Assign to staff</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{users.map(u => chip(draft.assigneeIds.includes(u.id), null, u.name, () => toggle("assigneeIds", u.id)))}</div>
