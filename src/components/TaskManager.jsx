@@ -7,9 +7,10 @@ import {
   TASK_TYPES, taskType, inp, assigneesOf,
   getContentItems, getCampaigns, contentChannelMeta, contentStatusMeta, contentTypeLabel,
   RECURRENCE_OPTIONS, completeTaskWithRecurrence, sortTasksForUser, dispatchTaskAction, copyMagnet, addAlert,
+  linkifyMagnets, parseMentionText, createTaskFromItem, taskPrefillFromItem,
   emptyTaskShape as emptyForm,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, MentionField, MentionText, onMagnetPaste } from './shared.jsx';
 
 /* ─────────────────────────────────────────────────────────────────────
    #8 — Compact month-grid date picker (no external library). Shared by
@@ -464,11 +465,11 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
           <div>
             <label style={labelStyle}>Title</label>
-            <input autoFocus value={form.title} onChange={e => set("title", e.target.value)} placeholder="Task title…" style={inp()} />
+            <input autoFocus value={form.title} onChange={e => set("title", e.target.value)} onPaste={e => onMagnetPaste(e, form.title, v => set("title", v))} placeholder="Task title…" style={inp()} />
           </div>
           <div>
             <label style={labelStyle}>Description</label>
-            <textarea rows={3} value={form.description} onChange={e => set("description", e.target.value)} placeholder="Optional details…" style={inp({ lineHeight: 1.55 })} />
+            <MentionField multiline rows={3} value={form.description || ""} onChange={v => set("description", v)} placeholder="Optional details… (@ to link a person, SOP, product…)" style={inp({ lineHeight: 1.55 })} />
           </div>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -581,7 +582,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, position: "sticky", bottom: 0, margin: "24px -28px -28px", padding: "16px 28px", background: C.sur, borderTop: `1.5px solid ${C.bdr}`, zIndex: 3 }}>
           {isSopRun && !isNew && form.status !== "done" && !completing && (
             <OBtn onClick={() => setCompleting(true)}><Icon name="task_alt" size={15} />Complete run</OBtn>
           )}
@@ -695,6 +696,7 @@ function TaskOverflowMenu({ task, users, projects, templates, allTasks, currentU
           <MenuRow icon={isFav ? "star" : "star_outline"} label={isFav ? "Unfavourite" : "Favourite"} onClick={() => act("favourite")} highlight={isFav} />
           <MenuRow icon="campaign" label="Alert staff member" onClick={() => setMode("alert")} chevron />
           <MenuRow icon="content_copy" label="Duplicate" onClick={() => act("duplicate")} />
+          <MenuRow icon="add_task" label="Create linked task" onClick={() => { createTaskFromItem(taskPrefillFromItem("task", task.id, task.title)); onClose(); }} />
           <MenuRow icon="call_merge" label="Merge into…" onClick={() => setMode("merge")} chevron />
           <MenuRow icon="drive_file_move" label="Add to project…" onClick={() => setMode("addToProject")} chevron />
           <MenuRow icon="dashboard_customize" label="Templates" onClick={() => setMode("templates")} chevron />
@@ -851,9 +853,10 @@ function TaskCard({ task, users, sops, projects, tags, templates, allTasks, curr
               <div style={{
                 fontSize: 15, fontWeight: isMilestone ? 800 : 700, color: isMilestone ? C.moss : C.txt,
                 textDecoration: isDone ? "line-through" : "none", opacity: isDone ? 0.6 : 1,
-              }}>{task.title}</div>
+              }}><MentionText text={linkifyMagnets(task.title || "")} /></div>
             )}
             {!renaming && task.description && <Icon name="subject" size={13} style={{ color: C.faint, flexShrink: 0 }} title="Has a description" />}
+            {!renaming && <IconBtn icon="my_location" size={13} title="Copy magnet link to this task" onClick={e => { e.stopPropagation(); copyMagnet("task", task.id); }} />}
           </div>
           {project && (
             <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: project.color || C.moss, marginTop: 3, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.04em", fontWeight: 600 }} title="Project">
@@ -876,6 +879,19 @@ function TaskCard({ task, users, sops, projects, tags, templates, allTasks, curr
               ))}
             </div>
           )}
+          {(() => {
+            // Surface any people/products/SOPs @mentioned or gk:-linked in the
+            // description as clickable pills, so relations show on the board (#47).
+            const segs = parseMentionText(linkifyMagnets(task.description || ""));
+            const mentions = segs.filter(s => s.mention).map(s => s.mention);
+            const seen = new Set();
+            const uniq = mentions.filter(m => { const k = m.kind + ":" + m.id; if (seen.has(k)) return false; seen.add(k); return true; });
+            return uniq.length ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }} onClick={e => e.stopPropagation()}>
+                {uniq.map(m => <MentionText key={m.kind + m.id} text={`@[${m.label}](${m.kind}:${m.id})`} />)}
+              </div>
+            ) : null;
+          })()}
         </div>
       </div>
 

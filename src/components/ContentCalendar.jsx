@@ -6,10 +6,11 @@ import {
   getUsers, confirmDelete, triggerSaved, canEdit, fmtDateShort, isOverdue,
   CAMPAIGN_STATUSES, campaignStatusMeta, CONTENT_CHANNELS, contentChannelMeta,
   CONTENT_STATUSES, contentStatusMeta, CONTENT_TYPES, contentTypeLabel, assigneesOf, GBP_CTA_TYPES, GBP_CATEGORIES,
-  campaignChannelCounts, processAndStoreImage,
+  campaignChannelCounts, processAndStoreImage, linkifyMagnets,
+  copyMagnet, createTaskFromItem, taskPrefillFromItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste } from './shared.jsx';
 
 /* Design intent: a shop's paper wall-planner, not a marketing ops tool —
    each day is a small cell you'd pin a sticky note to. The signature is
@@ -426,7 +427,7 @@ function GbpPreview({ form }) {
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
         {cat && <Pill color={C.moss}>{cat.label}</Pill>}
         <div style={{ fontSize: 13, color: C.txt, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-          {form.body || <span style={{ color: C.faint }}>Post text preview…</span>}
+          {form.body ? <MentionText text={linkifyMagnets(form.body)} /> : <span style={{ color: C.faint }}>Post text preview…</span>}
         </div>
         {cta && cta.key && (
           <span style={{ alignSelf: "flex-start", fontSize: 12, fontWeight: 700, color: C.moss, border: `1.5px solid ${C.moss}`, borderRadius: 99, padding: "5px 14px" }}>
@@ -572,6 +573,8 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
       }}>
         <div style={{ display: "flex", alignItems: "center", padding: "18px 22px", borderBottom: `1.5px solid ${C.bdr}`, flexShrink: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? "New Content Item" : "Edit Content Item"}</div>
+          {!isNew && <IconBtn icon="my_location" size={16} title="Copy magnet link to this item" onClick={() => copyMagnet("content", form.id)} />}
+          {!isNew && <IconBtn icon="add_task" size={16} title="Create a task from this item" onClick={() => createTaskFromItem(taskPrefillFromItem("content", form.id, form.title))} />}
           {!isNew && <IconBtn icon="delete" danger title="Delete" onClick={onDelete} />}
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
@@ -663,7 +666,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
 
           <div>
             <label style={lbl()}>Body</label>
-            <textarea rows={4} value={form.body || ""} onChange={e => set("body", e.target.value)} placeholder="Draft copy, description, or internal notes…" style={inp({ lineHeight: 1.55 })} />
+            <textarea rows={4} value={form.body || ""} onChange={e => set("body", e.target.value)} onPaste={e => onMagnetPaste(e, form.body || "", v => set("body", v))} placeholder="Draft copy, description, or internal notes…" style={inp({ lineHeight: 1.55 })} />
           </div>
 
           {/* Channel-specific fields */}
@@ -722,7 +725,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
               <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Instagram Details</div>
               <div>
                 <label style={lbl()}>Caption</label>
-                <textarea rows={3} value={form.caption || ""} onChange={e => set("caption", e.target.value)} placeholder="What actually posts…" style={inp({ lineHeight: 1.55 })} />
+                <textarea rows={3} value={form.caption || ""} onChange={e => set("caption", e.target.value)} onPaste={e => onMagnetPaste(e, form.caption || "", v => set("caption", v))} placeholder="What actually posts…" style={inp({ lineHeight: 1.55 })} />
               </div>
               <div>
                 <label style={lbl()}>Hashtags</label>
@@ -771,7 +774,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
 
           <div>
             <label style={lbl()}>Internal notes</label>
-            <textarea rows={2} value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Not published — team notes only…" style={inp({ lineHeight: 1.55 })} />
+            <textarea rows={2} value={form.notes || ""} onChange={e => set("notes", e.target.value)} onPaste={e => onMagnetPaste(e, form.notes || "", v => set("notes", v))} placeholder="Not published — team notes only…" style={inp({ lineHeight: 1.55 })} />
           </div>
         </div>
 
@@ -800,6 +803,8 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
       }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? "New Campaign" : "Edit Campaign"}</div>
+          {!isNew && <IconBtn icon="my_location" size={16} title="Copy magnet link to this campaign" onClick={() => copyMagnet("campaign", form.id)} />}
+          {!isNew && <IconBtn icon="add_task" size={16} title="Create a task from this campaign" onClick={() => createTaskFromItem(taskPrefillFromItem("campaign", form.id, form.name))} />}
           {!isNew && <IconBtn icon="delete" danger title="Delete campaign" onClick={onDelete} />}
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
@@ -810,7 +815,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
           </div>
           <div>
             <label style={lbl()}>Description</label>
-            <textarea rows={3} value={form.description} onChange={e => set("description", e.target.value)} placeholder="What's this campaign about?" style={inp({ lineHeight: 1.55 })} />
+            <textarea rows={3} value={form.description} onChange={e => set("description", e.target.value)} onPaste={e => onMagnetPaste(e, form.description || "", v => set("description", v))} placeholder="What's this campaign about?" style={inp({ lineHeight: 1.55 })} />
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 140px" }}>
@@ -857,7 +862,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, margin: "24px -28px -28px", padding: "16px 28px", background: C.sur, borderTop: `1.5px solid ${C.bdr}`, zIndex: 3 }}>
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={() => onSave(form)} disabled={!form.name.trim()}>Save</Btn>
         </div>
@@ -887,7 +892,7 @@ function CampaignCard({ campaign, items, users, editable, onOpen, onFilter }) {
           )}
         </div>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.txt }}>{campaign.name || "Untitled campaign"}</div>
-        {campaign.description && <div style={{ fontSize: 13, color: C.mut, lineHeight: 1.5 }}>{campaign.description}</div>}
+        {campaign.description && <div style={{ fontSize: 13, color: C.mut, lineHeight: 1.5 }}><MentionText text={linkifyMagnets(campaign.description)} /></div>}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {CONTENT_CHANNELS.map(ch => counts[ch.key] ? (
             <span key={ch.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: C.txt2, background: C.s2, borderRadius: 99, padding: "3px 9px" }}>

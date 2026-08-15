@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav, chatOpenDM } from './globals.js';
+import { C, getTheme, setTheme, getCurrentUser, clearCurrentUser, isAdmin, REMOTE_MODE, isRemoteWarm, remoteBootstrap, refreshCache, getSOP, sectionsForUser, chatPoll, setMagnetNav, setTaskCreator, setCallbackStarter, chatOpenDM } from './globals.js';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import MyDashboard from './components/MyDashboard.jsx';
@@ -20,6 +20,7 @@ import LoginReminders from './components/LoginReminders.jsx';
 import AnnouncementDelivery from './components/AnnouncementDelivery.jsx';
 import CallbackDelivery from './components/CallbackDelivery.jsx';
 import ChatDelivery from './components/ChatDelivery.jsx';
+import ChatDock from './components/ChatDock.jsx';
 
 function BootScreen() {
   return (
@@ -43,6 +44,7 @@ function App() {
   const [callbackFocus, setCallbackFocus] = useState(null); // callback id (toast/dashboard deep-link)
   const [chatUnread, setChatUnread] = useState(0); // total unread chat messages, for the sidebar badge
   const [newTaskPrefill, setNewTaskPrefill] = useState(null); // {title, description} to open a prefilled new task (act-from-item, #47)
+  const [newCallbackProduct, setNewCallbackProduct] = useState(null); // productId to open a prefilled New Callback (act-from-item, #47)
   const [chatFocus, setChatFocus] = useState(null); // channel id to open (from a chat toast / dashboard strip)
 
   // Theme toggle (#2): setTheme() mutates the shared C object + <html> dataset
@@ -117,6 +119,9 @@ function App() {
       else if (kind === "product" || kind === "client") setSection("waitlist");
       else if (kind === "user") { chatOpenDM(id).then(cid => { setChatFocus(cid); setSection("chat"); }).catch(() => setSection("chat")); }
     });
+    // #47: let any item view create a task / start a callback via the app surface.
+    setTaskCreator((prefill) => { setNewTaskPrefill(prefill); setSection("tasks"); });
+    setCallbackStarter((productId) => { setNewCallbackProduct(productId); setSection("waitlist"); });
   }, []);
 
   if (!user) {
@@ -184,7 +189,7 @@ function App() {
         {section === "calendar" && <ContentCalendar user={user} focusItemId={contentFocus} focusCampaignId={campaignFocus} onClearFocus={() => setContentFocus(null)} onClearCampaignFocus={() => setCampaignFocus(null)} onOpenSop={goToSop} onNavigateOut={onNavigateOut} />}
         {section === "announcements" && <Announcements user={user} />}
         {section === "chat" && <Chat user={user} onNavigate={onNavigateOut} focusChannelId={chatFocus} onClearFocus={() => setChatFocus(null)} onCreateTask={createTaskFrom} />}
-        {section === "waitlist" && <Waitlist user={user} focusCallbackId={callbackFocus} onClearFocus={() => setCallbackFocus(null)} />}
+        {section === "waitlist" && <Waitlist user={user} focusCallbackId={callbackFocus} onClearFocus={() => setCallbackFocus(null)} newCallbackProductId={newCallbackProduct} onConsumeNewCallback={() => setNewCallbackProduct(null)} />}
         {section === "admin" && isAdmin(user) && <AdminPanel />}
       </div>
       <ConfirmDialog />
@@ -194,6 +199,7 @@ function App() {
       <AnnouncementDelivery user={user} onOpen={() => setSection("announcements")} />
       <CallbackDelivery user={user} onOpen={goToCallback} />
       <ChatDelivery onOpen={goToChat} />
+      {canView("chat") && section !== "chat" && <ChatDock user={user} chatUnread={chatUnread} onNavigate={onNavigateOut} onCreateTask={createTaskFrom} />}
     </div>
   );
 }

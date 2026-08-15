@@ -100,7 +100,7 @@ function ImageRepository({ user }) {
         )} />
 
       {editMode ? (
-        <EditView blocks={blocks} onPatch={patch} onRemove={remove} onAdd={addBlock} />
+        <EditView blocks={blocks} onPatch={patch} onRemove={remove} onAdd={addBlock} onDone={() => { setEditMode(false); setActive(null); }} />
       ) : blocks.length === 0 ? (
         <EmptyState icon="perm_media" title="No repositories yet"
           sub="Add vendor image libraries so staff can find them by brand."
@@ -199,7 +199,7 @@ function LetterSection({ letter, items }) {
 /* Edit mode — flat, reorder-free list of block rows; each row has the
    page-specific letter dropdown (defaulting to the title's first letter via
    letterOf). Only title-with-link and text blocks, per spec. */
-function EditView({ blocks, onPatch, onRemove, onAdd }) {
+function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
   // Which brands have their note / login editors revealed — transient UI
   // only, never persisted to the saved doc.
   const [noteOpen, setNoteOpen] = useState({});
@@ -225,6 +225,7 @@ function EditView({ blocks, onPatch, onRemove, onAdd }) {
       }}>
         <OBtn onClick={() => onAdd("title")}><Icon name="add_link" size={16} />Add brand</OBtn>
         <OBtn onClick={() => onAdd("text")}><Icon name="add" size={16} />Add note</OBtn>
+        {onDone && <Btn onClick={onDone} style={{ marginLeft: "auto" }}><Icon name="done" size={16} />Done</Btn>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blocks.map(b => (

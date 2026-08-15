@@ -1,5 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, inp } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, linkifyMagnets, inp } from '../globals.js';
+
+/** Paste handler for any text input/textarea: if the pasted text contains a
+ * raw `gk:kind:id` magnet code, convert it in place to a readable
+ * `@[Label](kind:id)` mention token (so it later renders as a pill) instead
+ * of leaving a cryptic code. No magnet in the paste → default paste happens.
+ * `value`/`onChange(str)` are the field's controlled value + string setter. */
+function onMagnetPaste(e, value, onChange) {
+  const pasted = e.clipboardData?.getData("text");
+  if (!pasted || !/gk:(sop|task|playbook|product|client|content|campaign|callback|user):[\w-]+/.test(pasted)) return;
+  e.preventDefault();
+  const converted = linkifyMagnets(pasted);
+  const el = e.target;
+  const start = el.selectionStart ?? (value || "").length;
+  const end = el.selectionEnd ?? (value || "").length;
+  const next = (value || "").slice(0, start) + converted + (value || "").slice(end);
+  onChange(next);
+  const caret = start + converted.length;
+  requestAnimationFrame(() => { try { el.selectionStart = el.selectionEnd = caret; } catch { /* detached */ } });
+}
 
 /* Design intent:
    Who: shop staff + admins of The Green Kiss, often mid-shift, checking a
@@ -71,19 +90,19 @@ function OBtn({ children, onClick, style, active, disabled, title, type = "butto
 }
 
 /** Quiet icon-only button (delete, edit, drag handle actions). */
-function IconBtn({ icon, onClick, title, style, danger }) {
+function IconBtn({ icon, onClick, title, style, danger, size }) {
   const [hov, setHov] = useState(false);
   return (
     <button type="button" onClick={onClick} title={title}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
         background: hov ? (danger ? C.red + "14" : C.s2) : "transparent",
-        border: "none", borderRadius: 7, padding: 6, cursor: "pointer",
+        border: "none", borderRadius: 7, padding: size ? 3 : 6, cursor: "pointer",
         color: danger ? C.red : (hov ? C.txt : C.mut), display: "flex",
         alignItems: "center", justifyContent: "center", transition: "all .15s",
         ...(style || {}),
       }}
-    ><Icon name={icon} /></button>
+    ><Icon name={icon} {...(size ? { size } : {})} /></button>
   );
 }
 
@@ -269,6 +288,7 @@ function MentionText({ text, onNavigate }) {
         return (
           <span key={i} role="button" tabIndex={0}
             onClick={e => {
+              e.stopPropagation(); // a pill click navigates; it must not also trigger a card/row open
               if (kind === "contact") setContactCard({ contact: getContacts().find(c => c.id === id), anchorRect: e.currentTarget.getBoundingClientRect() });
               else (onNavigate || navigateItem)(kind, id);
             }}
@@ -345,7 +365,7 @@ const MentionField = React.forwardRef(function MentionField({ value, onChange, m
   const Tag = multiline ? "textarea" : "input";
   return (
     <>
-      <Tag ref={setRefs} value={value} onChange={handleChange} {...rest} />
+      <Tag ref={setRefs} value={value} onChange={handleChange} onPaste={e => onMagnetPaste(e, value, onChange)} {...rest} />
       {mentionState && <MentionPopover query={mentionState.query} anchorRect={mentionState.anchorRect} onPick={insertMention} onClose={() => setMentionState(null)} />}
     </>
   );
@@ -427,4 +447,4 @@ function LinkPopover({ anchorRect, initial, onSet, onClose }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink };
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste };

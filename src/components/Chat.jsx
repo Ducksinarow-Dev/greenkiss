@@ -163,7 +163,7 @@ function MessageRow({ m, grouped, mine, userName, onMention, onEdit, onDelete, o
   );
 }
 
-function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask }) {
+function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask, embedded }) {
   const admin = isAdmin(user);
   const users = getUsers();
   const userName = (id) => users.find(u => u.id === id)?.name || "Someone";
@@ -312,7 +312,7 @@ function Chat({ user, onNavigate, focusChannelId, onClearFocus, onCreateTask }) 
   );
 
   return (
-    <div className="gk-fade-in" style={{ display: "flex", gap: 16, height: "calc(100vh - 64px)" }}>
+    <div className="gk-fade-in" style={{ display: "flex", gap: embedded ? 10 : 16, height: embedded ? "100%" : "calc(100vh - 64px)", minHeight: 0 }}>
       {/* Channel + DM list */}
       <div style={{ width: 244, flexShrink: 0, background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "14px 16px", borderBottom: `1.5px solid ${C.bdr}` }}>

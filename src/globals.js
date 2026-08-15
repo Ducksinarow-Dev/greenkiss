@@ -1743,6 +1743,35 @@ function navigateItem(kind, id, blockId) {
   if (_magnetNav) { _magnetNav(kind, id, blockId); return true; }
   return false;
 }
+/* App-wide "create a task from this item" surface (#47). App registers one
+   creator (setSection("tasks") + prefill the new-task modal); any item view
+   calls createTaskFromItem(prefill) without threading a callback prop. */
+let _taskCreator = null;
+const setTaskCreator = (fn) => { _taskCreator = fn; };
+/** Trigger the new-task modal prefilled from another item. */
+function createTaskFromItem(prefill) {
+  if (_taskCreator) { _taskCreator(prefill); return true; }
+  return false;
+}
+/* App-wide "start a callback for this product" surface (#47). App registers a
+   starter that navigates to Waitlist and opens the New Callback form
+   pre-targeting the product; a product row calls startCallbackForProduct(id). */
+let _callbackStarter = null;
+const setCallbackStarter = (fn) => { _callbackStarter = fn; };
+function startCallbackForProduct(productId) {
+  if (_callbackStarter) { _callbackStarter(productId); return true; }
+  return false;
+}
+
+/** Build a {title, description} prefill from any linkable item, seeding the
+ * description with a mention pill back to the source so the new task stays
+ * linked (renders as a clickable pill; #47 "create task from this"). */
+function taskPrefillFromItem(kind, id, label, extra) {
+  const clean = (label || "").replace(/[[\]]/g, "");
+  const token = `@[${clean || "item"}](${kind}:${id})`;
+  return { title: label ? `${label}` : "", description: `From ${token}${extra ? "\n" + extra : ""}` };
+}
+
 /** One resolver for clicking any magnet link. Falls back to the app-wide nav
  * surface when an explicit `nav` object isn't passed. */
 function openMagnet(url, nav) {
@@ -1786,7 +1815,13 @@ function getLinkSearchCandidates(query) {
     const tagNames = (t.tagIds || []).map(id => tags.find(x => x.id === id)?.name || "");
     if (matches(t.title, ...tagNames)) out.push({ label: t.title || "Untitled task", sub: "Task" + (tagNames.filter(Boolean).length ? " · " + tagNames.filter(Boolean).join(", ") : ""), url: magnetFor("task", t.id) });
   });
-  return out.slice(0, 10);
+  // Waitlist + content targets are linkable too (#47).
+  getProducts().forEach(p => { if (matches(p.name, p.collection)) out.push({ label: p.name || "Untitled product", sub: "Product" + (p.collection ? " · " + p.collection : ""), url: magnetFor("product", p.id) }); });
+  getClients().forEach(c => { if (matches(c.name)) out.push({ label: c.name || "Unnamed client", sub: "Client", url: magnetFor("client", c.id) }); });
+  getContentItems().forEach(c => { if (matches(c.title)) out.push({ label: c.title || "Untitled content", sub: "Content", url: magnetFor("content", c.id) }); });
+  getCampaigns().forEach(c => { if (matches(c.name)) out.push({ label: c.name || "Untitled campaign", sub: "Campaign", url: magnetFor("campaign", c.id) }); });
+  getCallbacks().forEach(cb => { const pn = getProducts().find(p => p.id === cb.productId)?.name || "Callback"; if (matches(pn)) out.push({ label: pn, sub: "Callback", url: magnetFor("callback", cb.id) }); });
+  return out.slice(0, 12);
 }
 
 /* ─── RICH TEXT (R3 B3) ───────────────────────────────────────────────
@@ -2815,7 +2850,7 @@ export {
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
   getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
-  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
+  isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, setTaskCreator, createTaskFromItem, taskPrefillFromItem, setCallbackStarter, startCallbackForProduct, getLinkSearchCandidates, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getAllInstances, saveInstances, getInstances, addInstance, updateInstance, todayLocalISO,

@@ -8,8 +8,9 @@ import {
   getCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
   callbackTargetsUser, hasAckedCallback, ackCallback, getCallbackAcks,
   confirmDelete, triggerSaved, linkifyMagnets,
+  copyMagnet, createTaskFromItem, taskPrefillFromItem, startCallbackForProduct,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText, onMagnetPaste } from './shared.jsx';
 
 /* Waitlist & Callbacks (Batch 4). Clients waitlist for out-of-stock products;
    when stock lands, ops logs a callback that alerts sales staff/group (see
@@ -135,6 +136,8 @@ function DirectoryTab({ clients, products, bump }) {
                 <div style={{ fontSize: 14.5, fontWeight: 700, color: C.txt }}>{c.name}</div>
                 <div style={{ fontSize: 12, color: C.mut }}>{[c.phone, c.email].filter(Boolean).join(" · ") || "No contact details"}</div>
               </div>
+              <IconBtn icon="my_location" size={16} title="Copy magnet link to this client" onClick={() => copyMagnet("client", c.id)} />
+              <IconBtn icon="add_task" size={16} title="Create a task about this client" onClick={() => createTaskFromItem(taskPrefillFromItem("client", c.id, c.name))} />
               <IconBtn icon="edit" title="Edit" onClick={() => setEditClient(c.id)} />
               <IconBtn icon="delete" danger title="Remove" onClick={() => removeClient(c)} />
             </div>
@@ -163,6 +166,9 @@ function DirectoryTab({ clients, products, bump }) {
                   </div>
                 )}
               </div>
+              <IconBtn icon="my_location" size={16} title="Copy magnet link to this product" onClick={() => copyMagnet("product", p.id)} />
+              <IconBtn icon="add_task" size={16} title="Create a task about this product" onClick={() => createTaskFromItem(taskPrefillFromItem("product", p.id, p.name))} />
+              <IconBtn icon="notifications_active" size={16} title="Start a callback for this product" onClick={() => startCallbackForProduct(p.id)} />
               <IconBtn icon="edit" title="Edit" onClick={() => setEditProduct(p.id)} />
               <IconBtn icon="delete" danger title="Remove" onClick={() => removeProduct(p)} />
             </div>
@@ -204,12 +210,27 @@ function ProductEditRow({ product, onSave, onCancel }) {
 function WaitlistTab({ clients, products, waitlist, editor, bump }) {
   const [adding, setAdding] = useState(false);
   const [clientId, setClientId] = useState(""); const [productId, setProductId] = useState(""); const [note, setNote] = useState("");
+  const [phone, setPhone] = useState(""); const [email, setEmail] = useState("");
   const [showFulfilled, setShowFulfilled] = useState(false);
+
+  // When a client is chosen/created, seed the contact fields from their record
+  // so the editor sees current details and can fill in what's missing (#45).
+  React.useEffect(() => {
+    if (!clientId) { setPhone(""); setEmail(""); return; }
+    const c = clients.find(x => x.id === clientId);
+    if (c) { setPhone(c.phone || ""); setEmail(c.email || ""); }
+  }, [clientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = () => {
     if (!clientId || !productId) return;
+    // Write contact details back to the client so the directory stays current
+    // (only non-empty fields, so we never wipe existing data). #45
+    const patch = {};
+    if (phone.trim()) patch.phone = phone.trim();
+    if (email.trim()) patch.email = email.trim();
+    if (Object.keys(patch).length) updateClient(clientId, patch);
     addWaitlistEntry({ clientId, productId, note }); triggerSaved();
-    setClientId(""); setProductId(""); setNote(""); setAdding(false); bump();
+    setClientId(""); setProductId(""); setNote(""); setPhone(""); setEmail(""); setAdding(false); bump();
   };
   // Group active entries by product so demand is visible at a glance.
   const active = waitlist.filter(e => showFulfilled || !e.fulfilled);
@@ -232,10 +253,25 @@ function WaitlistTab({ clients, products, waitlist, editor, bump }) {
             <div style={{ flex: "1 1 200px" }}><TypeaheadAdd label="Client" options={clients} value={clientId} onChange={setClientId} onCreate={name => addClient({ name })} placeholder="Type a client's name…" /></div>
             <div style={{ flex: "1 1 200px" }}><TypeaheadAdd label="Product" options={products} value={productId} onChange={setProductId} onCreate={name => addProduct({ name })} placeholder="Type a product name…" /></div>
           </div>
+          {clientId && (
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={lbl()}>Phone (optional)</label>
+                <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Best number to reach them…" style={inp()} />
+              </div>
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={lbl()}>Email (optional)</label>
+                <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email…" style={inp()} />
+              </div>
+            </div>
+          )}
           <div>
             <label style={lbl()}>Note (optional)</label>
             <input value={note} onChange={e => setNote(e.target.value)} placeholder="Size, colour, how to reach them…" style={inp()} />
           </div>
+          {clientId && (phone.trim() || email.trim()) && (
+            <div style={{ fontSize: 12, color: C.faint }}><Icon name="sync" size={12} style={{ verticalAlign: "-2px" }} /> Contact details will be saved to this client.</div>
+          )}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
             <OBtn onClick={() => setAdding(false)}>Cancel</OBtn>
             <Btn onClick={create} disabled={!clientId || !productId}>Add</Btn>
@@ -259,6 +295,7 @@ function WaitlistTab({ clients, products, waitlist, editor, bump }) {
                     <Avatar name={clientName(clients, e.clientId)} size={24} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, textDecoration: e.fulfilled ? "line-through" : "none" }}>{clientName(clients, e.clientId)}</div>
+                      {(() => { const c = clients.find(x => x.id === e.clientId); const contact = [c?.phone, c?.email].filter(Boolean).join(" · "); return contact ? <div style={{ fontSize: 12, color: C.mut }}>{contact}</div> : null; })()}
                       {e.note && <div style={{ fontSize: 12, color: C.mut }}><MentionText text={linkifyMagnets(e.note)} /></div>}
                     </div>
                     {editor && (
@@ -283,8 +320,8 @@ function WaitlistTab({ clients, products, waitlist, editor, bump }) {
 }
 
 /* ─── CALLBACKS tab ────────────────────────────────────────────────── */
-function CallbackForm({ user, products, users, groups, onClose, onSaved }) {
-  const [draft, setDraft] = useState(defCallback(user));
+function CallbackForm({ user, products, users, groups, onClose, onSaved, initialProductId }) {
+  const [draft, setDraft] = useState(() => ({ ...defCallback(user), productId: initialProductId || "" }));
   const set = (ch) => setDraft(d => ({ ...d, ...ch }));
   const toggle = (field, id) => set({ [field]: draft[field].includes(id) ? draft[field].filter(x => x !== id) : [...draft[field], id] });
   const save = () => {
@@ -320,9 +357,9 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved }) {
         </div>
         <div>
           <label style={lbl()}>Note (optional)</label>
-          <input value={draft.note} onChange={e => set({ note: e.target.value })} placeholder="How many arrived, hold policy…" style={inp()} />
+          <input value={draft.note} onChange={e => set({ note: e.target.value })} onPaste={e => onMagnetPaste(e, draft.note || "", v => set({ note: v }))} placeholder="How many arrived, hold policy…" style={inp()} />
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, margin: "0 -26px -26px", padding: "16px 26px", background: C.sur, borderTop: `1.5px solid ${C.bdr}`, zIndex: 3 }}>
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={save} disabled={!draft.productId || (draft.assigneeIds.length === 0 && draft.groupIds.length === 0)}>Create &amp; alert</Btn>
         </div>
@@ -349,6 +386,8 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
             <div style={{ fontSize: 13, color: C.mut, marginTop: 3 }}>Logged by {callback.createdByName || "someone"} · {fmtDate(callback.createdAt)}</div>
           </div>
           <Pill color={callback.status === "done" ? C.moss : C.clay}>{callback.status === "done" ? "Closed" : `${remaining} to call`}</Pill>
+          <IconBtn icon="my_location" size={16} title="Copy magnet link to this callback" onClick={() => copyMagnet("callback", callback.id)} />
+          <IconBtn icon="add_task" size={16} title="Create a task from this callback" onClick={() => createTaskFromItem(taskPrefillFromItem("callback", callback.id, productName(products, callback.productId)))} />
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
         {callback.note && <div style={{ fontSize: 13.5, color: C.txt2, background: C.bg, border: `1.5px solid ${C.bdr}`, borderRadius: 10, padding: "10px 12px", whiteSpace: "pre-wrap" }}><MentionText text={linkifyMagnets(callback.note)} /></div>}
@@ -371,7 +410,7 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
                   <Avatar name={clientName(clients, e.clientId)} size={24} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: C.txt, textDecoration: e.fulfilled ? "line-through" : "none" }}>{clientName(clients, e.clientId)}</div>
-                    <div style={{ fontSize: 12, color: C.mut }}>{[clients.find(c => c.id === e.clientId)?.phone, e.note].filter(Boolean).join(" · ")}</div>
+                    <div style={{ fontSize: 12, color: C.mut }}>{[clients.find(c => c.id === e.clientId)?.phone, clients.find(c => c.id === e.clientId)?.email, e.note].filter(Boolean).join(" · ")}</div>
                   </div>
                   {editor && (
                     <button type="button" onClick={() => { updateWaitlistEntry(e.id, { fulfilled: !e.fulfilled, fulfilledAt: e.fulfilled ? null : new Date().toISOString() }); triggerSaved(); bump(); }}
@@ -387,7 +426,7 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
         </div>
 
         {editor && callback.status !== "done" && (
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: `1.5px solid ${C.bdr}`, paddingTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, borderTop: `1.5px solid ${C.bdr}`, position: "sticky", bottom: 0, margin: "0 -24px -24px", padding: "14px 24px", background: C.sur, zIndex: 3 }}>
             <Btn onClick={() => { updateCallback(callback.id, { status: "done", doneAt: new Date().toISOString() }); triggerSaved(); bump(); onClose(); }}><Icon name="check" size={16} />Close callback</Btn>
           </div>
         )}
@@ -396,10 +435,13 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
   );
 }
 
-function CallbacksTab({ user, clients, products, callbacks, users, groups, editor, bump, focusId, onClearFocus }) {
+function CallbacksTab({ user, clients, products, callbacks, users, groups, editor, bump, focusId, onClearFocus, startProductId, onConsumeStart }) {
   const [creating, setCreating] = useState(false);
+  const [startProduct, setStartProduct] = useState(null);
   const [openId, setOpenId] = useState(focusId || null);
   React.useEffect(() => { if (focusId) { setOpenId(focusId); onClearFocus && onClearFocus(); } }, [focusId, onClearFocus]);
+  // #47: a product row asked to start a callback pre-targeting that product.
+  React.useEffect(() => { if (startProductId) { setStartProduct(startProductId); setCreating(true); onConsumeStart && onConsumeStart(); } }, [startProductId, onConsumeStart]);
   const [showDone, setShowDone] = useState(false);
   const list = callbacks.filter(c => showDone || c.status !== "done");
   const openCb = openId && callbacks.find(c => c.id === openId);
@@ -435,7 +477,7 @@ function CallbacksTab({ user, clients, products, callbacks, users, groups, edito
           })}
         </div>
       )}
-      {creating && <CallbackForm user={user} products={products} users={users} groups={groups} onClose={() => setCreating(false)} onSaved={bump} />}
+      {creating && <CallbackForm user={user} products={products} users={users} groups={groups} initialProductId={startProduct} onClose={() => { setCreating(false); setStartProduct(null); }} onSaved={bump} />}
       {openCb && <CallbackDetail callback={openCb} user={user} clients={clients} products={products} users={users} groups={groups} editor={editor} onClose={() => setOpenId(null)} bump={bump} />}
     </div>
   );
@@ -443,11 +485,13 @@ function CallbacksTab({ user, clients, products, callbacks, users, groups, edito
 
 const TABS = [{ key: "waitlist", label: "Waitlist" }, { key: "callbacks", label: "Callbacks" }, { key: "directory", label: "Clients & Products" }];
 
-function Waitlist({ user, focusCallbackId, onClearFocus }) {
+function Waitlist({ user, focusCallbackId, onClearFocus, newCallbackProductId, onConsumeNewCallback }) {
   const editor = canEdit(user);
-  const [tab, setTab] = useState(focusCallbackId ? "callbacks" : "waitlist");
+  const [tab, setTab] = useState(focusCallbackId || newCallbackProductId ? "callbacks" : "waitlist");
   const [, setTick] = useState(0);
   const bump = () => setTick(t => t + 1);
+  // #47: a product row elsewhere asked to open the New Callback form here.
+  React.useEffect(() => { if (newCallbackProductId) setTab("callbacks"); }, [newCallbackProductId]);
 
   const clients = getClients();
   const products = getProducts();
@@ -470,7 +514,7 @@ function Waitlist({ user, focusCallbackId, onClearFocus }) {
         </div>} />
 
       {tab === "waitlist" && <WaitlistTab clients={clients} products={products} waitlist={waitlist} editor={editor} bump={bump} />}
-      {tab === "callbacks" && <CallbacksTab user={user} clients={clients} products={products} callbacks={callbacks} users={users} groups={groups} editor={editor} bump={bump} focusId={focusCallbackId} onClearFocus={onClearFocus} />}
+      {tab === "callbacks" && <CallbacksTab user={user} clients={clients} products={products} callbacks={callbacks} users={users} groups={groups} editor={editor} bump={bump} focusId={focusCallbackId} onClearFocus={onClearFocus} startProductId={newCallbackProductId} onConsumeStart={onConsumeNewCallback} />}
       {tab === "directory" && <DirectoryTab clients={clients} products={products} bump={bump} />}
     </div>
   );
