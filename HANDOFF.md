@@ -6,7 +6,7 @@ Snapshot for a new chat picking up work on this repo. Pair with `BACKLOG.md`, `D
 The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content calendar, image repository, announcements, waitlist/callbacks, and staff chat. Replaces Notion + scattered tools.
 - **Repo:** `Ducksinarow-Dev/greenkiss` (cloned at `/Users/super-dad/Projects/GK Hub/greenkiss`)
 - **Production:** https://hub.thegreenkiss.com · **Old tool being replaced:** https://team.thegreenkiss.com
-- **Latest release:** `v0.1.36` (on the `release` branch)
+- **Latest release:** `v0.1.37` (on the `release` branch)
 
 ## Stack & architecture
 - **Frontend:** React 18 + Vite, no router — `src/App.jsx` switches "sections" (nav keys). Components in `src/components/`. All shared state/data + helpers live in `src/globals.js` (~2.9k lines). Shared UI kit in `src/components/shared.jsx`.
@@ -34,7 +34,7 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **Track X (needs external setup):** PWA + Web Push (biggest buildable win; iOS needs "Add to Home Screen"); GBP posting API (needs Google Cloud OAuth — see `GBP_PUSH.md`); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.
 
-## Shipped Aug 2026 (this session — lands on `release` after the next `npm run release`)
+## Shipped Aug 2026 (this session — on `release` as v0.1.37; awaits the Update Now click)
 - **#47 create/act-from-item (complete):** "Create task from this" on products/clients/content/campaigns/callbacks + a task-overflow row (chat already had it); "Start callback" from a product; link-popover search extended to the new kinds. App-wide surfaces `createTaskFromItem`/`startCallbackForProduct` + `taskPrefillFromItem` in globals, registered in App alongside `setMagnetNav`.
 - **Magnets on task tiles + paste bug:** tiles render title/description mentions as clickable pills + a copy-magnet button; pasting a raw `gk:` code auto-converts to a mention token (`onMagnetPaste`), and bare codes resolve to pills everywhere via `linkifyMagnets`. MentionText pills now `stopPropagation`. Task description is now a `MentionField` (gains `@`-mention).
 - **#44 floating Save/Done:** sticky modal footers (Task/Campaign/Callback) + a Done button in Image Repository's sticky edit toolbar.
