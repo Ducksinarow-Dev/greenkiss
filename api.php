@@ -1035,7 +1035,9 @@ switch ($action) {
         foreach ($items as $it) {
             $date = $it['publishDate'] ?? '';
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
-            $mine = (($it['assigneeId'] ?? '') === $userId)
+            $itAssignees = $it['assigneeIds'] ?? [];
+            $mine = in_array($userId, is_array($itAssignees) ? $itAssignees : [], true)
+                || (($it['assigneeId'] ?? '') === $userId)
                 || in_array($userId, $campStaff[$it['campaignId'] ?? ''] ?? [], true);
             if (!$mine) continue;
             $dt = str_replace('-', '', $date);
@@ -1077,7 +1079,10 @@ switch ($action) {
             if (!empty($t['archived'])) continue;
             $onCal = !empty($t['onCalendar']) || ($projCal[$t['projectId'] ?? ''] ?? false);
             if (!$onCal) continue;
-            if (($t['assignedTo'] ?? '') !== $userId) continue;
+            $tAssignees = $t['assigneeIds'] ?? [];
+            $tMine = in_array($userId, is_array($tAssignees) ? $tAssignees : [], true)
+                || ($t['assignedTo'] ?? '') === $userId;
+            if (!$tMine) continue;
             $due = $t['dueDate'] ?? '';
             $startD = $t['startDate'] ?? '';
             $anchor = preg_match('/^\d{4}-\d{2}-\d{2}$/', $due) ? $due : $startD;
