@@ -1999,7 +1999,10 @@ const getImageRepo = () => db.getSync("imagerepo") || null;
 const saveImageRepo = (doc) => db.setSync("imagerepo", doc);
 const letterOf = (b) => {
   if (b && b.letter) return b.letter;
-  const c = ((b && b.text) || "").trim().charAt(0).toUpperCase();
+  // Prefer the brand grouping (#58) for the default letter, so a vendor's
+  // galleries file under the brand's first letter rather than each gallery's.
+  const src = ((b && b.brand) || (b && b.text) || "").trim();
+  const c = src.charAt(0).toUpperCase();
   return /[A-Z0-9]/.test(c) ? c : "#";
 };
 
@@ -2739,6 +2742,46 @@ const deleteContentItem = (id) => {
   if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id); return; }
   saveContentItems(next);
 };
+
+/* Saved reports (#51) — named, shared report presets in the Reports area.
+   Each stores its range mode (incl. dynamic presets like "last30"), channel,
+   and charted metric; dynamic ranges recompute against today on open. Plain
+   shared kv list (like groups/announcements). */
+const getContentReports = () => db.getListSync("contentReports");
+const saveContentReports = (list) => db.setSync("contentReports", list);
+const addContentReport = (r) => { const rec = { id: uid(), createdAt: nowISO(), ...r }; saveContentReports([...getContentReports(), rec]); return rec; };
+const deleteContentReport = (id) => saveContentReports(getContentReports().filter(r => r.id !== id));
+/** Resolve a report range mode to {from,to} ISO bounds (empty = unbounded).
+ * Dynamic presets are computed relative to today so they stay current. */
+function reportRange(mode, customFrom, customTo) {
+  const today = todayLocalISO();
+  const d = parseDate(today);
+  const firstOf = (y, m) => `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  switch (mode) {
+    case "last7": return { from: addDaysISO(today, -6), to: today };
+    case "last14": return { from: addDaysISO(today, -13), to: today };
+    case "last30": return { from: addDaysISO(today, -29), to: today };
+    case "last90": return { from: addDaysISO(today, -89), to: today };
+    case "thisMonth": return { from: firstOf(d.getFullYear(), d.getMonth()), to: today };
+    case "lastMonth": { const pm = new Date(d.getFullYear(), d.getMonth() - 1, 1); const end = new Date(d.getFullYear(), d.getMonth(), 0); return { from: firstOf(pm.getFullYear(), pm.getMonth()), to: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}` }; }
+    case "qtd": { const qStartMonth = Math.floor(d.getMonth() / 3) * 3; return { from: firstOf(d.getFullYear(), qStartMonth), to: today }; }
+    case "ytd": return { from: `${d.getFullYear()}-01-01`, to: today };
+    case "custom": return { from: customFrom || "", to: customTo || "" };
+    default: return { from: "", to: "" }; // "all"
+  }
+}
+const REPORT_RANGES = [
+  { key: "all", label: "All time" },
+  { key: "last7", label: "Last 7 days" },
+  { key: "last14", label: "Last 14 days" },
+  { key: "last30", label: "Last 30 days" },
+  { key: "last90", label: "Last 90 days" },
+  { key: "thisMonth", label: "This month" },
+  { key: "lastMonth", label: "Last month" },
+  { key: "qtd", label: "Quarter to date" },
+  { key: "ytd", label: "Year to date" },
+  { key: "custom", label: "Custom range" },
+];
 const defContentItem = (channel = "gbp") => ({
   id: uid(), campaignId: "", channel, type: "", title: "", status: "idea", startDate: "", publishDate: "",
   assigneeId: "", body: "", images: [], links: [], notes: "",
@@ -2981,6 +3024,7 @@ export {
   getCampaigns, saveCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   CAMPAIGN_STATUSES, campaignStatusMeta,
   getContentItems, saveContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
+  getContentReports, addContentReport, deleteContentReport, reportRange, REPORT_RANGES,
   campaignChannelCounts, CONTENT_CHANNELS, contentChannelMeta, CONTENT_STATUSES, contentStatusMeta,
   CONTENT_TYPES, contentTypeLabel, assigneesOf, isAssignedTo,
   GBP_CTA_TYPES, GBP_CATEGORIES,

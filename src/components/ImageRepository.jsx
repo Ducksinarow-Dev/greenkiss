@@ -164,7 +164,9 @@ function ImageRepository({ user }) {
       {showTop && !editMode && (
         <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Return to top"
           style={{
-            position: "fixed", bottom: 32, right: 48, width: 44, height: 44, borderRadius: 99,
+            // Sits directly ABOVE the ChatDock launcher bubble (right:20 bottom:20,
+            // 56px) so the two don't overlap on long pages (#59).
+            position: "fixed", bottom: 88, right: 26, width: 44, height: 44, borderRadius: 99,
             border: `1.5px solid ${C.bdr2}`, background: C.sur, color: C.moss, cursor: "pointer",
             boxShadow: C.shadowMd, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 40,
           }}>
@@ -177,7 +179,62 @@ function ImageRepository({ user }) {
 
 /* One letter's block — anchored so letter clicks land here. Empty letters
    render a faded capital + note (per spec), so the A–Z reads complete. */
+/* A single gallery link row (title block) — the leaf of a brand group and the
+   standalone form for a brand with just one gallery. */
+function GalleryRow({ b }) {
+  return (
+    <div style={{ fontSize: 16 }}>
+      {b.url
+        ? <ItemLink url={b.url}>{b.text || b.url}</ItemLink>
+        : <span style={{ color: C.txt, fontWeight: 600 }}>{b.text || "Untitled"}</span>}
+      {b.note && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, whiteSpace: "pre-wrap", marginTop: 3 }}>{b.note}</div>}
+      {(b.user || b.pass) && <LoginBox user={b.user} pass={b.pass} />}
+    </div>
+  );
+}
+
+/* Collapsible brand sub-category (#58) — groups a vendor's multiple image
+   galleries under one expandable heading. */
+function BrandGroup({ brand, blocks }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{ border: `1.5px solid ${C.bdr}`, borderRadius: 10, overflow: "hidden" }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", background: C.bg, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+        <Icon name={open ? "expand_more" : "chevron_right"} size={18} style={{ color: C.faint, flexShrink: 0 }} />
+        <span style={{ flex: 1, fontSize: 16, fontWeight: 700, color: C.txt }}>{brand}</span>
+        <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{blocks.length}</span>
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, padding: "10px 14px 12px 34px" }}>
+          {blocks.map(b => <GalleryRow key={b.id} b={b} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Group a letter's title blocks by brand (#58): branded galleries collapse
+   under one heading; un-branded titles + notes render inline as before,
+   preserving first-appearance order. */
+function groupByBrand(items) {
+  const nodes = [];
+  const idx = {};
+  items.forEach(b => {
+    const brand = b.type === "title" ? (b.brand || "").trim() : "";
+    if (brand) {
+      const key = brand.toLowerCase();
+      if (idx[key] == null) { idx[key] = nodes.length; nodes.push({ kind: "brand", brand, blocks: [b] }); }
+      else nodes[idx[key]].blocks.push(b);
+    } else {
+      nodes.push({ kind: "single", block: b });
+    }
+  });
+  return nodes;
+}
+
 function LetterSection({ letter, items }) {
+  const nodes = groupByBrand(items);
   return (
     <div id={"repo-" + letter} style={{ scrollMarginTop: 64, marginBottom: 26 }}>
       <div style={{
@@ -189,17 +246,12 @@ function LetterSection({ letter, items }) {
         <div style={{ fontSize: 13.5, color: C.faint, fontStyle: "italic" }}>Currently no brands under this letter.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {items.map(b => b.type === "text" ? (
-            <div key={b.id} style={{ fontSize: 14.5, color: C.txt2, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{b.text}</div>
-          ) : (
-            <div key={b.id} style={{ fontSize: 16 }}>
-              {b.url
-                ? <ItemLink url={b.url}>{b.text || b.url}</ItemLink>
-                : <span style={{ color: C.txt, fontWeight: 600 }}>{b.text || "Untitled"}</span>}
-              {b.note && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, whiteSpace: "pre-wrap", marginTop: 3 }}>{b.note}</div>}
-              {(b.user || b.pass) && <LoginBox user={b.user} pass={b.pass} />}
-            </div>
-          ))}
+          {nodes.map(n => n.kind === "brand"
+            ? <BrandGroup key={"brand-" + n.brand.toLowerCase()} brand={n.brand} blocks={n.blocks} />
+            : n.block.type === "text"
+              ? <div key={n.block.id} style={{ fontSize: 14.5, color: C.txt2, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{n.block.text}</div>
+              : <GalleryRow key={n.block.id} b={n.block} />
+          )}
         </div>
       )}
     </div>
@@ -261,8 +313,12 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
                   placeholder="Note…" rows={2} style={inp({ fontSize: 14, lineHeight: 1.5 })} />
               ) : (
                 <>
+                  {/* Optional brand group (#58) — galleries sharing a brand
+                      nest under one collapsible heading in the viewer. */}
+                  <input value={b.brand || ""} onChange={e => onPatch(b.id, { brand: e.target.value })}
+                    placeholder="Brand group (optional — groups galleries)" style={inp({ fontSize: 13, color: C.txt2 })} />
                   <input value={b.text} onChange={e => onPatch(b.id, { text: e.target.value })}
-                    placeholder="Brand name" style={inp({ fontSize: 14, fontWeight: 600 })} />
+                    placeholder={(b.brand || "").trim() ? "Gallery / collection name" : "Brand name"} style={inp({ fontSize: 14, fontWeight: 600 })} />
                   <input value={b.url || ""} onChange={e => onPatch(b.id, { url: e.target.value })}
                     placeholder="https://… (image repository link)" style={inp({ fontSize: 13 })} />
                   {/* Optional note attached to this brand (#37) — shown once

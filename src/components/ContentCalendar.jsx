@@ -3,6 +3,7 @@ import {
   C, FONT_CAPS, uid, nowISO, CATEGORY_COLORS, inp,
   getCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   getContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
+  getContentReports, addContentReport, deleteContentReport, reportRange, REPORT_RANGES,
   getUsers, confirmDelete, triggerSaved, canEdit, fmtDate, fmtDateShort, isOverdue,
   CAMPAIGN_STATUSES, campaignStatusMeta, CONTENT_CHANNELS, contentChannelMeta,
   CONTENT_STATUSES, contentStatusMeta, CONTENT_TYPES, contentTypeLabel, assigneesOf, GBP_CTA_TYPES, GBP_CATEGORIES,
@@ -1282,17 +1283,44 @@ function StatTile({ label, value, color, active, onClick }) {
   );
 }
 
-function ReportsView({ items, campaigns }) {
+function ReportsView({ items, campaigns, editable, bump }) {
+  const [rangeMode, setRangeMode] = useState("all"); // #51 dynamic ranges
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [channel, setChannel] = useState("");
   const [metric, setMetric] = useState("clicks");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [reportsV, setReportsV] = useState(0); // re-read saved list after save/delete
   const num = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+
+  // Resolve the active window: dynamic presets recompute against today; the
+  // date inputs only drive the "custom" mode.
+  const range = reportRange(rangeMode, from, to);
+  const saved = getContentReports();
+
+  const applyReport = (r) => {
+    setRangeMode(r.rangeMode || "all");
+    setChannel(r.channel || "");
+    setMetric(r.metric || "clicks");
+    if (r.rangeMode === "custom") { setFrom(r.from || ""); setTo(r.to || ""); }
+  };
+  const doSave = () => {
+    const name = saveName.trim();
+    if (!name) return;
+    addContentReport({ name, rangeMode, channel, metric, ...(rangeMode === "custom" ? { from, to } : {}) });
+    setSaveName(""); setSaveOpen(false); setReportsV(v => v + 1); triggerSaved(); bump && bump();
+  };
+  const removeReport = async (r) => {
+    if (!(await confirmDelete(`Delete saved report "${r.name}"?`))) return;
+    deleteContentReport(r.id); setReportsV(v => v + 1); triggerSaved(); bump && bump();
+  };
+  void reportsV;
 
   const filtered = items.filter(i => {
     if (channel && i.channel !== channel) return false;
-    if (from && (i.publishDate || "") < from) return false;
-    if (to && (i.publishDate || "") > to) return false;
+    if (range.from && (i.publishDate || "") < range.from) return false;
+    if (range.to && (i.publishDate || "") > range.to) return false;
     return true;
   });
   const sumMetric = (list, key) => list.reduce((s, i) => s + num((i.metrics || {})[key]), 0);
@@ -1312,9 +1340,32 @@ function ReportsView({ items, campaigns }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {saved.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: FONT_CAPS }}>Saved</span>
+          {saved.map(r => (
+            <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: C.s2, border: `1.5px solid ${C.bdr}`, borderRadius: 99, padding: "3px 4px 3px 11px" }}>
+              <button type="button" onClick={() => applyReport(r)} title="Open this report"
+                style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: C.txt, padding: 0 }}>{r.name}</button>
+              {editable && <button type="button" onClick={() => removeReport(r)} title="Delete report" style={{ display: "inline-flex", background: "none", border: "none", cursor: "pointer", color: C.faint, padding: 2, borderRadius: 99 }}><Icon name="close" size={13} /></button>}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <div><label style={lbl()}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
-        <div><label style={lbl()}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+        <div>
+          <label style={lbl()}>Range</label>
+          <select value={rangeMode} onChange={e => setRangeMode(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+            {REPORT_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+          </select>
+        </div>
+        {rangeMode === "custom" && (
+          <>
+            <div><label style={lbl()}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+            <div><label style={lbl()}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+          </>
+        )}
         <div>
           <label style={lbl()}>Channel</label>
           <select value={channel} onChange={e => setChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
@@ -1322,6 +1373,22 @@ function ReportsView({ items, campaigns }) {
             {CONTENT_CHANNELS.map(ch => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
           </select>
         </div>
+        {editable && (
+          <div style={{ position: "relative" }}>
+            <OBtn onClick={() => setSaveOpen(o => !o)} style={{ fontSize: 12, padding: "8px 12px" }}><Icon name="bookmark_add" size={15} />Save report</OBtn>
+            {saveOpen && (
+              <>
+                <div onClick={() => setSaveOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, zIndex: 41, width: 240, background: C.sur, border: `1.5px solid ${C.bdr2}`, borderRadius: 12, boxShadow: C.shadowMd, padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input autoFocus value={saveName} onChange={e => setSaveName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") doSave(); }}
+                    placeholder="Report name…" style={inp({ fontSize: 13, padding: "8px 10px" })} />
+                  <div style={{ fontSize: 11.5, color: C.faint }}>Saves the range, channel &amp; metric — dynamic ranges recompute each time.</div>
+                  <Btn onClick={doSave} disabled={!saveName.trim()} style={{ padding: "7px 12px", fontSize: 12 }}>Save</Btn>
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <div style={{ marginLeft: "auto", fontSize: 12.5, color: C.mut }}>{filtered.length} item{filtered.length === 1 ? "" : "s"} in range</div>
       </div>
 
@@ -1563,7 +1630,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
         <CampaignsView campaigns={campaigns} items={allItems} users={users} editable={editable}
           onOpenCampaign={(c) => setOpenCampaignId(c.id)} onEditCampaign={openEditCampaign} onNewCampaign={openNewCampaign} />
       )}
-      {tab === "reports" && <ReportsView items={allItems} campaigns={campaigns} />}
+      {tab === "reports" && <ReportsView items={allItems} campaigns={campaigns} editable={editable} bump={bump} />}
 
       {modal && (
         <ContentItemModal initial={modal.item} isNew={modal.isNew} users={users} campaigns={campaigns} nav={nav}
