@@ -10,7 +10,7 @@ import {
   confirmDelete, triggerSaved, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem, startCallbackForProduct,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText, onMagnetPaste } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText, onMagnetPaste, Segmented, Modal } from './shared.jsx';
 
 /* Waitlist & Callbacks (Batch 4). Clients waitlist for out-of-stock products;
    when stock lands, ops logs a callback that alerts sales staff/group (see
@@ -335,8 +335,7 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved, initial
     </button>
   );
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 620, padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{ background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto", padding: 26, display: "flex", flexDirection: "column", gap: 15 }}>
+    <Modal onClose={onClose} scrim={0.4} zIndex={620} cardStyle={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto", padding: 26, display: "flex", flexDirection: "column", gap: 15 }}>
         <div style={{ display: "flex", alignItems: "center" }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>New callback</div>
           <IconBtn icon="close" title="Close" onClick={onClose} />
@@ -363,8 +362,7 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved, initial
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={save} disabled={!draft.productId || (draft.assigneeIds.length === 0 && draft.groupIds.length === 0)}>Create &amp; alert</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -378,8 +376,7 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
   const remaining = entries.filter(e => !e.fulfilled).length;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 620, padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{ background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd, width: "100%", maxWidth: 540, maxHeight: "90vh", overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+    <Modal onClose={onClose} scrim={0.4} zIndex={620} cardStyle={{ maxWidth: 540, maxHeight: "90vh", overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 19, fontWeight: 800, color: C.txt }}>{productName(products, callback.productId)}</div>
@@ -430,8 +427,7 @@ function CallbackDetail({ callback, user, clients, products, users, groups, edit
             <Btn onClick={() => { updateCallback(callback.id, { status: "done", doneAt: new Date().toISOString() }); triggerSaved(); bump(); onClose(); }}><Icon name="check" size={16} />Close callback</Btn>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -500,18 +496,11 @@ function Waitlist({ user, focusCallbackId, onClearFocus, newCallbackProductId, o
   const users = getUsers();
   const groups = getGroups();
 
-  const tabStyle = (on) => ({
-    padding: "8px 15px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: FONT_CAPS,
-    fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-    background: on ? C.sur : "transparent", color: on ? C.moss : C.mut, boxShadow: on ? C.shadowSm : "none",
-  });
-
   return (
     <div className="gk-fade-in">
       <SectionHeader title="Waitlist & Callbacks" sub="Track who's waiting on out-of-stock products, and work the list when stock lands"
-        right={<div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-          {TABS.map(t => <button key={t.key} onClick={() => setTab(t.key)} style={tabStyle(tab === t.key)}>{t.label}</button>)}
-        </div>} />
+        right={<Segmented options={TABS} value={tab} onChange={setTab}
+          btnStyle={{ padding: "8px 15px", borderRadius: 8, fontSize: 12.5, letterSpacing: "0.05em" }} />} />
 
       {tab === "waitlist" && <WaitlistTab clients={clients} products={products} waitlist={waitlist} editor={editor} bump={bump} />}
       {tab === "callbacks" && <CallbacksTab user={user} clients={clients} products={products} callbacks={callbacks} users={users} groups={groups} editor={editor} bump={bump} focusId={focusCallbackId} onClearFocus={onClearFocus} startProductId={newCallbackProductId} onConsumeStart={onConsumeNewCallback} />}

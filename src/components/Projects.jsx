@@ -5,7 +5,7 @@ import {
   canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
   TASK_BOARD_STATUSES, inp, sortTasksForUser, completeTaskWithRecurrence, dispatchTaskAction, parseDate, todayLocalISO,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver, Segmented, Modal } from './shared.jsx';
 import { TaskCard, TaskModal, emptyForm as emptyTaskForm } from './TaskManager.jsx';
 
 /* Design intent: a project is a shelf, not a spreadsheet row — cards read
@@ -58,12 +58,7 @@ function ProjectModal({ initial, users, onSave, onDelete, onClose, isNew }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
-      onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
-        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 28,
-      }}>
+    <Modal onClose={onClose} scrim={0.35} zIndex={500} cardStyle={{ maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 28 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? "New Project" : "Edit Project"}</div>
           {!isNew && <IconBtn icon="delete" danger title="Delete project" onClick={onDelete} />}
@@ -144,8 +139,7 @@ function ProjectModal({ initial, users, onSave, onDelete, onClose, isNew }) {
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={() => onSave(form)} disabled={!form.name.trim()}>Save</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -695,19 +689,13 @@ function Projects({ user, onOpenSop, focusProjectId, onClearFocus }) {
     <div className="gk-fade-in">
       <SectionHeader title="Projects" sub={`${projects.length} project${projects.length === 1 ? "" : "s"}`}
         right={<>
-          <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-            {[{ key: "board", icon: "view_kanban" }, { key: "list", icon: "view_list" }].map(v => (
-              <button key={v.key} type="button" onClick={() => changeView(v.key)} title={v.key === "board" ? "Board view" : "List view"}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
-                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
-                  background: view === v.key ? C.sur : "transparent", color: view === v.key ? C.moss : C.mut,
-                  boxShadow: view === v.key ? C.shadowSm : "none",
-                }}>
-                <Icon name={v.icon} size={16} />{v.key === "board" ? "Board" : "List"}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            options={[
+              { key: "board", icon: "view_kanban", iconSize: 16, label: "Board", title: "Board view" },
+              { key: "list", icon: "view_list", iconSize: 16, label: "List", title: "List view" },
+            ]}
+            value={view} onChange={changeView}
+            btnStyle={{ padding: "7px 13px" }} />
           {editable && <Btn onClick={() => setCreating(true)}><Icon name="add" size={17} />New Project</Btn>}
         </>} />
 

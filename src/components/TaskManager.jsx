@@ -10,7 +10,7 @@ import {
   linkifyMagnets, parseMentionText, createTaskFromItem, taskPrefillFromItem,
   emptyTaskShape as emptyForm,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, MentionField, MentionText, onMagnetPaste } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, MentionField, MentionText, onMagnetPaste, Segmented, Modal } from './shared.jsx';
 
 /* ─────────────────────────────────────────────────────────────────────
    #8 — Compact month-grid date picker (no external library). Shared by
@@ -408,12 +408,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
-      onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
-        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: wide ? 720 : 680, maxHeight: "88vh", overflowY: "auto", padding: 28,
-      }}>
+    <Modal onClose={onClose} scrim={0.35} zIndex={500} cardStyle={{ maxWidth: wide ? 720 : 680, maxHeight: "88vh", overflowY: "auto", padding: 28 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? (isSopRun ? "Run SOP — new task" : "New Task") : "Edit Task"}</div>
           {!isNew && <IconBtn icon="my_location" title="Copy magnet link to this task" onClick={() => copyMagnet("task", form.id)} />}
@@ -432,19 +427,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
             <div>
               <label style={labelStyle}>Type</label>
-              <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, width: "fit-content" }}>
-                {TASK_TYPES.map(t => (
-                  <button key={t.key} type="button" onClick={() => set("type", t.key)} style={{
-                    display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-                    fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
-                    background: (form.type || "task") === t.key ? C.sur : "transparent",
-                    color: (form.type || "task") === t.key ? C.moss : C.mut,
-                    boxShadow: (form.type || "task") === t.key ? C.shadowSm : "none",
-                  }}>
-                    <Icon name={t.icon} size={15} />{t.label}
-                  </button>
-                ))}
-              </div>
+              <Segmented options={TASK_TYPES} value={form.type || "task"} onChange={v => set("type", v)} style={{ width: "fit-content" }} />
             </div>
             <div style={{ flex: "0 1 300px", minWidth: 160 }}>
               <label style={labelStyle}>Tags</label>
@@ -622,8 +605,7 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={() => onSave(form)} disabled={!form.title.trim()}>{isNew && isSopRun ? "Create" : "Save"}</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -963,16 +945,10 @@ function TaskDoneSlideOver({ doneTasks, archivedTasks, cardProps, onClose }) {
   const list = tab === "done" ? doneTasks : archivedTasks;
   return (
     <SlideOver title={tab === "done" ? `Done (${doneTasks.length})` : `Archived (${archivedTasks.length})`} icon="task_alt" onClose={onClose}>
-      <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, width: "fit-content", marginBottom: 14 }}>
-        {[{ key: "done", label: "Done" }, { key: "archived", label: "Archived" }].map(t => (
-          <button key={t.key} type="button" onClick={() => setTab(t.key)} style={{
-            padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
-            fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
-            background: tab === t.key ? C.sur : "transparent", color: tab === t.key ? C.moss : C.mut,
-            boxShadow: tab === t.key ? C.shadowSm : "none",
-          }}>{t.label}</button>
-        ))}
-      </div>
+      <Segmented
+        options={[{ key: "done", label: "Done" }, { key: "archived", label: "Archived" }]}
+        value={tab} onChange={setTab}
+        style={{ width: "fit-content", marginBottom: 14 }} />
       {list.length === 0 ? (
         <div style={{ textAlign: "center", padding: "30px 10px", fontSize: 13, color: C.faint }}>
           {tab === "done" ? "No completed tasks yet." : "Nothing archived."}
@@ -1209,19 +1185,14 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
     <div className="gk-fade-in">
       <SectionHeader title="Task Manager" sub={`${openCount} open task${openCount === 1 ? "" : "s"}`}
         right={<>
-          <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-            {[{ key: "board", icon: "view_kanban", label: "Board" }, { key: "list", icon: "view_list", label: "List" }, { key: "manager", icon: "supervisor_account", label: "Manager" }].map(v => (
-              <button key={v.key} type="button" onClick={() => changeView(v.key)} title={`${v.label} view`}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6, padding: "7px 13px", borderRadius: 7, border: "none", cursor: "pointer",
-                  fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
-                  background: view === v.key ? C.sur : "transparent", color: view === v.key ? C.moss : C.mut,
-                  boxShadow: view === v.key ? C.shadowSm : "none",
-                }}>
-                <Icon name={v.icon} size={16} />{v.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            options={[
+              { key: "board", icon: "view_kanban", iconSize: 16, label: "Board", title: "Board view" },
+              { key: "list", icon: "view_list", iconSize: 16, label: "List", title: "List view" },
+              { key: "manager", icon: "supervisor_account", iconSize: 16, label: "Manager", title: "Manager view" },
+            ]}
+            value={view} onChange={changeView}
+            btnStyle={{ padding: "7px 13px" }} />
           <OBtn onClick={() => setShowDone(true)}><Icon name="task_alt" size={16} />Done ({doneTasks.length})</OBtn>
           {editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>}
         </>} />

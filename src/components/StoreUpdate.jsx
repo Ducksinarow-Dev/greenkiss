@@ -3,7 +3,7 @@ import {
   C, FONT_CAPS, canEdit, isAdmin, inp, triggerSaved,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, SectionHeader, lbl } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, SectionHeader, lbl, Modal } from './shared.jsx';
 
 /* Store Update (#21): live Shopify sales vs seasonal targets, shown as
    speedometer gauges. Same "connect the integration" pattern as Omnisend —
@@ -126,8 +126,7 @@ function TargetEditor({ onClose }) {
     saveSalesTargets(clean); triggerSaved(); onClose();
   };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{ background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd, width: "100%", maxWidth: 460, maxHeight: "88vh", overflowY: "auto", padding: 26 }}>
+    <Modal onClose={onClose} scrim={0.35} zIndex={500} cardStyle={{ maxWidth: 460, maxHeight: "88vh", overflowY: "auto", padding: 26 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>Monthly Sales Targets</div>
           <IconBtn icon="close" title="Close" onClick={onClose} />
@@ -149,8 +148,7 @@ function TargetEditor({ onClose }) {
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={save}>Save targets</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

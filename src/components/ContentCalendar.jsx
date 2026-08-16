@@ -11,7 +11,7 @@ import {
   getTasks, getProjects, taskOnCalendar, navigateItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste, Modal } from './shared.jsx';
 
 /* Design intent: a shop's paper wall-planner, not a marketing ops tool —
    each day is a small cell you'd pin a sticky note to. The signature is
@@ -806,12 +806,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
     ? (form.assigneeIds || []).filter(x => x !== id)
     : [...(form.assigneeIds || []), id]);
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500, padding: 20 }}
-      onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
-        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: 28,
-      }}>
+    <Modal onClose={onClose} scrim={0.35} zIndex={500} cardStyle={{ maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: 28 }}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: C.txt, flex: 1 }}>{isNew ? "New Campaign" : "Edit Campaign"}</div>
           {!isNew && <IconBtn icon="my_location" size={16} title="Copy magnet link to this campaign" onClick={() => copyMagnet("campaign", form.id)} />}
@@ -877,8 +872,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={() => onSave(form)} disabled={!form.name.trim()}>Save</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

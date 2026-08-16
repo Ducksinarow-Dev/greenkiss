@@ -8,7 +8,7 @@ import {
   hasAckedAnnouncement, announcementAckList, ackAnnouncement,
   confirmDelete, triggerSaved, linkifyMagnets,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText, Modal } from './shared.jsx';
 
 /* Announcements + Current News (Batch 2). One page, two kinds: active
    announcements (toast / full-screen, acknowledge-tracked) and passive news
@@ -91,11 +91,7 @@ function Composer({ draft: initial, onClose, onSaved }) {
 
   const field = { ...inp({ fontSize: 14, padding: "9px 11px" }) };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 620, padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
-        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 26, display: "flex", flexDirection: "column", gap: 15,
-      }}>
+    <Modal onClose={onClose} scrim={0.4} zIndex={620} cardStyle={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto", padding: 26, display: "flex", flexDirection: "column", gap: 15 }}>
         <div style={{ display: "flex", alignItems: "center" }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>
             {isNew ? (isNews ? "Post news" : "New announcement") : (isNews ? "Edit news post" : "Edit announcement")}
@@ -180,8 +176,7 @@ function Composer({ draft: initial, onClose, onSaved }) {
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={save}>{isNew ? "Publish" : "Save"}</Btn>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

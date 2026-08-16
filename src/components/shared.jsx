@@ -418,19 +418,14 @@ function LinkPopover({ anchorRect, initial, onSet, onClose }) {
   const [draft, setDraft] = useState(initial || "");
   const [query, setQuery] = useState("");
   const results = mode === "internal" ? getLinkSearchCandidates(query) : [];
-  const tabBtn = (key, label) => (
-    <button type="button" onClick={() => setMode(key)} style={{
-      flex: 1, padding: "6px 10px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit",
-      fontSize: 12, fontWeight: 600, background: mode === key ? C.sur : "transparent",
-      color: mode === key ? C.moss : C.mut, boxShadow: mode === key ? C.shadowSm : "none",
-    }}>{label}</button>
-  );
   return (
     <Popover anchorRect={anchorRect} onClose={onClose} width={300}>
-      <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, marginBottom: 10 }}>
-        {tabBtn("url", "Web address")}
-        {tabBtn("internal", "Internal (magnet)")}
-      </div>
+      <Segmented
+        options={[{ key: "url", label: "Web address" }, { key: "internal", label: "Internal (magnet)" }]}
+        value={mode} onChange={setMode}
+        style={{ marginBottom: 10 }}
+        btnStyle={{ flex: 1, padding: "6px 10px", fontSize: 12, textTransform: "none", letterSpacing: "normal", fontFamily: "inherit", justifyContent: "center" }}
+      />
       {mode === "url" ? (
         <>
           <input autoFocus value={draft} onChange={e => setDraft(e.target.value)} placeholder="https://…  or paste a gk: magnet link"
@@ -463,4 +458,60 @@ function LinkPopover({ anchorRect, initial, onSet, onClose }) {
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste, PresenceDot };
+/** Segmented pill toggle — the shared tab-bar chrome used across forms,
+ * section headers and panels (a raised white pill with moss uppercase-tracked
+ * text marks the active option). options: [{key,label,icon?}]. `btnStyle`
+ * merges into each button so a call site can tweak padding/size without
+ * re-implementing the whole control. */
+function Segmented({ options, value, onChange, style, btnStyle }) {
+  return (
+    <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}`, ...style }}>
+      {options.map(o => {
+        const active = value === o.key;
+        return (
+          <button key={o.key} type="button" onClick={() => onChange(o.key)} title={o.title}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 7, border: "none", cursor: "pointer",
+              fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
+              background: active ? C.sur : "transparent", color: active ? C.moss : C.mut,
+              boxShadow: active ? C.shadowSm : "none", ...btnStyle,
+            }}>
+            {o.icon && <Icon name={o.icon} size={o.iconSize || 15} />}{o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Modal shell — the fixed scrim + raised card that ~9 components each
+ * hand-rolled identically (click-scrim/ESC to close, stopPropagation on the
+ * card). It owns only the shell; callers pass their own header + body as
+ * children, since those vary too much to share. `cardStyle` sets the
+ * per-site card (maxWidth / maxHeight / padding / scroll model); `scrim`,
+ * `zIndex` and `align` cover the small wrapper variations. The full-screen
+ * announcement takeover is a different overlay and intentionally doesn't use
+ * this. */
+function Modal({ onClose, children, scrim = 0.35, zIndex = 550, align = "center", cardStyle, cardClass = "gk-fade-in", closeOnEsc = false }) {
+  useEffect(() => {
+    if (!closeOnEsc) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, closeOnEsc]);
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex, display: "flex", alignItems: align, justifyContent: "center", padding: 20,
+      background: `rgba(10,12,10,${scrim})`,
+    }}>
+      <div className={cardClass} onClick={e => e.stopPropagation()} style={{
+        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd, width: "100%",
+        ...cardStyle,
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste, PresenceDot, Segmented, Modal };

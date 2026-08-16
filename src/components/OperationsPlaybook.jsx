@@ -5,7 +5,7 @@ import {
   getContacts, addContact, updateContact, deleteContact,
   getPlaybookRevs, addPlaybookRev, getCurrentUser, fmtDate, nowISO, copyMagnet,
 } from '../globals.js';
-import { Icon, IconBtn, Btn, OBtn, EmptyState } from './shared.jsx';
+import { Icon, IconBtn, Btn, OBtn, EmptyState, Modal } from './shared.jsx';
 import { BlocksEditor } from './SOPEditor.jsx';
 import { ViewerBlock } from './SOPViewer.jsx';
 
@@ -36,11 +36,7 @@ function PlaybookHistoryModal({ onClose, onRestored }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,10,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 550, padding: 20 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="gk-fade-in" style={{
-        background: C.sur, borderRadius: 16, border: `1.5px solid ${C.bdr}`, boxShadow: C.shadowMd,
-        width: "100%", maxWidth: 680, maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden",
-      }}>
+    <Modal onClose={onClose} scrim={0.35} zIndex={550} cardStyle={{ maxWidth: 680, maxHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", padding: "16px 20px", borderBottom: `1.5px solid ${C.bdr}` }}>
           <Icon name="history" size={20} style={{ color: C.moss, marginRight: 10 }} />
           <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, flex: 1 }}>Playbook History</div>
@@ -84,8 +80,7 @@ function PlaybookHistoryModal({ onClose, onRestored }) {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
