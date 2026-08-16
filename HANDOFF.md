@@ -6,7 +6,7 @@ Snapshot for a new chat picking up work on this repo. Pair with `BACKLOG.md`, `D
 The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content calendar, image repository, announcements, waitlist/callbacks, and staff chat. Replaces Notion + scattered tools.
 - **Repo:** `Ducksinarow-Dev/greenkiss` (cloned at `/Users/super-dad/Projects/GK Hub/greenkiss`)
 - **Production:** https://hub.thegreenkiss.com · **Old tool being replaced:** https://team.thegreenkiss.com
-- **Latest release:** `v0.1.39` (on the `release` branch)
+- **Latest release:** `v0.1.41` (on the `release` branch)
 
 ## Stack & architecture
 - **Frontend:** React 18 + Vite, no router — `src/App.jsx` switches "sections" (nav keys). Components in `src/components/`. All shared state/data + helpers live in `src/globals.js` (~2.9k lines). Shared UI kit in `src/components/shared.jsx`.
@@ -34,7 +34,9 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **Track X (needs external setup):** PWA + Web Push (biggest buildable win; iOS needs "Add to Home Screen"); GBP posting API (needs Google Cloud OAuth — see `GBP_PUSH.md`); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.
 
-## Shipped Aug 2026 (this session — on `release` as v0.1.39; awaits the Update Now click)
+## Shipped Aug 2026 (on `release` as v0.1.41; awaits the Update Now click)
+- **v0.1.40 (another chat): code-cleanup pass** — extracted shared `Segmented` + `Modal` in `shared.jsx`, consolidated drifting constants into single sources of truth, removed dead code, fixed correctness bugs. Baseline lint warnings dropped to ~33.
+- **#56 campaign manager (mirrors the project manager):** click a campaign → `CampaignDetail` with **Board | Timeline | Split** over its content items — `CampaignContentBoard` (drag-to-restatus by `CONTENT_STATUSES`) + `CampaignTimeline` (Gantt; bars span optional content `startDate`→`publishDate`, framed by campaign start/end, Today line, Week/Month/Quarter zoom via shared `Segmented`). Campaigns tab gained **Cards | Timeline** where Timeline = all-campaigns Gantt (`CampaignsTimeline`). Content items gained optional `startDate`. Timeline helpers `MS_DAY`/`daysBetween`/`addDaysISO`/`MONTHS_ABBR`/`TIMELINE_ZOOMS` now live in globals (shared by both managers). Deep-linking a campaign opens the detail.
 - **#54 project Split view:** third option in `ProjectDetail`'s Board|Timeline toggle — stacks `ProjectTimeline` over `ProjectTasksBoard`.
 - **#55 system-wide search:** `GlobalSearch.jsx` command palette (Cmd/Ctrl+K + sidebar **Search…** button) over `globalSearch()` in globals; grouped results (SOPs/forms/tasks/projects/content/campaigns/clients/products/callbacks/playbook/image-repo/staff), keyboard nav, deep-link via `navigateItem` (extended for `project` + `imagerepo`).
 
