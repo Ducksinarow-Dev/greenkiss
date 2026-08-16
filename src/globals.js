@@ -698,11 +698,16 @@ const ANNOUNCEMENT_DELIVERY = [
   { key: "signin", label: "At next sign-in" },
   { key: "now", label: "Live now" },
 ];
+// Section dot colors need a dark-mode variant like everything else driven off
+// C; `color` resolves against the current theme at read time so news dots don't
+// stay light-theme in dark mode. Pairs are [light, dark].
+const _newsSection = (key, label, light, dark) =>
+  ({ key, label, get color() { return getTheme() === "dark" ? dark : light; } });
 const NEWS_SECTIONS = [
-  { key: "general", label: "General", color: "#799385" },
-  { key: "sales", label: "Sales", color: "#B63E59" },
-  { key: "product", label: "Product", color: "#4f6358" },
-  { key: "events", label: "Events", color: "#B98A3E" },
+  _newsSection("general", "General", "#799385", "#8fab9d"),
+  _newsSection("sales", "Sales", "#B63E59", "#d1728a"),
+  _newsSection("product", "Product", "#4f6358", "#6f8a7d"),
+  _newsSection("events", "Events", "#B98A3E", "#d7ab5e"),
 ];
 const newsSectionMeta = (key) => NEWS_SECTIONS.find(s => s.key === key) || NEWS_SECTIONS[0];
 
@@ -1437,6 +1442,15 @@ const duplicateSOP = (sop) => {
   return addSOP(copy);
 };
 
+/** SOP/Form lifecycle. "archived" is reachable via the editor's restore/
+ * archive controls rather than the draft⇄published toggle. */
+const SOP_STATUSES = [
+  { key: "draft", label: "Draft", col: C.faint },
+  { key: "published", label: "Published", col: C.moss },
+  { key: "archived", label: "Archived", col: C.faint },
+];
+const sopStatusMeta = Object.fromEntries(SOP_STATUSES.map(s => [s.key, s]));
+
 const defSOP = (categoryId = "", kind = "sop") => ({
   id: uid(),
   title: "",
@@ -1654,7 +1668,11 @@ const formColor = (formId) => {
    maintained reverse index (nothing to keep in sync or drift) — they're
    computed by scanning every document's text at render time, which is
    trivially fast at this data scale (dozens–low hundreds of documents). */
-const MENTION_RE = /@\[([^\]]+)\]\((sop|form|contact|playbook|user|task|product|client|content|campaign|callback):([\w-]+)\)/g;
+/** The kinds an @-mention token can carry. MENTION_RE is derived from this so
+ * the parser, picker (getMentionCandidates) and navigator (setMagnetNav) can
+ * all validate against one list instead of three hand-kept copies. */
+const MENTION_KINDS = ["sop", "form", "contact", "playbook", "user", "task", "product", "client", "content", "campaign", "callback"];
+const MENTION_RE = new RegExp(`@\\[([^\\]]+)\\]\\((${MENTION_KINDS.join("|")}):([\\w-]+)\\)`, "g");
 
 /** Splits text into {text} and {mention:{kind,id,label}} segments, in order. */
 function parseMentionText(text) {
@@ -2527,7 +2545,14 @@ const isDueThisWeek = (dateStr) => {
  * the UI never sees a stale value — no bulk migration write (collision
  * risk with concurrent live users); a project only persists its remapped
  * status once it next goes through addProject/updateProject. */
-const PROJECT_STATUS_KEYS = ["upcoming", "in_progress", "approval", "done", "archived"];
+const PROJECT_STATUSES = [
+  { key: "upcoming", label: "Upcoming", col: C.faint },
+  { key: "in_progress", label: "In Progress", col: C.txt2 },
+  { key: "approval", label: "Approval", col: C.clay },
+  { key: "done", label: "Done", col: C.moss },
+  { key: "archived", label: "Archived", col: C.faint },
+];
+const PROJECT_STATUS_KEYS = PROJECT_STATUSES.map(s => s.key);
 function normalizeProjectStatus(status) {
   if (status === "active") return "in_progress";
   if (status === "on_hold") return "upcoming";
@@ -2569,13 +2594,6 @@ const defProject = () => ({
   leadId: "", memberIds: [], color: C.moss, includeTasksOnCalendar: false, createdAt: nowISO(), updatedAt: nowISO(),
 });
 
-const PROJECT_STATUSES = [
-  { key: "upcoming", label: "Upcoming", col: C.faint },
-  { key: "in_progress", label: "In Progress", col: C.txt2 },
-  { key: "approval", label: "Approval", col: C.clay },
-  { key: "done", label: "Done", col: C.moss },
-  { key: "archived", label: "Archived", col: C.faint },
-];
 const projectStatusMeta = Object.fromEntries(PROJECT_STATUSES.map(s => [s.key, s]));
 /** Columns on the Projects board — Done + Archived both live in the
  * slide-over instead (see ProjectDoneSlideOver). */
@@ -2928,6 +2946,7 @@ export {
   getAlerts, saveAlerts, addAlert, deleteAlert,
   getTaskTemplates, saveTaskTemplates, addTaskTemplate, deleteTaskTemplate, taskFromTemplate, snapshotTaskForTemplate,
   getSOPs, saveSOPs, getSOP, addSOP, updateSOP, deleteSOP, duplicateSOP, defSOP, sopMatchesSearch, sopExcerpt,
+  SOP_STATUSES, sopStatusMeta,
   getAllHeadingTexts, getAllTypePrefixes, seedStandardSections, asListBlock, blockBg, taskFromSop, sopHasTaskRoles,
   isMagnet, parseMagnet, magnetFor, copyMagnet, openMagnet, linkifyMagnets, setMagnetNav, navigateItem, setTaskCreator, createTaskFromItem, taskPrefillFromItem, setCallbackStarter, startCallbackForProduct, getLinkSearchCandidates, globalSearch, sanitizeHtml, escapeHtml, mentionTokensToHtml, triggerToast,
   getPlaybookRevs, addPlaybookRev,

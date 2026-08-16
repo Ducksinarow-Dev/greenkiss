@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   C, FONT_CAPS, uid, getCategories, addCategory, updateSOP, addSOP, deleteSOP, duplicateSOP, confirmDelete, triggerSaved,
   getCurrentUser, processAndStoreImage, CATEGORY_COLORS, inp, getAllHeadingTexts, getAllTypePrefixes, asListBlock, blockBg,
-  sanitizeHtml, escapeHtml, getMentionCandidates, copyMagnet,
+  sanitizeHtml, escapeHtml, getMentionCandidates, copyMagnet, SOP_STATUSES,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, MentionField, Popover, LinkPopover } from './shared.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
@@ -759,13 +759,13 @@ function SOPEditor({ sop, isNew, onClose, onSaved, onDeleted }) {
           )}
         </div>
         <div style={{ display: "flex", background: C.s2, borderRadius: 9, padding: 3, border: `1.5px solid ${C.bdr}` }}>
-          {["draft", "published"].map(s => (
-            <button key={s} onClick={() => setStatus(s)} style={{
+          {SOP_STATUSES.filter(s => s.key !== "archived").map(({ key, label }) => (
+            <button key={key} onClick={() => setStatus(key)} style={{
               padding: "6px 16px", borderRadius: 7, border: "none", cursor: "pointer",
               fontSize: 12, fontWeight: 600, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em",
-              background: status === s ? (s === "published" ? C.moss : C.sur) : "transparent",
-              color: status === s ? (s === "published" ? "#fff" : C.txt) : C.mut,
-            }}>{s}</button>
+              background: status === key ? (key === "published" ? C.moss : C.sur) : "transparent",
+              color: status === key ? (key === "published" ? "#fff" : C.txt) : C.mut,
+            }}>{label.toLowerCase()}</button>
           ))}
         </div>
         {status === "archived" ? (

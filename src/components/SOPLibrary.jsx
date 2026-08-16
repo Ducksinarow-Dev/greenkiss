@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, getCategories, getSOPs, getSOP, defSOP, sopMatchesSearch, sopExcerpt, fmtDateShort, canEdit,
-  seedStandardSections, triggerSaved, inp, getAllInstances, formColor, fmtDate,
+  seedStandardSections, triggerSaved, inp, getAllInstances, formColor, fmtDate, sopStatusMeta,
 } from '../globals.js';
 import { Btn, OBtn, Pill, Icon, SectionHeader, EmptyState } from './shared.jsx';
 import { MiniCalendar } from './TaskManager.jsx';
@@ -35,9 +35,7 @@ function SOPCard({ sop, category, onOpen }) {
       <div style={{ padding: "16px 18px", flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
           {category && <Pill color={color}>{category.name}</Pill>}
-          <Pill color={sop.status === "published" ? C.moss : C.faint}>
-            {sop.status === "published" ? "Published" : sop.status === "archived" ? "Archived" : "Draft"}
-          </Pill>
+          {(() => { const st = sopStatusMeta[sop.status] || sopStatusMeta.draft; return <Pill color={st.col}>{st.label}</Pill>; })()}
           {sop.code && <Pill color={C.faint}>{sop.code}</Pill>}
         </div>
         <div style={{ fontSize: 17, fontWeight: 800, color: C.txt, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
