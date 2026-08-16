@@ -3,15 +3,16 @@ import {
   C, FONT_CAPS, uid, nowISO, CATEGORY_COLORS, inp,
   getCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   getContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
-  getUsers, confirmDelete, triggerSaved, canEdit, fmtDateShort, isOverdue,
+  getUsers, confirmDelete, triggerSaved, canEdit, fmtDate, fmtDateShort, isOverdue,
   CAMPAIGN_STATUSES, campaignStatusMeta, CONTENT_CHANNELS, contentChannelMeta,
   CONTENT_STATUSES, contentStatusMeta, CONTENT_TYPES, contentTypeLabel, assigneesOf, GBP_CTA_TYPES, GBP_CATEGORIES,
   campaignChannelCounts, processAndStoreImage, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem,
   getTasks, getProjects, taskOnCalendar, navigateItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
+  parseDate, todayLocalISO, daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste, Modal } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste, Modal, Segmented } from './shared.jsx';
 
 /* Design intent: a shop's paper wall-planner, not a marketing ops tool —
    each day is a small cell you'd pin a sticky note to. The signature is
@@ -630,9 +631,13 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
                 </select>
               </div>
             )}
-            <div style={{ flex: "1 1 140px" }}>
+            <div style={{ flex: "1 1 120px" }}>
+              <label style={lbl()}>Start date</label>
+              <input type="date" value={form.startDate || ""} onChange={e => set("startDate", e.target.value)} max={form.publishDate || undefined} style={inp()} />
+            </div>
+            <div style={{ flex: "1 1 120px" }}>
               <label style={lbl()}>Publish date</label>
-              <input type="date" value={form.publishDate || ""} onChange={e => set("publishDate", e.target.value)} style={inp()} />
+              <input type="date" value={form.publishDate || ""} onChange={e => set("publishDate", e.target.value)} min={form.startDate || undefined} style={inp()} />
             </div>
           </div>
 
@@ -877,7 +882,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
 }
 
 /* ─── CAMPAIGNS VIEW ─────────────────────────────────────────────────── */
-function CampaignCard({ campaign, items, users, editable, onOpen, onFilter }) {
+function CampaignCard({ campaign, items, users, editable, onOpen, onEdit }) {
   const sm = campaignStatusMeta[campaign.status] || CAMPAIGN_STATUSES[0];
   const counts = campaignChannelCounts(campaign.id, items);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -885,8 +890,8 @@ function CampaignCard({ campaign, items, users, editable, onOpen, onFilter }) {
   return (
     <div style={{ display: "flex", background: C.sur, borderRadius: 12, border: `1.5px solid ${C.bdr}`, overflow: "hidden" }}>
       <div style={{ width: 6, flexShrink: 0, background: campaign.color || C.moss }} />
-      <div onClick={() => onFilter(campaign.id)} role="button" tabIndex={0}
-        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onFilter(campaign.id); } }}
+      <div onClick={() => onOpen(campaign)} role="button" tabIndex={0}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(campaign); } }}
         style={{ padding: "16px 18px", flex: 1, minWidth: 0, cursor: "pointer", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <Pill color={sm.col}>{sm.label}</Pill>
@@ -921,30 +926,324 @@ function CampaignCard({ campaign, items, users, editable, onOpen, onFilter }) {
       </div>
       {editable && (
         <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "0 10px" }}>
-          <IconBtn icon="edit" title="Edit campaign" onClick={onOpen} />
+          <IconBtn icon="edit" title="Edit campaign" onClick={() => onEdit(campaign)} />
         </div>
       )}
     </div>
   );
 }
 
-function CampaignsView({ campaigns, items, users, editable, onOpenCampaign, onNewCampaign, onFilterCampaign }) {
+function CampaignsView({ campaigns, items, users, editable, onOpenCampaign, onEditCampaign, onNewCampaign }) {
+  const [view, setView] = useState(() => { try { return localStorage.getItem("gkCampaignsView") || "cards"; } catch { return "cards"; } });
+  const setV = (v) => { setView(v); try { localStorage.setItem("gkCampaignsView", v); } catch { /* private */ } };
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        {campaigns.length > 0 && <Segmented value={view} onChange={setV} options={[{ key: "cards", label: "Cards", icon: "view_agenda" }, { key: "timeline", label: "Timeline", icon: "calendar_view_week" }]} />}
+        <div style={{ flex: 1 }} />
         {editable && <Btn onClick={onNewCampaign}><Icon name="add" size={17} />New Campaign</Btn>}
       </div>
       {campaigns.length === 0 ? (
         <EmptyState icon="campaign" title="No campaigns yet" sub="Group related content across channels and track it together."
           action={editable && <Btn onClick={onNewCampaign}><Icon name="add" size={17} />New Campaign</Btn>} />
+      ) : view === "timeline" ? (
+        <CampaignsTimeline campaigns={campaigns} onOpenCampaign={onOpenCampaign} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {campaigns.map(c => (
             <CampaignCard key={c.id} campaign={c} items={items} users={users} editable={editable}
-              onOpen={() => onOpenCampaign(c)} onFilter={onFilterCampaign} />
+              onOpen={onOpenCampaign} onEdit={onEditCampaign} />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── CAMPAIGN MANAGER (#56) ──────────────────────────────────────────
+   Mirrors the per-project manager: open a campaign → Board | Timeline |
+   Split over its content items. Board = Kanban by CONTENT_STATUSES with
+   drag-to-restatus; Timeline = Gantt of content items (bars span optional
+   startDate→publishDate, single-day marker if publish-only) framed by the
+   campaign's own start/end range. */
+
+/* Compact content-item card for the Kanban (mirrors TaskCard's role). */
+function ContentCard({ item, users, onOpen, onDragStart }) {
+  const ch = contentChannelMeta[item.channel] || {};
+  const staff = assigneesOf(item).map(id => users.find(u => u.id === id)).filter(Boolean);
+  const overdue = isOverdue(item.publishDate, item.status === "published");
+  const typeLabel = contentTypeLabel(item.channel, item.type);
+  return (
+    <div draggable onDragStart={onDragStart} onClick={onOpen} role="button" tabIndex={0}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 11, padding: "11px 13px", cursor: "pointer", boxShadow: C.shadowSm, display: "flex", flexDirection: "column", gap: 7 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <Icon name={ch.icon || "article"} size={15} style={{ color: C.faint, flexShrink: 0 }} title={ch.label} />
+        <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title || "Untitled"}</div>
+      </div>
+      {typeLabel && <div style={{ fontSize: 11, fontWeight: 700, color: C.mut, textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: FONT_CAPS }}>{typeLabel}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {item.publishDate && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: overdue ? C.red : C.mut, fontFamily: "'IBM Plex Mono',monospace" }}><Icon name="event" size={12} />{fmtDateShort(item.publishDate)}</span>}
+        <div style={{ flex: 1 }} />
+        {staff.slice(0, 3).map((u, i) => <div key={u.id} style={{ marginLeft: i === 0 ? 0 : -5, border: `2px solid ${C.sur}`, borderRadius: 99 }}><Avatar name={u.name} size={18} /></div>)}
+      </div>
+    </div>
+  );
+}
+
+/* Kanban of a campaign's content items by status, drag-to-restatus. */
+function CampaignContentBoard({ items, users, onOpenItem, onRestatus }) {
+  const [dragId, setDragId] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+  const drop = (status) => { if (dragId) onRestatus(dragId, status); setDragId(null); setOverCol(null); };
+  return (
+    <div style={{ display: "flex", gap: 14, overflowX: "auto", paddingBottom: 8 }}>
+      {CONTENT_STATUSES.map(s => {
+        const colItems = items.filter(i => i.status === s.key).sort((a, b) => (a.publishDate || "9999").localeCompare(b.publishDate || "9999"));
+        return (
+          <div key={s.key}
+            onDragOver={e => { e.preventDefault(); setOverCol(s.key); }} onDrop={() => drop(s.key)}
+            style={{ flex: "1 1 240px", minWidth: 220, background: overCol === s.key ? C.mossSoft : C.bg, border: `1.5px solid ${overCol === s.key ? C.moss : C.bdr}`, borderRadius: 13, padding: 12, transition: "background .12s, border-color .12s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
+              <div style={{ width: 9, height: 9, borderRadius: 99, background: s.col }} />
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>{s.label}</div>
+              <span style={{ fontSize: 12, color: C.mut, background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{colItems.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {colItems.map(it => (
+                <ContentCard key={it.id} item={it} users={users}
+                  onOpen={() => onOpenItem(it)} onDragStart={(e) => { setDragId(it.id); if (e?.dataTransfer) e.dataTransfer.effectAllowed = "move"; }} />
+              ))}
+              {colItems.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", fontSize: 13, color: C.faint }}>Drop here</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Gantt of a campaign's content items — bars span optional startDate→publishDate
+   (single-day marker if publish-only), framed by the campaign's date range. */
+function CampaignTimeline({ campaign, items, users, onOpenItem }) {
+  const [zoom, setZoom] = useState("month");
+  const px = TIMELINE_ZOOMS.find(z => z.key === zoom).px;
+  const today = todayLocalISO();
+  const dated = items.filter(i => i.publishDate || i.startDate);
+  if (dated.length === 0) {
+    return <EmptyState icon="calendar_view_week" title="Nothing scheduled yet" sub="Give content items a publish (and optional start) date to see them on the timeline." />;
+  }
+  const lo = [campaign.startDate, today, ...dated.map(i => i.startDate || i.publishDate)].filter(Boolean).sort()[0];
+  const hi = [campaign.endDate, today, ...dated.map(i => i.publishDate || i.startDate)].filter(Boolean).sort().slice(-1)[0];
+  const rangeStart = addDaysISO(lo, -3);
+  const rangeEnd = addDaysISO(hi, 4);
+  const totalDays = Math.max(daysBetween(rangeStart, rangeEnd), 1);
+  const trackW = totalDays * px;
+  const xOf = (iso) => daysBetween(rangeStart, iso) * px;
+
+  const months = [];
+  { let cur = rangeStart.slice(0, 8) + "01";
+    if (parseDate(cur) < parseDate(rangeStart)) cur = rangeStart;
+    let guard = 0;
+    while (parseDate(cur) <= parseDate(rangeEnd) && guard++ < 120) {
+      const d = parseDate(cur);
+      const nextMonthISO = addDaysISO(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`, 32).slice(0, 8) + "01";
+      const segStart = parseDate(cur) < parseDate(rangeStart) ? rangeStart : cur;
+      const segEnd = parseDate(nextMonthISO) > parseDate(rangeEnd) ? rangeEnd : nextMonthISO;
+      months.push({ label: `${MONTHS_ABBR[d.getMonth()]} ${d.getFullYear()}`, left: xOf(segStart), width: Math.max(daysBetween(segStart, segEnd) * px, 0) });
+      cur = nextMonthISO;
+    }
+  }
+
+  const rows = dated.slice().sort((a, b) => (a.publishDate || a.startDate || "").localeCompare(b.publishDate || b.startDate || ""));
+  const NAME_W = 230, ROW_H = 38;
+  return (
+    <div style={{ border: `1.5px solid ${C.bdr}`, borderRadius: 13, overflow: "hidden", background: C.sur }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1.5px solid ${C.bdr}` }}>
+        <Icon name="calendar_view_week" size={16} style={{ color: C.moss }} />
+        <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.txt }}>Timeline</div>
+        <Segmented options={TIMELINE_ZOOMS.map(z => ({ key: z.key, label: z.label }))} value={zoom} onChange={setZoom} />
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth: NAME_W + trackW }}>
+          <div style={{ display: "flex", position: "relative", height: 26, borderBottom: `1.5px solid ${C.bdr}` }}>
+            <div style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}` }} />
+            <div style={{ position: "relative", width: trackW }}>
+              {months.map((mo, i) => (
+                <div key={i} style={{ position: "absolute", left: mo.left, width: mo.width, top: 0, height: 26, borderLeft: `1px solid ${C.bdr}`, fontSize: 11, fontWeight: 700, color: C.mut, fontFamily: FONT_CAPS, textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 0 0 6px", overflow: "hidden", whiteSpace: "nowrap" }}>{mo.label}</div>
+              ))}
+            </div>
+          </div>
+          <div style={{ position: "relative" }}>
+            <div style={{ position: "absolute", left: NAME_W + xOf(today), top: 0, bottom: 0, width: 2, background: C.clay, zIndex: 1, pointerEvents: "none" }} />
+            {rows.map(it => {
+              const owner = users.find(u => u.id === assigneesOf(it)[0]);
+              const hasSpan = it.startDate && it.publishDate && it.publishDate >= it.startDate;
+              const barStart = hasSpan ? it.startDate : (it.publishDate || it.startDate);
+              const barEnd = hasSpan ? it.publishDate : (it.publishDate || it.startDate);
+              const left = xOf(barStart);
+              const width = Math.max((daysBetween(barStart, barEnd) + 1) * px, 14);
+              const published = it.status === "published";
+              const overdue = isOverdue(it.publishDate, published);
+              const barColor = published ? C.moss : (overdue ? C.red : (campaign.color || C.moss));
+              const ch = contentChannelMeta[it.channel] || {};
+              return (
+                <div key={it.id} style={{ display: "flex", height: ROW_H, borderBottom: `1px solid ${C.bdr}` }}>
+                  <div onClick={() => onOpenItem(it)} title={it.title} style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 7, padding: "0 10px", cursor: "pointer", overflow: "hidden" }}>
+                    <Icon name={ch.icon || "article"} size={14} style={{ color: C.faint, flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: published ? "line-through" : "none", opacity: published ? 0.6 : 1 }}>{it.title || "Untitled"}</span>
+                    {owner ? <Avatar name={owner.name} size={20} /> : <span style={{ width: 20, height: 20, borderRadius: 99, border: `1.5px dashed ${C.bdr2}`, flexShrink: 0 }} />}
+                  </div>
+                  <div style={{ position: "relative", width: trackW }}>
+                    <div onClick={() => onOpenItem(it)} title={`${it.title}${hasSpan ? ` · ${fmtDateShort(barStart)} – ${fmtDateShort(barEnd)}` : ` · ${fmtDateShort(barEnd)}`}`}
+                      style={{ position: "absolute", left, top: 8, height: ROW_H - 16, width, background: barColor, opacity: published ? 0.55 : 1, borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, padding: "0 6px", overflow: "hidden" }}>
+                      {owner && <Avatar name={owner.name} size={16} />}
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title || "Untitled"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Campaign detail — the per-campaign mirror of ProjectDetail. */
+function CampaignDetail({ campaign, allItems, users, editable, onBack, onOpenItem, onNewItem, onEditCampaign, onFilterCalendar, onRestatus }) {
+  const [view, setView] = useState(() => { try { return localStorage.getItem("gkCampaignItemView") || "board"; } catch { return "board"; } });
+  const setV = (v) => { setView(v); try { localStorage.setItem("gkCampaignItemView", v); } catch { /* private */ } };
+  const items = allItems.filter(i => i.campaignId === campaign.id);
+  const sm = campaignStatusMeta[campaign.status] || CAMPAIGN_STATUSES[0];
+  const staff = (campaign.assigneeIds || []).map(id => users.find(u => u.id === id)).filter(Boolean);
+  return (
+    <div className="gk-fade-in">
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <IconBtn icon="arrow_back" title="Back to campaigns" onClick={onBack} />
+        <div style={{ flex: 1 }} />
+        <OBtn onClick={() => onFilterCalendar(campaign.id)}><Icon name="calendar_month" size={16} />View on calendar</OBtn>
+        {editable && <OBtn onClick={() => onEditCampaign(campaign)}><Icon name="edit" size={16} />Edit</OBtn>}
+      </div>
+
+      <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "24px 28px", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ width: 8, height: 40, borderRadius: 99, background: campaign.color || C.moss, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+              <Pill color={sm.col}>{sm.label}</Pill>
+              {(campaign.startDate || campaign.endDate) && (
+                <span style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
+                  {campaign.startDate ? fmtDate(campaign.startDate) : "…"} – {campaign.endDate ? fmtDate(campaign.endDate) : "…"}
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: C.txt, marginBottom: 6 }}>{campaign.name || "Untitled campaign"}</div>
+            {campaign.description && <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.55, maxWidth: 640 }}><MentionText text={linkifyMagnets(campaign.description)} /></div>}
+          </div>
+          {staff.length > 0 && (
+            <div style={{ display: "flex" }}>
+              {staff.slice(0, 6).map((u, i) => <div key={u.id} style={{ marginLeft: i === 0 ? 0 : -6, border: `2px solid ${C.sur}`, borderRadius: 99 }}><Avatar name={u.name} size={26} /></div>)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>Content</div>
+        <Segmented value={view} onChange={setV} options={[{ key: "board", label: "Board", icon: "view_kanban" }, { key: "timeline", label: "Timeline", icon: "calendar_view_week" }, { key: "split", label: "Split", icon: "view_agenda" }]} />
+        <div style={{ flex: 1 }} />
+        {editable && <Btn onClick={() => onNewItem(campaign.id)}><Icon name="add" size={17} />New Content</Btn>}
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState icon="post_add" title="No content in this campaign yet" sub="Add the first content item to start planning."
+          action={editable && <Btn onClick={() => onNewItem(campaign.id)}><Icon name="add" size={17} />New Content</Btn>} />
+      ) : view === "timeline" ? (
+        <CampaignTimeline campaign={campaign} items={items} users={users} onOpenItem={onOpenItem} />
+      ) : view === "split" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <CampaignTimeline campaign={campaign} items={items} users={users} onOpenItem={onOpenItem} />
+          <CampaignContentBoard items={items} users={users} onOpenItem={onOpenItem} onRestatus={onRestatus} />
+        </div>
+      ) : (
+        <CampaignContentBoard items={items} users={users} onOpenItem={onOpenItem} onRestatus={onRestatus} />
+      )}
+    </div>
+  );
+}
+
+/* All-campaigns Gantt for the Campaigns tab overview — each campaign a bar
+   spanning startDate→endDate, click to open its detail. */
+function CampaignsTimeline({ campaigns, onOpenCampaign }) {
+  const [zoom, setZoom] = useState("month");
+  const px = TIMELINE_ZOOMS.find(z => z.key === zoom).px;
+  const today = todayLocalISO();
+  const dated = campaigns.filter(c => c.startDate || c.endDate);
+  if (dated.length === 0) return <EmptyState icon="calendar_view_week" title="No dated campaigns" sub="Give campaigns a start and end date to see them on the timeline." />;
+  const lo = [today, ...dated.map(c => c.startDate || c.endDate)].filter(Boolean).sort()[0];
+  const hi = [today, ...dated.map(c => c.endDate || c.startDate)].filter(Boolean).sort().slice(-1)[0];
+  const rangeStart = addDaysISO(lo, -3);
+  const rangeEnd = addDaysISO(hi, 4);
+  const totalDays = Math.max(daysBetween(rangeStart, rangeEnd), 1);
+  const trackW = totalDays * px;
+  const xOf = (iso) => daysBetween(rangeStart, iso) * px;
+  const months = [];
+  { let cur = rangeStart.slice(0, 8) + "01";
+    if (parseDate(cur) < parseDate(rangeStart)) cur = rangeStart;
+    let guard = 0;
+    while (parseDate(cur) <= parseDate(rangeEnd) && guard++ < 120) {
+      const d = parseDate(cur);
+      const nextMonthISO = addDaysISO(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`, 32).slice(0, 8) + "01";
+      const segStart = parseDate(cur) < parseDate(rangeStart) ? rangeStart : cur;
+      const segEnd = parseDate(nextMonthISO) > parseDate(rangeEnd) ? rangeEnd : nextMonthISO;
+      months.push({ label: `${MONTHS_ABBR[d.getMonth()]} ${d.getFullYear()}`, left: xOf(segStart), width: Math.max(daysBetween(segStart, segEnd) * px, 0) });
+      cur = nextMonthISO;
+    }
+  }
+  const NAME_W = 200, ROW_H = 40;
+  return (
+    <div style={{ border: `1.5px solid ${C.bdr}`, borderRadius: 13, overflow: "hidden", background: C.sur }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: `1.5px solid ${C.bdr}` }}>
+        <Icon name="calendar_view_week" size={16} style={{ color: C.moss }} />
+        <div style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.txt }}>Campaign timeline</div>
+        <Segmented options={TIMELINE_ZOOMS.map(z => ({ key: z.key, label: z.label }))} value={zoom} onChange={setZoom} />
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ minWidth: NAME_W + trackW }}>
+          <div style={{ display: "flex", position: "relative", height: 26, borderBottom: `1.5px solid ${C.bdr}` }}>
+            <div style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}` }} />
+            <div style={{ position: "relative", width: trackW }}>
+              {months.map((mo, i) => (
+                <div key={i} style={{ position: "absolute", left: mo.left, width: mo.width, top: 0, height: 26, borderLeft: `1px solid ${C.bdr}`, fontSize: 11, fontWeight: 700, color: C.mut, fontFamily: FONT_CAPS, textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 0 0 6px", overflow: "hidden", whiteSpace: "nowrap" }}>{mo.label}</div>
+              ))}
+            </div>
+          </div>
+          <div style={{ position: "relative" }}>
+            <div style={{ position: "absolute", left: NAME_W + xOf(today), top: 0, bottom: 0, width: 2, background: C.clay, zIndex: 1, pointerEvents: "none" }} />
+            {dated.map(c => {
+              const cs = c.startDate || c.endDate, ce = c.endDate || c.startDate;
+              const left = xOf(cs);
+              const width = Math.max((daysBetween(cs, ce) + 1) * px, 14);
+              return (
+                <div key={c.id} style={{ display: "flex", height: ROW_H, borderBottom: `1px solid ${C.bdr}` }}>
+                  <div onClick={() => onOpenCampaign(c)} title={c.name} style={{ width: NAME_W, flexShrink: 0, position: "sticky", left: 0, zIndex: 2, background: C.sur, borderRight: `1.5px solid ${C.bdr}`, display: "flex", alignItems: "center", gap: 7, padding: "0 10px", cursor: "pointer", overflow: "hidden" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 99, background: c.color || C.moss, flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: C.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name || "Untitled"}</span>
+                  </div>
+                  <div style={{ position: "relative", width: trackW }}>
+                    <div onClick={() => onOpenCampaign(c)} title={`${c.name} · ${fmtDateShort(cs)} – ${fmtDateShort(ce)}`}
+                      style={{ position: "absolute", left, top: 9, height: ROW_H - 18, width, background: c.color || C.moss, borderRadius: 7, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 8px", overflow: "hidden" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name || "Untitled"}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1055,6 +1354,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const [monthKey, setMonthKey] = useState(() => nowISO().slice(0, 7));
   const [modal, setModal] = useState(null); // {item, isNew}
   const [campaignModal, setCampaignModal] = useState(null); // {campaign, isNew}
+  const [openCampaignId, setOpenCampaignId] = useState(null); // campaign detail view (#56)
   const [filterChannel, setFilterChannel] = useState("");
   const [filterCampaign, setFilterCampaign] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
@@ -1091,12 +1391,12 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusItemId]);
 
-  // Dashboard "Upcoming Campaigns" click (#23): land on the calendar filtered
-  // to that campaign, so its items + date band are front-and-centre.
+  // A campaign deep-link (dashboard "Upcoming Campaigns" / magnet / search)
+  // opens that campaign's detail manager (#56).
   React.useEffect(() => {
     if (focusCampaignId) {
-      setFilterCampaign(focusCampaignId);
-      setTab("calendar");
+      setOpenCampaignId(focusCampaignId);
+      setTab("campaigns");
       onClearCampaignFocus && onClearCampaignFocus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1111,6 +1411,8 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   });
 
   const openNew = (dateStr) => setModal({ item: { ...defContentItem(), publishDate: dateStr || "" }, isNew: true });
+  const openNewForCampaign = (campId) => setModal({ item: { ...defContentItem(), campaignId: campId }, isNew: true });
+  const restatusItem = (id, status) => { updateContentItem(id, { status }); triggerSaved(); bump(); };
   const openEdit = (item) => setModal({ item: { ...item }, isNew: false });
   const saveItem = (form) => {
     if (modal.isNew) addContentItem(form); else updateContentItem(form.id, form);
@@ -1139,6 +1441,29 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
 
   const upcoming = allItems.filter(i => i.status !== "published" && i.publishDate >= todayStr()).length;
   const activeCampaign = filterCampaign ? campaigns.find(c => c.id === filterCampaign) : null;
+  const openCampaign = openCampaignId ? campaigns.find(c => c.id === openCampaignId) : null;
+
+  // Campaign detail manager (#56) takes over the whole view when open; the
+  // item + campaign edit modals stay mounted so New Content / Edit work here.
+  if (openCampaign) {
+    return (
+      <div className="gk-fade-in">
+        <CampaignDetail campaign={openCampaign} allItems={allItems} users={users} editable={editable}
+          onBack={() => setOpenCampaignId(null)}
+          onOpenItem={openEdit} onNewItem={openNewForCampaign} onEditCampaign={openEditCampaign}
+          onFilterCalendar={(id) => { setOpenCampaignId(null); filterByCampaign(id); }}
+          onRestatus={restatusItem} />
+        {modal && (
+          <ContentItemModal initial={modal.item} isNew={modal.isNew} users={users} campaigns={campaigns} nav={nav}
+            onSave={saveItem} onDelete={!modal.isNew ? deleteItem : undefined} onClose={() => setModal(null)} />
+        )}
+        {campaignModal && (
+          <CampaignModal initial={campaignModal.campaign} isNew={campaignModal.isNew} users={users}
+            onSave={saveCampaignModal} onDelete={!campaignModal.isNew ? deleteCampaignModal : undefined} onClose={() => setCampaignModal(null)} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="gk-fade-in">
@@ -1236,7 +1561,7 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
       {tab === "list" && <ListView items={items} users={users} campaigns={campaigns} onOpenItem={openEdit} />}
       {tab === "campaigns" && (
         <CampaignsView campaigns={campaigns} items={allItems} users={users} editable={editable}
-          onOpenCampaign={openEditCampaign} onNewCampaign={openNewCampaign} onFilterCampaign={filterByCampaign} />
+          onOpenCampaign={(c) => setOpenCampaignId(c.id)} onEditCampaign={openEditCampaign} onNewCampaign={openNewCampaign} />
       )}
       {tab === "reports" && <ReportsView items={allItems} campaigns={campaigns} />}
 

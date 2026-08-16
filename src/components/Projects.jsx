@@ -4,6 +4,7 @@ import {
   getTasks, addTask, updateTask, deleteTask, getUsers, getSOPs, getTags, getTaskTemplates, confirmDelete, triggerSaved,
   canEdit, fmtDate, fmtDateShort, isOverdue, PROJECT_STATUSES, PROJECT_BOARD_STATUSES, projectStatusMeta, projectProgress,
   TASK_BOARD_STATUSES, inp, sortTasksForUser, completeTaskWithRecurrence, dispatchTaskAction, parseDate, todayLocalISO,
+  daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS as ZOOMS,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, SlideOver, Segmented, Modal } from './shared.jsx';
 import { TaskCard, TaskModal, emptyForm as emptyTaskForm } from './TaskManager.jsx';
@@ -264,11 +265,6 @@ function ProjectTasksBoard({ tasks, currentUser, cardProps, onOpenTask, onQuickT
   );
 }
 
-const MS_DAY = 86400000;
-const daysBetween = (a, b) => Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / MS_DAY);
-const addDaysISO = (iso, n) => { const d = parseDate(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
-const MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const ZOOMS = [{ key: "week", label: "Week", px: 30 }, { key: "month", label: "Month", px: 11 }, { key: "quarter", label: "Quarter", px: 4.6 }];
 
 /* Notion-style Timeline (#53): left = Task + Owner columns; right = a scrollable
    date track where each task is a bar spanning startDate→dueDate (single-day

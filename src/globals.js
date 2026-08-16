@@ -1630,6 +1630,14 @@ const todayLocalISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+/* Shared timeline/Gantt helpers (#53/#56) — used by both the project manager
+   and the campaign manager so the two Gantts behave identically. */
+const MS_DAY = 86400000;
+const daysBetween = (a, b) => Math.round((parseDate(b).getTime() - parseDate(a).getTime()) / MS_DAY);
+const addDaysISO = (iso, n) => { const d = parseDate(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+const MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const TIMELINE_ZOOMS = [{ key: "week", label: "Week", px: 30 }, { key: "month", label: "Month", px: 11 }, { key: "quarter", label: "Quarter", px: 4.6 }];
+
 /* Form submissions (R4): a submission is an instance of a form — dated,
    attributed, snapshotting the template so later template edits never
    rewrite records. `values[blockId]` holds per-block fill state, `notes`
@@ -2732,7 +2740,7 @@ const deleteContentItem = (id) => {
   saveContentItems(next);
 };
 const defContentItem = (channel = "gbp") => ({
-  id: uid(), campaignId: "", channel, type: "", title: "", status: "idea", publishDate: "",
+  id: uid(), campaignId: "", channel, type: "", title: "", status: "idea", startDate: "", publishDate: "",
   assigneeId: "", body: "", images: [], links: [], notes: "",
   ctaType: "", ctaUrl: "", category: "update",
   targetKeyword: "", url: "",
@@ -2922,7 +2930,7 @@ async function importAllData(parsed) {
 export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
   REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, apiCall, refreshCache,
-  db, uid, nowISO, fmtDate, fmtDateShort, parseDate,
+  db, uid, nowISO, fmtDate, fmtDateShort, parseDate, MS_DAY, daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS,
   getCurrentUser, setCurrentUser, clearCurrentUser, fetchLoginHistory, refreshPresence, isUserOnline, subscribePresence,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   NAV_ITEMS, NAV_SECTIONS, getUserSections, setUserSections, sectionsForUser,
