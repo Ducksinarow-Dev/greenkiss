@@ -36,7 +36,7 @@ function Bubble({ icon, color, title, items, onClose, onOpen }) {
 /** One toast per alert flagged at me (R4 D5): task title, a colored
  * priority flag when it's high/urgent, due date, who flagged it. The whole
  * toast opens the task; open or dismiss deletes the alert record. */
-function AlertBubble({ alert, task, fromName, onClose, onOpen }) {
+function AlertBubble({ task, fromName, onClose, onOpen }) {
   const pm = taskPriorityMeta[task.priority];
   const hot = task.priority === "high" || task.priority === "urgent";
   return (

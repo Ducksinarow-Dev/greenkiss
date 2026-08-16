@@ -560,14 +560,6 @@ async function remoteLoginOptions() {
   const res = await apiCall("login_options", { method: "GET", auth: false });
   return res.users || [];
 }
-function remoteLogout() {
-  apiCall("logout", { method: "POST" }).catch(() => {});
-  _setToken("");
-  clearCurrentUser();
-  _remoteWarm = false;
-  _cache.clear();
-}
-
 /* ─── SHARED INPUT STYLE ─────────────────────────────────────────── */
 const inp = (ex = {}) => ({
   background: C.inset, border: `1.5px solid ${C.bdr}`, color: C.txt,
@@ -683,11 +675,6 @@ const getUserGroups = (userId) => {
 };
 const setUserGroups = (userId, groupIds) =>
   db.setSync("userGroups", { ...getUserGroupsMap(), [userId]: groupIds });
-/** Resolved group objects for a user (skips any stale/deleted ids). */
-const groupsForUser = (userId) => {
-  const set = new Set(getUserGroups(userId));
-  return getGroups().filter(g => set.has(g.id));
-};
 /** User ids that belong to a group — the reverse lookup targeting uses. */
 const userIdsInGroup = (groupId) =>
   Object.entries(getUserGroupsMap()).filter(([, ids]) => (ids || []).includes(groupId)).map(([id]) => id);
@@ -2060,7 +2047,6 @@ function seedImageRepoIfEmpty() {
    {items:[{id,type:"tool"|"prompt",title,body,url,tags,createdAt}]} —
    same zero-backend pattern as the image repo / playbook. */
 const getToolsPrompts = () => db.getSync("toolsPrompts") || { items: [] };
-const saveToolsPrompts = (doc) => db.setSync("toolsPrompts", doc);
 
 /* ─── OMNISEND (email metrics) ────────────────────────────────────────
    The API key lives server-side; these just proxy through api.php so it
@@ -2917,13 +2903,13 @@ async function importAllData(parsed) {
 
 export {
   C, setTheme, getTheme, FONT_CAPS, FONT_BODY, CATEGORY_COLORS, LOGIN_BG, LOGIN_BG_DEEP,
-  REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, remoteLogout, apiCall, refreshCache,
+  REMOTE_MODE, isRemoteWarm, remoteBootstrap, remoteLogin, remoteLoginOptions, apiCall, refreshCache,
   db, uid, nowISO, fmtDate, fmtDateShort, parseDate,
   getCurrentUser, setCurrentUser, clearCurrentUser, fetchLoginHistory, refreshPresence, isUserOnline, subscribePresence,
   _gkRefs, confirmDelete, triggerSaved, inp, ROLE_LABELS, canEdit, isAdmin,
   NAV_ITEMS, NAV_SECTIONS, getUserSections, setUserSections, sectionsForUser,
   getGroups, saveGroups, addGroup, updateGroup, deleteGroup,
-  getUserGroups, setUserGroups, groupsForUser, userIdsInGroup,
+  getUserGroups, setUserGroups, userIdsInGroup,
   ANNOUNCEMENT_SURFACES, ANNOUNCEMENT_DELIVERY, NEWS_SECTIONS, newsSectionMeta,
   getAnnouncements, saveAnnouncements, defAnnouncement, addAnnouncement, updateAnnouncement, deleteAnnouncement,
   announcementIsLive, announcementTargetsUser, announcementsForUser, announcementRecipientIds,
@@ -2951,7 +2937,7 @@ export {
   parseMentionText, getMentionCandidates, findBacklinks,
   getPlaybook, savePlaybook, savePlaybookSection, deletePlaybookSection, seedPlaybookIfEmpty,
   getImageRepo, saveImageRepo, saveImageRepoBlock, deleteImageRepoBlock, seedImageRepoIfEmpty, letterOf,
-  getToolsPrompts, saveToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
+  getToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
   getRevisions, getRevision, restoreRevision,

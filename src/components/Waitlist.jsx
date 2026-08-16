@@ -5,7 +5,7 @@ import {
   getClients, addClient, updateClient, deleteClient,
   getProducts, addProduct, updateProduct, deleteProduct,
   getWaitlist, addWaitlistEntry, updateWaitlistEntry, deleteWaitlistEntry, waitlistForProduct,
-  getCallbacks, defCallback, addCallback, updateCallback, deleteCallback,
+  getCallbacks, defCallback, addCallback, updateCallback,
   callbackTargetsUser, hasAckedCallback, ackCallback, getCallbackAcks,
   confirmDelete, triggerSaved, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem, startCallbackForProduct,

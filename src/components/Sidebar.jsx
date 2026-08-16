@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { C, FONT_CAPS, getTheme, setTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved, triggerToast, getIcsSubscribeUrl, NAV_ITEMS, sectionsForUser } from '../globals.js';
+import { C, FONT_CAPS, getTheme, clearCurrentUser, isAdmin, changeOwnPin, triggerSaved, triggerToast, getIcsSubscribeUrl, NAV_ITEMS, sectionsForUser } from '../globals.js';
 import { Icon, Avatar, Btn, OBtn, IconBtn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 

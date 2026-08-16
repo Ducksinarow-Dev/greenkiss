@@ -71,7 +71,7 @@ function AudiencePicker({ draft, set }) {
   );
 }
 
-function Composer({ draft: initial, user, onClose, onSaved }) {
+function Composer({ draft: initial, onClose, onSaved }) {
   const isNew = !getAnnouncements().some(a => a.id === initial.id);
   const [draft, setDraft] = useState(initial);
   const [error, setError] = useState("");

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { C, FONT_CAPS, LOGIN_BG, LOGIN_BG_DEEP, getUsers, setCurrentUser, REMOTE_MODE, remoteLogin, remoteLoginOptions } from '../globals.js';
-import { Btn, Icon, lbl } from './shared.jsx';
+import { Btn, lbl } from './shared.jsx';
 import gkLogo from '../assets/gk-logo.svg';
 
 function Login({ onLogin }) {
