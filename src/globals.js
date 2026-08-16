@@ -439,6 +439,10 @@ const db = {
   /** Synchronous read for render-time use (in-memory cache is always
    * fully warm by the time components render — see remoteBootstrap). */
   getSync: (k) => _hydrate(k),
+  /** Like getSync but guarantees an array. Guards render-time .map/.filter
+   * against a corrupted or wrong-typed value (a truthy non-array would slip
+   * past `|| []` and crash the whole render layer). */
+  getListSync: (k) => { const v = _hydrate(k); return Array.isArray(v) ? v : []; },
   setSync: (k, v) => {
     _cache.set(k, v);
     if (REMOTE_MODE) { _remoteKvSet(k, v); return; } // fire-and-forget, matches dev-mode call sites
@@ -648,7 +652,7 @@ const sectionsForUser = (user) =>
    Membership lives keyed by user rather than on the users table so it
    works identically in dev and remote mode (remote users are server-side
    and we don't want to widen that API just for a label). */
-const getGroups = () => db.getSync("groups") || [];
+const getGroups = () => db.getListSync("groups");
 const saveGroups = (list) => db.setSync("groups", list);
 const addGroup = (name, color, parentId = null) => {
   const g = { id: uid(), name: (name || "").trim(), color: color || CATEGORY_COLORS[0], parentId: parentId || null };
@@ -715,7 +719,7 @@ const NEWS_SECTIONS = [
 ];
 const newsSectionMeta = (key) => NEWS_SECTIONS.find(s => s.key === key) || NEWS_SECTIONS[0];
 
-const getAnnouncements = () => db.getSync("announcements") || [];
+const getAnnouncements = () => db.getListSync("announcements");
 const saveAnnouncements = (list) => db.setSync("announcements", list);
 function defAnnouncement(kind, user) {
   return {
@@ -805,7 +809,7 @@ function ackAnnouncement(id, userId) {
    that product (call each client, mark fulfilled) and close the callback.
    Generic kv docs; callbackAcks merges server-side like announcement acks. */
 // Clients ------------------------------------------------------------------
-const getClients = () => db.getSync("clients") || [];
+const getClients = () => db.getListSync("clients");
 const saveClients = (l) => db.setSync("clients", l);
 const addClient = (c) => {
   const rec = { id: uid(), name: (c.name || "").trim(), phone: c.phone || "", email: c.email || "", notes: c.notes || "", createdAt: nowISO() };
@@ -815,7 +819,7 @@ const addClient = (c) => {
 const updateClient = (id, ch) => saveClients(getClients().map(c => c.id === id ? { ...c, ...ch } : c));
 const deleteClient = (id) => saveClients(getClients().filter(c => c.id !== id));
 // Products (manual, each with a list of links) -----------------------------
-const getProducts = () => db.getSync("products") || [];
+const getProducts = () => db.getListSync("products");
 const saveProducts = (l) => db.setSync("products", l);
 const addProduct = (p) => {
   const rec = { id: uid(), name: (p.name || "").trim(), collection: p.collection || "", links: p.links || [], createdAt: nowISO() };
@@ -825,7 +829,7 @@ const addProduct = (p) => {
 const updateProduct = (id, ch) => saveProducts(getProducts().map(p => p.id === id ? { ...p, ...ch } : p));
 const deleteProduct = (id) => saveProducts(getProducts().filter(p => p.id !== id));
 // Waitlist entries (client wants product) ----------------------------------
-const getWaitlist = () => db.getSync("waitlist") || [];
+const getWaitlist = () => db.getListSync("waitlist");
 const saveWaitlist = (l) => db.setSync("waitlist", l);
 const addWaitlistEntry = (e) => {
   const rec = { id: uid(), clientId: e.clientId, productId: e.productId, note: e.note || "", fulfilled: false, fulfilledAt: null, createdAt: nowISO() };
@@ -836,7 +840,7 @@ const updateWaitlistEntry = (id, ch) => saveWaitlist(getWaitlist().map(e => e.id
 const deleteWaitlistEntry = (id) => saveWaitlist(getWaitlist().filter(e => e.id !== id));
 const waitlistForProduct = (productId) => getWaitlist().filter(e => e.productId === productId);
 // Callbacks ----------------------------------------------------------------
-const getCallbacks = () => db.getSync("callbacks") || [];
+const getCallbacks = () => db.getListSync("callbacks");
 const saveCallbacks = (l) => db.setSync("callbacks", l);
 const defCallback = (user) => ({
   id: uid(), productId: "", assigneeIds: [], groupIds: [], status: "open", note: "",
@@ -886,8 +890,8 @@ function ackCallback(id, userId) {
    not kv). Dev mode mirrors the same shape in localStorage kv so the whole
    UI works in the preview without a server — low volume, fine for testing.
    Built as a self-contained slice so it can be lifted into DuckTracks. */
-const _chatCh = () => db.getSync("chatChannels") || [];
-const _chatMsg = () => db.getSync("chatMessages") || [];
+const _chatCh = () => db.getListSync("chatChannels");
+const _chatMsg = () => db.getListSync("chatMessages");
 const _chatReads = () => db.getSync("chatReads") || {};
 const _chatLastRead = (uidv, cid) => (_chatReads()[uidv] || {})[cid] || 0;
 const _chatSetRead = (uidv, cid, v) => {
@@ -1237,7 +1241,7 @@ async function refreshCache() {
 
 /* ─── CATEGORY STORAGE ───────────────────────────────────────────── */
 /** @returns {Category[]} */
-const getCategories = () => db.getSync("categories") || [];
+const getCategories = () => db.getListSync("categories");
 /** @param {Category[]} c */
 const saveCategories = (c) => db.setSync("categories", c);
 const addCategory = (name, color) => {
@@ -1279,7 +1283,7 @@ const deleteCategory = (id) => {
    from the same CATEGORY_COLORS swatch set so tag chips visually match
    the rest of the app's "ingredient label" tag treatment. */
 /** @returns {Tag[]} */
-const getTags = () => db.getSync("tags") || [];
+const getTags = () => db.getListSync("tags");
 /** @param {Tag[]} t */
 const saveTags = (t) => db.setSync("tags", t);
 const addTag = (name, color) => {
@@ -1294,7 +1298,7 @@ const addTag = (name, color) => {
    Contacts and @person mentions) — same per-record collision-safe shape
    as tags/categories. ──────────────────────────────────────────────── */
 /** @returns {Contact[]} */
-const getContacts = () => db.getSync("contacts") || [];
+const getContacts = () => db.getListSync("contacts");
 /** @param {Contact[]} c */
 const saveContacts = (c) => db.setSync("contacts", c);
 const addContact = (contact) => {
@@ -1321,7 +1325,7 @@ const deleteContact = (id) => {
    a viewer-appropriate action); delete is restricted server-side to the
    alert's target, its creator, or an admin. */
 /** @returns {Alert[]} */
-const getAlerts = () => db.getSync("alerts") || [];
+const getAlerts = () => db.getListSync("alerts");
 /** @param {Alert[]} a */
 const saveAlerts = (a) => db.setSync("alerts", a);
 const addAlert = (taskId, toUserId) => {
@@ -1340,7 +1344,7 @@ const deleteAlert = (id) => {
 
 /* ─── TASK TEMPLATE STORAGE (#9 — "Templates" overflow action) ──────── */
 /** @returns {TaskTemplate[]} */
-const getTaskTemplates = () => db.getSync("taskTemplates") || [];
+const getTaskTemplates = () => db.getListSync("taskTemplates");
 /** @param {TaskTemplate[]} t */
 const saveTaskTemplates = (t) => db.setSync("taskTemplates", t);
 /** Strips id/status/assignee/dates so the template is a reusable shape,
@@ -1379,7 +1383,7 @@ const taskFromTemplate = (tpl, extra = {}) => {
 
 /* ─── SOP STORAGE ────────────────────────────────────────────────── */
 /** @returns {SOP[]} */
-const getSOPs = () => db.getSync("sops") || [];
+const getSOPs = () => db.getListSync("sops");
 /** @param {SOP[]} s */
 const saveSOPs = (s) => db.setSync("sops", s);
 /** @param {string} id @returns {SOP|null} */
@@ -1597,7 +1601,7 @@ const sopExcerpt = (sop, maxLen = 140) => {
    blocksSnapshot is frozen at start time so editing the live template
    later never rewrites a past run's history. ─────────────────────────── */
 /** @returns {Instance[]} */
-const getAllInstances = () => db.getSync("instances") || [];
+const getAllInstances = () => db.getListSync("instances");
 /** @param {Instance[]} i */
 const saveInstances = (i) => db.setSync("instances", i);
 /** @param {string} docId @returns {Instance[]} newest first */
@@ -1957,7 +1961,7 @@ const savePlaybook = (p) => db.setSync("playbook", p);
    written at edit boundaries (leaving edit mode, section add/delete, and
    before any restore so restores are themselves undoable). Capped at 20.
    Rides the generic kv path like the playbook doc itself. */
-const getPlaybookRevs = () => db.getSync("playbookRevs") || [];
+const getPlaybookRevs = () => db.getListSync("playbookRevs");
 function addPlaybookRev(label = "") {
   const playbook = getPlaybook();
   if (!playbook) return;
@@ -2330,7 +2334,7 @@ async function processAndStoreImage(file, maxDim = 1400, quality = 0.82) {
 
 /* ─── TASK STORAGE ───────────────────────────────────────────────── */
 /** @returns {Task[]} */
-const getTasks = () => db.getSync("tasks") || [];
+const getTasks = () => db.getListSync("tasks");
 /** @param {Task[]} t */
 const saveTasks = (t) => db.setSync("tasks", t);
 const addTask = (task) => {
@@ -2545,7 +2549,7 @@ function normalizeProjectStatus(status) {
   return "upcoming";
 }
 /** @returns {Project[]} */
-const getProjects = () => (db.getSync("projects") || []).map(p => ({ ...p, status: normalizeProjectStatus(p.status) }));
+const getProjects = () => db.getListSync("projects").map(p => ({ ...p, status: normalizeProjectStatus(p.status) }));
 /** @param {Project[]} p */
 const saveProjects = (p) => db.setSync("projects", p);
 const addProject = (project) => {
@@ -2667,7 +2671,7 @@ const projectProgress = (projectId, allTasks) => {
 
 /* ─── CAMPAIGN STORAGE ───────────────────────────────────────────── */
 /** @returns {Campaign[]} */
-const getCampaigns = () => db.getSync("campaigns") || [];
+const getCampaigns = () => db.getListSync("campaigns");
 /** @param {Campaign[]} c */
 const saveCampaigns = (c) => db.setSync("campaigns", c);
 const addCampaign = (campaign) => {
@@ -2703,7 +2707,7 @@ const defCampaign = () => ({
 
 /* ─── CONTENT ITEM STORAGE ───────────────────────────────────────── */
 /** @returns {ContentItem[]} */
-const getContentItems = () => db.getSync("content") || [];
+const getContentItems = () => db.getListSync("content");
 /** @param {ContentItem[]} c */
 const saveContentItems = (c) => db.setSync("content", c);
 const addContentItem = (item) => {
@@ -2765,7 +2769,7 @@ const isAssignedTo = (rec, userId) => assigneesOf(rec).includes(userId);
  * own listing needs role info too, so it uses fetchUsersFull() instead
  * of getUsers() directly. */
 /** @returns {User[]} */
-const getUsers = () => db.getSync("users") || [];
+const getUsers = () => db.getListSync("users");
 /** @param {User[]} u */
 const saveUsers = (u) => db.setSync("users", u);
 
@@ -2894,8 +2898,19 @@ function exportAllData() {
  * responsible for the "are you sure" confirm — this just applies it. */
 async function importAllData(parsed) {
   const data = (parsed && parsed.data) || parsed || {};
+  // Validate the whole payload before writing anything: a scalar where a
+  // collection is expected (e.g. tasks:"oops") would otherwise persist and
+  // crash the render layer on every reload. Reject up front, write nothing.
+  const bad = Object.keys(data).filter(k => {
+    const v = data[k];
+    return v != null && typeof v !== "object"; // arrays and objects are fine; scalars are not
+  });
+  if (bad.length) {
+    throw new Error(`Import file is malformed — these keys aren't valid data: ${bad.join(", ")}`);
+  }
   for (const k of Object.keys(data)) {
     if (k === "users" && REMOTE_MODE) continue; // remote users aren't importable this way
+    if (data[k] == null) continue; // skip explicit nulls rather than clobbering a collection with null
     await db.set(k, data[k]);
   }
 }

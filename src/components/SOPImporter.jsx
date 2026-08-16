@@ -172,17 +172,22 @@ function parseDocxHtmlToBlocks(html) {
 }
 
 /** Uploads every image block's base64 src through the app's real image
- * pipeline (downscale + REMOTE_MODE upload), mutating blocks in place. */
+ * pipeline (downscale + REMOTE_MODE upload), mutating blocks in place.
+ * Returns the number of images that failed to process — the caller surfaces
+ * this so a partial import (some images dropped) isn't silent data loss. */
 async function hydrateImages(blocks) {
   const jobs = blocks.filter(b => b.type === "image" && (b.src || "").startsWith("data:"));
+  let dropped = 0;
   await Promise.all(jobs.map(async b => {
     try {
       const file = dataUriToFile(b.src, "import.jpg");
       b.src = await processAndStoreImage(file);
     } catch {
       b.src = ""; // leave it blank rather than fail the whole import
+      dropped++;
     }
   }));
+  return dropped;
 }
 
 async function importDocx(file) {
@@ -191,8 +196,8 @@ async function importDocx(file) {
   const result = await mammoth.convertToHtml({ arrayBuffer });
   const blocks = parseDocxHtmlToBlocks(result.value || "");
   if (!blocks.length) throw new Error("Couldn't find any content in that document.");
-  await hydrateImages(blocks);
-  return blocks;
+  const dropped = await hydrateImages(blocks);
+  return { blocks, dropped };
 }
 
 /** Groups pdf.js text-content items (individual runs, not lines) into lines
@@ -259,7 +264,7 @@ async function parsePdfToBlocks(file) {
 async function importPdf(file) {
   const blocks = await parsePdfToBlocks(file);
   if (!blocks.length) throw new Error("Couldn't extract any text from that PDF.");
-  return blocks;
+  return { blocks, dropped: 0 }; // pdf.js text extraction carries no embedded images
 }
 
 /** Import button — editor/admin only, rendered next to "New SOP". Hands
@@ -275,11 +280,15 @@ function ImportSopButton({ onImported }) {
     setBusy(true); setErr("");
     try {
       const ext = (file.name.split(".").pop() || "").toLowerCase();
-      let blocks;
-      if (ext === "docx") blocks = await importDocx(file);
-      else if (ext === "pdf") blocks = await importPdf(file);
+      let result;
+      if (ext === "docx") result = await importDocx(file);
+      else if (ext === "pdf") result = await importPdf(file);
       else throw new Error("Only .docx and .pdf files can be imported.");
+      const { blocks, dropped } = result;
       const title = file.name.replace(/\.(docx|pdf)$/i, "");
+      if (dropped > 0) {
+        setErr(`Imported, but ${dropped} image${dropped === 1 ? "" : "s"} couldn't be processed and ${dropped === 1 ? "was" : "were"} left out.`);
+      }
       onImported({ title, blocks });
     } catch (e) {
       setErr(e.message || "Couldn't import that file.");

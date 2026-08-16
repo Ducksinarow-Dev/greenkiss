@@ -470,6 +470,7 @@ function MetricsSection({ form, setMetric, set }) {
     setLoadingStats(true);
     try {
       const stats = await fetchOmnisendCampaignStats(linked);
+      if (!stats) { triggerToast("No stats available for this campaign yet"); setLoadingStats(false); return; }
       set("omnisendStats", { ...stats, fetchedAt: new Date().toISOString() });
     } catch (err) { triggerToast(err.message || "Couldn't refresh stats"); }
     setLoadingStats(false);
