@@ -21,7 +21,16 @@ pass=0; fail=0
 ok(){ if [ "$2" = "$3" ]; then echo "  PASS $1"; pass=$((pass+1)); else echo "  FAIL $1 (got [$2] want [$3])"; fail=$((fail+1)); fi; }
 MU="${MYSQL_USER:-$USER}"
 q(){ mysql -N -u "$MU" "$DB" -e "$1"; }
-count_ids(){ q "SELECT v FROM kv_store WHERE k='$1';" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo is_array($d)?count($d):0;'; }
+# Counts what the CLIENT is served, not what a particular table holds. This used
+# to read kv_store directly, which made every assertion below silently coupled
+# to storage: when tasks moved to their own table (#41 step 3) the counts went
+# to zero and read as lost data rather than as the test looking in the old
+# place. Going through kv_all keeps these about behaviour — the contract the
+# browser depends on — so the remaining collections can migrate without
+# touching a single assertion here.
+count_ids(){ curl -s --max-time 20 "$B?action=kv_all" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); $x=$d["data"]["'"$1"'"]??null; echo is_array($x)?count($x):0;'; }
+# The served collection as JSON, for assertions that grep for specific content.
+served(){ curl -s --max-time 20 "$B?action=kv_all" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo json_encode($d["data"]["'"$1"'"]??[]);'; }
 
 command -v mysql >/dev/null && command -v php >/dev/null || { echo "SKIP: needs mysql + php on PATH"; exit 0; }
 mysqladmin ping >/dev/null 2>&1 || { echo "SKIP: no mysqld running"; exit 0; }
@@ -97,9 +106,13 @@ post task_save '{"task":{"id":"t20","title":"Project task","projectId":"p1"}}'
 # A second client adds a task AFTER the first one loaded its cache.
 post task_save '{"task":{"id":"t21","title":"Coworker task added later"}}'
 post project_delete '{"id":"p1"}'
-ok "coworker's later task survived the cascade" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c 'Coworker task added later')" "1"
-ok "deleted project's task was unlinked, not deleted" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c 'Project task')" "1"
-ok "projectId cleared" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c '"projectId":"p1"')" "0"
+# Against what the client is served, for the same reason as count_ids. Note the
+# third assertion would PASS for the wrong reason if left pointed at kv_store:
+# the frozen doc contains no "projectId":"p1" simply because nothing writes it
+# any more, so it would report success without the cascade having run at all.
+ok "coworker's later task survived the cascade" "$(served tasks | grep -c 'Coworker task added later')" "1"
+ok "deleted project's task was unlinked, not deleted" "$(served tasks | grep -c 'Project task')" "1"
+ok "projectId cleared" "$(served tasks | grep -c '"projectId":"p1"')" "0"
 
 echo "== sop_delete is server-side =="
 post sop_save '{"sop":{"id":"s1","title":"Mine"}}'

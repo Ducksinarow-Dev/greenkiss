@@ -30,49 +30,28 @@ foreach (array_slice($argvv, 1) as $a) {
     if (strncmp($a, '--', 2) !== 0) { $target = $a; break; }
 }
 
-/* ── Shared logic (pure, so --self-test can check it without a DB) ────── */
-
-/**
- * A record table's real columns are named after the JSON field they mirror,
- * snake_case for camelCase: due_date <- dueDate, project_id <- projectId.
- * Deriving it beats maintaining a per-collection field map that can drift out
- * of sync with the schema.
- * ponytail: mechanical mapping — if a column ever needs a value that ISN'T a
- * straight field copy (a computed rollup, say), give it an explicit entry here
- * rather than bending the naming rule.
+/* ── Shared logic ─────────────────────────────────────────────────────
+ * recordRow()/recordFieldForColumn() are LIFTED FROM api.php rather than
+ * restated here. They used to be a second copy, which meant the migration and
+ * the live write path could drift into building the same row two different
+ * ways — the migration would then quietly write rows that no longer matched
+ * what the app produces. api.php can't be require'd (it would connect to a DB
+ * and serve a request), so the functions are extracted and eval'd.
  */
-function gkFieldForColumn($col) {
-    return preg_replace_callback('/_([a-z])/', fn($m) => strtoupper($m[1]), $col);
-}
-
-/**
- * One kv record -> the row to write. `data` keeps the WHOLE record (nothing is
- * dropped, so the row is a lossless replacement for the JSON entry) and the
- * real columns are copies for querying.
- *
- * Dates are normalized to NULL when blank: the app stores "" for "no date", but
- * a DATE column rejects "" under a strict sql_mode and would silently become
- * 0000-00-00 under a lax one. Both are wrong; NULL is the honest answer.
- */
-function gkRecordRow(array $record, array $cols) {
-    $row = [
-        'id' => (string)$record['id'],
-        'data' => json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        'version' => 1,
-    ];
-    foreach ($cols as $col => $type) {
-        $val = $record[gkFieldForColumn($col)] ?? null;
-        if (is_array($val) || is_object($val)) $val = null; // scalar columns only
-        if ($val === '') $val = null;
-        if ($val !== null && strncmp($type, 'DATE', 4) === 0) {
-            // Accept only a real Y-m-d; anything else (a full ISO timestamp, a
-            // locale string, junk) is stored as NULL rather than a bogus date.
-            $val = preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$val, $m) ? $m[1] : null;
-        }
-        $row[$col] = $val === null ? null : (string)$val;
+$apiSrcForFns = file_get_contents("$root/api.php");
+function gk_lift_fn($src, $pattern, $what) {
+    if (!preg_match($pattern, $src, $m)) {
+        fwrite(STDERR, "Could not find $what in api.php\n");
+        exit(1);
     }
-    return $row;
+    return $m[0];
 }
+eval(gk_lift_fn($apiSrcForFns, '/function recordFieldForColumn\(.*?\n\}/s', 'recordFieldForColumn()'));
+eval(gk_lift_fn($apiSrcForFns, '/function recordRow\(.*?\n\}/s', 'recordRow()'));
+
+// Names kept so the rest of this script (and its self-test) reads unchanged.
+function gkFieldForColumn($col) { return recordFieldForColumn($col); }
+function gkRecordRow(array $record, array $cols) { return recordRow($record, $cols); }
 
 /* ── Self-test: the transformation logic, no DB needed ────────────────── */
 

@@ -85,7 +85,10 @@ q "DELETE FROM revisions;"
 q "DELETE FROM chat_messages; DELETE FROM chat_members; DELETE FROM chat_channels;"
 curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d "{\"file\":\"$F\"}" >/dev/null
 ok "kv restored" "$(q "SELECT v FROM kv_store WHERE k='imagerepo';" | grep -c Bathorium)" "1"
-ok "tasks restored" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c lavender)" "1"
+# Tasks live in their own table since #41 step 3, so this reads the table rather
+# than the (now frozen) kv doc — otherwise it reports 0 and reads as lost data
+# when the restore actually worked perfectly.
+ok "tasks restored" "$(q "SELECT data FROM tasks;" | grep -c lavender)" "1"
 ok "revisions restored" "$(q 'SELECT COUNT(*) FROM revisions;')" "1"
 ok "chat channels restored" "$(q "SELECT COUNT(*) FROM chat_channels WHERE id='c1';")" "1"
 ok "chat message restored" "$(q "SELECT body FROM chat_messages;" | grep -c 'Lavender restock is in')" "1"
