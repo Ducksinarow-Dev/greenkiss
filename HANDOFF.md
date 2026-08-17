@@ -6,7 +6,7 @@ Snapshot for a new chat picking up work on this repo. Pair with `BACKLOG.md`, `D
 The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content calendar, image repository, announcements, waitlist/callbacks, and staff chat. Replaces Notion + scattered tools.
 - **Repo:** `Ducksinarow-Dev/greenkiss` (cloned at `/Users/super-dad/Projects/GK Hub/greenkiss`)
 - **Production:** https://hub.thegreenkiss.com · **Old tool being replaced:** https://team.thegreenkiss.com
-- **Latest release:** `v0.1.43` (on the `release` branch)
+- **Latest release:** `v0.1.44` (on the `release` branch)
 
 ## Stack & architecture
 - **Frontend:** React 18 + Vite, no router — `src/App.jsx` switches "sections" (nav keys). Components in `src/components/`. All shared state/data + helpers live in `src/globals.js` (~2.9k lines). Shared UI kit in `src/components/shared.jsx`.
@@ -34,7 +34,8 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **Track X (needs external setup):** PWA + Web Push (biggest buildable win; iOS needs "Add to Home Screen"); GBP posting API (needs Google Cloud OAuth — see `GBP_PUSH.md`); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.
 
-## Shipped Aug 2026 (on `release` as v0.1.43; awaits the Update Now click)
+## Shipped Aug 2026 (on `release` as v0.1.44; awaits the Update Now click)
+- **Inline mention pills in edit fields (`RichMentionField`):** new reusable contentEditable field in `shared.jsx` renders `@[Label](kind:id)` tokens as **fully-rounded pills inline while editing** (not token text), serializing back to the same token string — a drop-in for input/textarea; supports `@`-mention + paste-to-pill, preserves caret. Swapped into announcement/news title+details, task title+description, content body/caption/notes, campaign description, callback note. All mention pills (`MentionText` + `mentionTokensToHtml`) are now `borderRadius:999`. **Chat composer + SOP block fields still use the plain `MentionField`** (auto-resize / WYSIWYG context) — possible follow-up. contentEditable typing/caret isn't automation-testable — spot-check live.
 - **Magnet-pill fix (announcements/news):** composer title + details now paste-convert `gk:` codes (`onMagnetPaste`), and every announcement/news **title AND body** renders via `MentionText`+`linkifyMagnets` (Announcements list, dashboard `NewsStrip`, `AnnouncementDelivery` blocker + toast) — titles previously rendered plain, so pasted codes stayed as text.
 - **#51 saved reports:** Content Reports gained a **Range** dropdown with dynamic presets (last 7/14/30/90, this/last month, QTD, YTD, custom) that recompute on open; **Save report** stores name+range+channel+metric in shared kv `contentReports`, shown as clickable chips. Globals: `reportRange`/`REPORT_RANGES` + `getContentReports`/`addContentReport`/`deleteContentReport`.
 - **#58 brand sub-categories (Image Repository):** title blocks gained optional `brand`; galleries sharing a brand render under a collapsible `BrandGroup` header (`groupByBrand`/`GalleryRow`); `letterOf` prefers brand; edit mode gained a "Brand group" field. Backward-compatible with the flat blocks.
