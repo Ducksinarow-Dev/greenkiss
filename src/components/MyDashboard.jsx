@@ -71,27 +71,6 @@ function ItemRow({ item, onToggle, onOpen }) {
   );
 }
 
-function ItemGroup({ group, items, onToggle, onOpen }) {
-  if (items.length === 0) return null;
-  const accent = group.accent;
-  const color = accent ? C.red : (group.key === "today" ? C.moss : C.txt2);
-  const icon = accent ? "error" : group.icon;
-  return (
-    <div>
-      <div style={{
-        fontSize: 12, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em",
-        color, marginBottom: 9, display: "flex", alignItems: "center", gap: 6,
-      }}>
-        {icon && <Icon name={icon} size={14} />}
-        {group.label} <span style={{ color: C.faint, fontWeight: 500 }}>({items.length})</span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        {items.map(item => <ItemRow key={item.key} item={item} onToggle={() => onToggle(item)} onOpen={() => onOpen(item)} />)}
-      </div>
-    </div>
-  );
-}
-
 /** #9 — the target user's alert strip: any staff member who flagged a task
  * for someone shows up here, rose/pink accent, dismissible (dismiss =
  * delete the alert record). Sits above everything else on the dashboard. */
@@ -287,6 +266,91 @@ function ChatStrip({ count, onOpen }) {
   );
 }
 
+/* ── Merged "Needs your attention" bar ──────────────────────────────
+   Collapses the four notification channels (callbacks, unread chat, news,
+   alerts) into ONE bar with a per-channel count, instead of up to five
+   separately-styled strips stacked at the top. Clay accent when something
+   is must-act (an open callback or a flagged alert), moss when it's just
+   informational (chat/news). Expands to reveal the real items — the
+   existing strip components, passed in as children. Hidden when empty. */
+function AttentionBar({ callbackCount, chatUnread, newsCount, alertCount, children }) {
+  const [open, setOpen] = useState(false);
+  const total = callbackCount + (chatUnread ? 1 : 0) + newsCount + alertCount;
+  if (total === 0) return null;
+  const mustAct = callbackCount > 0 || alertCount > 0;
+  const accent = mustAct ? C.clay : C.moss;
+  const chips = [];
+  if (callbackCount) chips.push(`${callbackCount} callback${callbackCount === 1 ? "" : "s"}`);
+  if (alertCount) chips.push(`${alertCount} alert${alertCount === 1 ? "" : "s"}`);
+  if (chatUnread) chips.push(`${chatUnread} unread`);
+  if (newsCount) chips.push(`${newsCount} update${newsCount === 1 ? "" : "s"}`);
+  return (
+    <div style={{ marginBottom: 22, background: C.sur, border: `1.5px solid ${mustAct ? accent + "66" : C.bdr}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, overflow: "hidden" }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "12px 15px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+        <Icon name={mustAct ? "notifications_active" : "notifications"} size={19} style={{ color: accent, flexShrink: 0 }} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.txt, flexShrink: 0 }}>Needs your attention</span>
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {chips.map((c, i) => (
+            <span key={i} style={{ fontSize: 11.5, fontWeight: 600, color: C.txt2, background: C.bg, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 9px" }}>{c}</span>
+          ))}
+        </span>
+        <span style={{ fontSize: 12, color: C.mut, fontWeight: 600, display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+          {open ? "Hide" : "Show"} <Icon name={open ? "expand_less" : "expand_more"} size={17} />
+        </span>
+      </button>
+      {open && <div style={{ padding: "4px 15px 14px" }}>{children}</div>}
+    </div>
+  );
+}
+
+/* ── Focus hero — the answer to "what do I do next?" ────────────────
+   The single most prominent element: overdue + due-today work, full width,
+   red top-accent the moment anything is overdue. When the day is clear it
+   stays calm and points at what's coming, so the dashboard never opens on a
+   wall of equal-weight cards. */
+function FocusHero({ items, weekCount, onToggle, onOpen }) {
+  const overdue = items.filter(i => i.group === "overdue");
+  const today = items.filter(i => i.group === "today");
+  const hasOverdue = overdue.length > 0;
+  const accent = hasOverdue ? C.red : C.moss;
+  const summary = items.length === 0
+    ? (weekCount > 0 ? `Nothing due today · ${weekCount} coming up this week` : "Nothing due today")
+    : [hasOverdue ? `${overdue.length} overdue` : null, today.length ? `${today.length} due today` : null].filter(Boolean).join(" · ");
+  return (
+    <section style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderTop: `3px solid ${accent}`, borderRadius: 14, padding: "18px 20px", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: items.length ? 14 : 0 }}>
+        <Icon name={hasOverdue ? "priority_high" : "wb_sunny"} size={20} style={{ color: accent }} />
+        <span style={{ fontSize: 17, fontWeight: 800, color: C.txt }}>Do next today</span>
+        <span style={{ fontSize: 13, color: hasOverdue ? C.red : C.mut, fontWeight: hasOverdue ? 700 : 500 }}>{summary}</span>
+      </div>
+      {items.length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.mut, fontSize: 13.5, marginTop: 10 }}>
+          <Icon name="check_circle" size={17} style={{ color: C.moss }} />
+          You&apos;re clear for today — nice. Anything assigned shows below.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 8 }}>
+          {[...overdue, ...today].map(item => (
+            <ItemRow key={item.key} item={item} onToggle={() => onToggle(item)} onOpen={() => onOpen(item)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* Quiet secondary section — uniform header so the grid cells line up. */
+const DashSection = ({ title, extra, children }) => (
+  <div style={{ minWidth: 0 }}>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.08em", color: C.txt2 }}>{title}</span>
+      {extra}
+    </div>
+    {children}
+  </div>
+);
+
 function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback, chatUnread = 0, onOpenChat }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
@@ -385,7 +449,16 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
   };
 
   const myProjects = projects.filter(p => p.leadId === user.id || (p.memberIds || []).includes(user.id));
-  const totalOpen = allItems.length;
+
+  // Counts for the merged attention bar (the strips themselves still own
+  // their rendering — this is just the summary line).
+  const myCallbacks = openCallbacksForUser(user);
+  const myNews = announcementsForUser(user, "news");
+
+  // Hero = overdue + due-today; the secondary "This week & later" card gets
+  // everything else still open.
+  const todayItems = bySection(DASH_SECTIONS[0]);      // overdue + today
+  const laterItems = bySection(DASH_SECTIONS[1]);      // week + later
 
   // Upcoming campaigns (team-wide) — not done, and not already ended.
   const t0 = new Date();
@@ -408,36 +481,36 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
 
-      <CallbacksStrip user={user} onOpen={onOpenCallback} />
+      {/* One merged bar instead of up to five stacked notification strips.
+          Expands to the original strips, which keep their own behavior. */}
+      <AttentionBar callbackCount={myCallbacks.length} chatUnread={chatUnread} newsCount={myNews.length} alertCount={myAlerts.length}>
+        <CallbacksStrip user={user} onOpen={onOpenCallback} />
+        <ChatStrip count={chatUnread} onOpen={onOpenChat} />
+        <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
+        <NewsStrip user={user} onOpen={onOpenAnnouncements} />
+      </AttentionBar>
 
-      <ChatStrip count={chatUnread} onOpen={onOpenChat} />
+      {/* Hero — the most prominent block, "what do I do next?" */}
+      <FocusHero items={todayItems} weekCount={laterItems.length} onToggle={toggleItem} onOpen={openItem} />
 
-      <NewsStrip user={user} onOpen={onOpenAnnouncements} />
-
-      <AlertsStrip alerts={myAlerts} tasks={tasks} users={users} onDismiss={dismissAlert} onOpenTask={openAlertedTask} />
-
+      {/* Store gauges stay their own wide element, demoted below the hero. */}
       <DashStoreStrip user={user} onOpen={onOpenStore} />
 
-      {/* Top row — Tasks 50% | Projects 50% */}
-      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 22 }}>
-        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-          <SecTitle>Tasks</SecTitle>
-          {totalOpen === 0 ? (
-            <DashEmpty icon="task_alt" title="Nothing due" sub="Tasks and sub-tasks assigned to you show up here, grouped by when they're due." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-              {DASH_SECTIONS.map(sec => {
-                const items = bySection(sec);
-                const accent = sec.key === "today" && items.some(i => i.group === "overdue");
-                return <ItemGroup key={sec.key} group={{ ...sec, accent }} items={items} onToggle={toggleItem} onOpen={openItem} />;
-              })}
+      {/* Quiet, aligned secondary grid — equal gaps, uniform headers. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 24, alignItems: "start" }}>
+        <DashSection title="This week & later" extra={laterItems.length > 0 && <span style={{ fontSize: 11, color: C.mut, background: C.bg, border: `1px solid ${C.bdr}`, borderRadius: 99, padding: "1px 8px" }}>{laterItems.length}</span>}>
+          {laterItems.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {laterItems.map(item => <ItemRow key={item.key} item={item} onToggle={() => toggleItem(item)} onOpen={() => openItem(item)} />)}
             </div>
+          ) : (
+            <DashEmpty icon="task_alt" title="Nothing upcoming" sub="Tasks assigned to you, due later this week or beyond, land here." />
           )}
-        </div>
-        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-          <SecTitle>My Projects</SecTitle>
+        </DashSection>
+
+        <DashSection title="My Projects">
           {myProjects.length > 0 ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {myProjects.map(p => (
                 <ProjectCard key={p.id} project={p} users={users} tasks={tasks} onOpen={() => onOpenProject && onOpenProject(p.id)} />
               ))}
@@ -445,13 +518,9 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
           ) : (
             <DashEmpty icon="folder_open" title="No projects" sub="Projects you lead or belong to appear here." />
           )}
-        </div>
-      </div>
+        </DashSection>
 
-      {/* Bottom row — Upcoming Campaigns 50% | My Forms fills the other half */}
-      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-          <SecTitle>Upcoming Campaigns</SecTitle>
+        <DashSection title="Upcoming Campaigns">
           {upcomingCampaigns.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {upcomingCampaigns.map(c => <DashCampaignCard key={c.id} campaign={c} onOpen={() => onOpenCampaign && onOpenCampaign(c.id)} />)}
@@ -459,10 +528,10 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
           ) : (
             <DashEmpty icon="campaign" title="No upcoming campaigns" sub="Campaigns with a current or future date range show here." />
           )}
-        </div>
-        {myForms.length > 0 ? (
-          <div style={{ flex: "1 1 340px", minWidth: 0 }}>
-            <SecTitle>My Forms <span style={{ color: C.faint, fontWeight: 500 }}>— in progress</span></SecTitle>
+        </DashSection>
+
+        {myForms.length > 0 && (
+          <DashSection title="My Forms" extra={<span style={{ fontSize: 11, color: C.faint }}>in progress</span>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
               {myForms.map(f => {
                 const doc = sops.find(s => s.id === f.docId);
@@ -485,10 +554,7 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
                 );
               })}
             </div>
-          </div>
-        ) : (
-          /* keep Upcoming Campaigns at ~50% when there are no forms to fill the row */
-          <div style={{ flex: "1 1 340px", minWidth: 0 }} aria-hidden="true" />
+          </DashSection>
         )}
       </div>
 
