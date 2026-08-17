@@ -82,6 +82,26 @@ ok('no-arg call does not throw', (() => { try { backupHealth(undefined, NOW); re
 const badDate = backupHealth({ backups: [{ createdAt: 'not-a-date' }], offsite: { configured: true, ok: true, at: 'garbage' } }, NOW);
 ok('unreadable dates => warn, not a crash or silence', badDate.level === 'warn');
 
+// ── Uploads mirror (the image library) ────────────────────────────────
+const upOk = { configured: true, ok: true, at: hoursAgo(1), uploaded: 3, pending: 0 };
+ok('healthy mirror stays silent',
+  backupHealth({ backups: snap(2), offsite: { configured: true, ok: true, at: hoursAgo(2) }, uploads: upOk }, NOW).level === 'ok');
+const upFail = backupHealth({ backups: snap(2), offsite: { configured: true, ok: true, at: hoursAgo(2) }, uploads: { configured: true, ok: false, error: 'B2 auth returned HTTP 401 — bad_auth_token' } }, NOW);
+ok('failing mirror => bad', upFail.level === 'bad');
+ok('failing mirror surfaces the real error', upFail.detail.includes('bad_auth_token'));
+const upPending = backupHealth({ backups: snap(2), offsite: { configured: true, ok: true, at: hoursAgo(2) }, uploads: { configured: true, ok: true, at: hoursAgo(1), pending: 12 } }, NOW);
+ok('backlog => warn, not bad (the cap drains it)', upPending.level === 'warn' && /12 images/.test(upPending.detail));
+ok('one pending image reads singular',
+  /1 image /.test(backupHealth({ backups: snap(2), offsite: { configured: true, ok: true, at: hoursAgo(2) }, uploads: { configured: true, ok: true, at: hoursAgo(1), pending: 1 } }, NOW).detail));
+// With B2 off entirely, "off-site is off" is the one actionable problem —
+// repeating it per subsystem would turn it into a wall of red.
+const b2Off = backupHealth({ backups: snap(2), offsite: { configured: false }, uploads: { configured: false } }, NOW);
+ok('B2 unconfigured reports once, not per subsystem', b2Off.problems.length === 1);
+// Missing uploads status (an older server, or before the first mirror run)
+// must not invent a problem.
+ok('absent uploads status is silent',
+  backupHealth({ backups: snap(2), offsite: { configured: true, ok: true, at: hoursAgo(2) } }, NOW).level === 'ok');
+
 // ── Severity ordering: a hard failure must not be downgraded by a warn ─
 const both = backupHealth({ backups: snap(50), offsite: { configured: true, ok: false, error: 'x' } }, NOW);
 ok('bad wins over warn', both.level === 'bad' && both.problems.length === 2);

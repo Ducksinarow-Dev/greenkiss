@@ -129,6 +129,10 @@ try {
 // be safely restored; backup_restore refuses anything below it.
 define('GK_BACKUP_FORMAT', 2);
 
+// How many images the uploads mirror sends per run, so one cron tick can't hit
+// max_execution_time on the first sync of a large library; the rest go next run.
+define('GK_UPLOADS_SYNC_CAP', 40);
+
 $GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
 
 // Tables that are neither kv nor chat nor per-record, dumped verbatim. tokens is
@@ -901,7 +905,10 @@ switch ($action) {
         // Off-site copy rides the explicit backup path only (this action = the
         // daily cron and the admin's "Back up now" button), never the lazy
         // write-triggered one — see offsiteSync's header comment.
-        respond(200, ['ok' => true, 'file' => $file, 'offsite' => offsiteSync($pdo, $file)]);
+        // Uploads ride the same explicit path as the DB copy (cron + the admin
+        // button), never maybeAutoBackup — an image upload inside a staff save
+        // would add seconds to it.
+        respond(200, ['ok' => true, 'file' => $file, 'offsite' => offsiteSync($pdo, $file), 'uploads' => uploadsSync($pdo)]);
         break;
 
     case 'backup_list':
@@ -913,6 +920,11 @@ switch ($action) {
             'backups' => listBackups(),
             'offsite' => offsiteConfigured()
                 ? (kvGet($pdo, 'backupOffsite') ?: ['configured' => true, 'ok' => null, 'error' => 'No off-site copy has run yet.'])
+                : ['configured' => false],
+            // Same reasoning as offsite: a mirror that quietly stopped looks
+            // exactly like one that finished, so its status ships with the list.
+            'uploads' => offsiteConfigured()
+                ? (kvGet($pdo, 'backupUploads') ?: ['configured' => true, 'ok' => null, 'error' => 'No uploads mirror has run yet.'])
                 : ['configured' => false],
         ]);
         break;
@@ -2099,7 +2111,10 @@ function b2Authorize() {
 }
 
 // Uploads one backup file. Returns ['ok'=>bool, 'error'=>?string].
-function offsiteUpload($path) {
+// $remoteName lets the uploads mirror preserve a relative path
+// (uploads/2026-08/x.jpg) instead of flattening every month folder into one
+// namespace; backups keep passing just a filename.
+function offsiteUpload($path, $remoteName = null) {
     if (!offsiteConfigured()) return ['ok' => false, 'error' => 'not configured'];
     if (!is_file($path)) return ['ok' => false, 'error' => 'local backup file missing'];
     $auth = b2Authorize();
@@ -2139,7 +2154,9 @@ function offsiteUpload($path) {
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_HTTPHEADER => [
             'Authorization: ' . $u['authorizationToken'],
-            'X-Bz-File-Name: ' . rawurlencode($prefix . basename($path)),
+            // rawurlencode would escape the slashes that make B2 show these as
+            // folders, so encode each path segment and keep the separators.
+            'X-Bz-File-Name: ' . implode('/', array_map('rawurlencode', explode('/', $prefix . ($remoteName ?? basename($path))))),
             'Content-Type: application/octet-stream',
             'Content-Length: ' . strlen($body),
             // B2 verifies this and rejects a corrupted upload, which is exactly
@@ -2165,6 +2182,90 @@ function offsiteUpload($path) {
 // disaster. This matters more than the upload itself: nobody watches a cron,
 // and "automated but quietly broken for three months" is worse than manual.
 // Never throws — an off-site failure must not fail the local backup.
+// ── UPLOADS MIRROR (#42a) ─────────────────────────────────────────────────
+// The image library was in no backup at all: the DB dump carries the imagerepo
+// links, not the files behind them.
+//
+// Mirrored rather than bundled. Images are append-only (nothing in the app
+// deletes an upload), so putting them in each 6-hourly snapshot would store the
+// whole library ~240 times over — on the same disk as the originals, where a
+// dead disk takes both. Each file is uploaded to B2 exactly once instead:
+// ~1x storage, and it lives somewhere the server dying doesn't reach.
+//
+// The manifest is a plain newline-delimited file of already-sent paths, next to
+// the backups. Losing it costs a re-upload, not data — B2 versions rather than
+// overwrites, so re-sending a name can never destroy the copy already there.
+// GK_UPLOADS_SYNC_CAP is defined above the switch — it's a default argument
+// value, so it has to exist before uploadsPending() is ever called.
+
+// Which files still need sending. Pure (filesystem in, list out) so the walk,
+// the manifest filter and the cap are all checkable without B2 credentials.
+// ponytail: cap per run, so one cron tick can't hit max_execution_time on a
+// first sync of a large library — the rest simply go on the next run. Raise it
+// (or move to a queue) only if a backlog ever fails to drain.
+function uploadsPending($root, array $done, $cap = GK_UPLOADS_SYNC_CAP) {
+    if (!is_dir($root)) return [];
+    $out = [];
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+    foreach ($it as $f) {
+        if (!$f->isFile()) continue;
+        $rel = ltrim(str_replace('\\', '/', substr($f->getPathname(), strlen($root))), '/');
+        // .htaccess (written by ensureUploadsDir) is config, not content, and
+        // restoring it is ensureUploadsDir's job on the new server.
+        if ($rel === '' || basename($rel) === '.htaccess') continue;
+        if (isset($done[$rel])) continue;
+        $out[] = $rel;
+    }
+    // Sort BEFORE capping, not after. Capping first takes an arbitrary
+    // filesystem-ordered subset and merely sorts that, so which images go up
+    // on a given run would vary by host — and a backlog would drain in an
+    // order nobody can predict or resume reasoning about. The full walk is
+    // cheap next to the uploads themselves.
+    sort($out);
+    return $cap === PHP_INT_MAX ? $out : array_slice($out, 0, $cap);
+}
+
+function uploadsManifestPath() { return ensureBackupsDir() . '/.uploads_synced'; }
+
+function uploadsManifestRead() {
+    $p = uploadsManifestPath();
+    if (!is_file($p)) return [];
+    $lines = preg_split('/\r?\n/', (string)file_get_contents($p));
+    return array_flip(array_filter(array_map('trim', $lines), fn($l) => $l !== ''));
+}
+
+// Mirrors any not-yet-sent uploads to B2. Never throws: like offsiteSync, a
+// file-copy problem must not be able to fail the database backup that called it.
+function uploadsSync($pdo) {
+    if (!offsiteConfigured()) return ['configured' => false];
+    $status = ['configured' => true, 'ok' => true, 'at' => gmdate('c'), 'uploaded' => 0, 'pending' => 0, 'error' => null];
+    try {
+        $root = rtrim(GK_UPLOADS_DIR, '/');
+        $done = uploadsManifestRead();
+        $todo = uploadsPending($root, $done);
+        foreach ($todo as $rel) {
+            $res = offsiteUpload($root . '/' . $rel, 'uploads/' . $rel);
+            if (!$res['ok']) { $status['ok'] = false; $status['error'] = $res['error']; break; }
+            // Append per file, not once at the end: a run that dies halfway
+            // (timeout, disk, network) must not re-send everything next time.
+            file_put_contents(uploadsManifestPath(), $rel . "\n", FILE_APPEND | LOCK_EX);
+            $status['uploaded']++;
+        }
+        // Anything still outstanding after the cap, so a backlog is visible
+        // rather than looking like a finished sync.
+        $status['pending'] = count(uploadsPending($root, uploadsManifestRead(), PHP_INT_MAX));
+    } catch (Throwable $e) {
+        $status['ok'] = false;
+        $status['error'] = $e->getMessage();
+    }
+    try { kvSet($pdo, 'backupUploads', $status); } catch (Throwable $e) { error_log('GK uploads status write failed: ' . $e->getMessage()); }
+    if (!$status['ok']) error_log('GK uploads mirror FAILED: ' . $status['error']);
+    return $status;
+}
+
 function offsiteSync($pdo, $file) {
     if (!offsiteConfigured()) return ['configured' => false];
     $path = ensureBackupsDir() . '/' . $file;

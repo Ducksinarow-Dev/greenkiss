@@ -2919,7 +2919,7 @@ async function backupList() {
    running (or the site is down), which is worth saying out loud. */
 const BACKUP_STALE_HOURS = 26;
 /** @returns {{level:"ok"|"warn"|"bad", problems:string[], detail:string}} */
-function backupHealth({ backups = [], offsite = {} } = {}, now = Date.now()) {
+function backupHealth({ backups = [], offsite = {}, uploads = {} } = {}, now = Date.now()) {
   const problems = [];
   let level = "ok";
   const bad = (m) => { problems.push(m); level = "bad"; };
@@ -2955,6 +2955,19 @@ function backupHealth({ backups = [], offsite = {} } = {}, now = Date.now()) {
       // The single most valuable case: uploads succeeded once (so credentials
       // are fine) and then stopped — a dead or never-created cron.
       bad(`No off-site copy in ${Math.floor(age)}h — the daily cron may have stopped.`);
+    }
+  }
+
+  // Uploads mirror (the image library). Only meaningful once off-site is on —
+  // if B2 isn't configured that's already reported above, and repeating it per
+  // subsystem turns one actionable problem into a wall of red.
+  if (offsite.configured !== false) {
+    if (uploads.ok === false) {
+      bad("Image library copy FAILED" + (uploads.error ? ` — ${uploads.error}` : "."));
+    } else if (uploads.pending > 0) {
+      // Not a failure: the per-run cap drains a backlog over successive runs.
+      // Worth surfacing so a mirror that never finishes is visible.
+      warn(`${uploads.pending} image${uploads.pending === 1 ? "" : "s"} not yet copied off-site.`);
     }
   }
 
