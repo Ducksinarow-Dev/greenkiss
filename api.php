@@ -240,6 +240,12 @@ switch ($action) {
         $rows = $pdo->query("SELECT k, v FROM kv_store");
         $out = new stdClass();
         foreach ($rows as $r) { $out->{$r['k']} = json_decode($r['v'], true); }
+        // Tasks come from their own table now (#41 step 3), overriding the kv
+        // doc of the same name — which is left frozen as the rollback. Serving
+        // them here is what keeps the whole client unchanged: it still warms one
+        // cache from one payload and never learns where anything is stored.
+        ensureTasksMigrated($pdo);
+        $out->tasks = recordAll($pdo, 'tasks');
         respond(200, ['data' => $out]);
         break;
 
@@ -342,14 +348,30 @@ switch ($action) {
         respond(200, ['ok' => true, 'navAccess' => $map]);
         break;
 
+    // Tasks live in their own table (#41 step 3) rather than one JSON blob, so
+    // a write is a single-row statement instead of a whole-collection
+    // read-modify-write under a lock. The RESPONSE shape is unchanged — still
+    // the full `tasks` array — so the client needs no change at all.
     case 'task_save':
         $user = requireAuth($pdo, $body);
-        handleCollectionSave($pdo, $body, $user, 'task', 'tasks');
+        requireRole($user, ['editor', 'admin']);
+        $task = $body['task'] ?? null;
+        if (!is_array($task) || empty($task['id'])) respond(400, ['error' => 'Missing task']);
+        ensureTasksMigrated($pdo);
+        maybeAutoBackup($pdo);
+        recordUpsert($pdo, 'tasks', $task);
+        respond(200, ['ok' => true, 'tasks' => recordAll($pdo, 'tasks')]);
         break;
 
     case 'task_delete':
         $user = requireAuth($pdo, $body);
-        handleCollectionDelete($pdo, $body, $user, 'tasks');
+        requireRole($user, ['editor', 'admin']);
+        $id = $body['id'] ?? '';
+        if ($id === '') respond(400, ['error' => 'Missing id']);
+        ensureTasksMigrated($pdo);
+        maybeAutoBackup($pdo);
+        $pdo->prepare("DELETE FROM tasks WHERE id = ?")->execute([$id]);
+        respond(200, ['ok' => true, 'tasks' => recordAll($pdo, 'tasks')]);
         break;
 
     case 'project_save':
@@ -361,7 +383,8 @@ switch ($action) {
         // Cascade: the project's tasks survive as standalone tasks.
         $user = requireAuth($pdo, $body);
         handleCollectionDelete($pdo, $body, $user, 'projects', function ($pdo, $id) {
-            return ['tasks' => collectionMapAll($pdo, 'tasks', function ($t) use ($id) {
+            ensureTasksMigrated($pdo); // tasks are rows now (#41 step 3)
+            return ['tasks' => recordMapAll($pdo, 'tasks', function ($t) use ($id) {
                 if (($t['projectId'] ?? '') === $id) $t['projectId'] = '';
                 return $t;
             })];
@@ -1436,6 +1459,113 @@ function ensureRecordTables($pdo) {
     foreach ($GK_RECORD_TABLES as $table => $cols) {
         $pdo->exec(recordTableSql($table, $cols));
     }
+}
+
+// ── #41 step 3: per-record rows for `tasks` ───────────────────────────────
+// A record table's real columns are named after the JSON field they mirror,
+// snake_case for camelCase (due_date <- dueDate). Deriving beats maintaining a
+// per-collection field map that can drift from the schema.
+// scripts/migrate_kv_to_rows.php lifts these two out of this file, so the
+// migration and the live write path can never build a row differently.
+function recordFieldForColumn($col) {
+    return preg_replace_callback('/_([a-z])/', fn($m) => strtoupper($m[1]), $col);
+}
+
+// One record -> the row to write. `data` keeps the WHOLE record, so the row is
+// a lossless replacement for the JSON entry and nothing depends on having
+// modelled every field as a column.
+function recordRow(array $record, array $cols) {
+    $row = [
+        'id' => (string)$record['id'],
+        'data' => json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        'version' => 1,
+    ];
+    foreach ($cols as $col => $type) {
+        $val = $record[recordFieldForColumn($col)] ?? null;
+        if (is_array($val) || is_object($val)) $val = null; // scalar columns only
+        if ($val === '') $val = null;
+        if ($val !== null && strncmp($type, 'DATE', 4) === 0) {
+            // The app stores "" for "no date"; a DATE column would either reject
+            // that or quietly store 0000-00-00. Anything not a real Y-m-d
+            // (a full ISO timestamp, junk) becomes NULL rather than a bogus date.
+            $val = preg_match('/^(\d{4}-\d{2}-\d{2})/', (string)$val, $m) ? $m[1] : null;
+        }
+        $row[$col] = $val === null ? null : (string)$val;
+    }
+    return $row;
+}
+
+// Insert-or-replace one record. version increments on update so #40's
+// optimistic-concurrency check has something to compare against later.
+function recordUpsert($pdo, $table, array $record) {
+    global $GK_RECORD_TABLES;
+    $row = recordRow($record, $GK_RECORD_TABLES[$table]);
+    $names = array_keys($row);
+    $sets = [];
+    foreach ($names as $c) {
+        if ($c === 'id' || $c === 'version') continue;
+        $sets[] = "$c = VALUES($c)";
+    }
+    $sets[] = 'version = version + 1';
+    $pdo->prepare(
+        "INSERT INTO $table (" . implode(', ', $names) . ")
+         VALUES (" . implode(', ', array_fill(0, count($names), '?')) . ")
+         ON DUPLICATE KEY UPDATE " . implode(', ', $sets)
+    )->execute(array_values($row));
+}
+
+// Every record in a table, as the client already expects to receive them.
+// ORDER BY id, not updated_at: an edit must not reshuffle the list under
+// anyone. Display order is decided client-side (sortTasksForUser and friends),
+// so this only needs to be deterministic.
+function recordAll($pdo, $table) {
+    $out = [];
+    foreach ($pdo->query("SELECT data FROM $table ORDER BY id") as $r) {
+        $rec = json_decode($r['data'], true);
+        if (is_array($rec)) $out[] = $rec;
+    }
+    return $out;
+}
+
+// Rewrites every record through $fn — for the cascades that follow a delete.
+function recordMapAll($pdo, $table, callable $fn) {
+    foreach (recordAll($pdo, $table) as $rec) {
+        $next = $fn($rec);
+        if ($next !== $rec) recordUpsert($pdo, $table, $next);
+    }
+    return recordAll($pdo, $table);
+}
+
+// One-time copy of the kv `tasks` doc into the tasks table, run lazily on the
+// first request that touches tasks.
+//
+// This exists so deploying step 3 can't empty anyone's task list: the table is
+// created empty, and without this the first kv_all after a deploy would report
+// zero tasks while the real ones sat untouched in kv_store. Doing it here rather
+// than only in scripts/migrate_kv_to_rows.php means the deploy needs no SSH step
+// and no ordering discipline from whoever ships it.
+//
+// Idempotent twice over: guarded by a kv marker, and the upserts are
+// insert-or-replace, so two concurrent first-requests can't duplicate anything.
+// The kv `tasks` doc is deliberately left in place, frozen, as the rollback —
+// nothing writes it again, and reverting means pointing reads back at it.
+function ensureTasksMigrated($pdo) {
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    ensureRecordTables($pdo);
+    $marker = kvGet($pdo, 'tasksRowsMigrated');
+    if (is_array($marker) && !empty($marker['at'])) return;
+    $legacy = kvGet($pdo, 'tasks');
+    $n = 0;
+    if (is_array($legacy)) {
+        foreach ($legacy as $t) {
+            if (!is_array($t) || ($t['id'] ?? '') === '') continue;
+            recordUpsert($pdo, 'tasks', $t);
+            $n++;
+        }
+    }
+    kvSet($pdo, 'tasksRowsMigrated', ['at' => gmdate('c'), 'count' => $n]);
 }
 
 // Can this user see the channel? Public channels are visible to all; others
