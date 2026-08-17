@@ -13,7 +13,7 @@ import {
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
   parseDate, todayLocalISO, daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, onMagnetPaste, Modal, Segmented } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, RichMentionField, Modal, Segmented } from './shared.jsx';
 
 /* Design intent: a shop's paper wall-planner, not a marketing ops tool —
    each day is a small cell you'd pin a sticky note to. The signature is
@@ -683,7 +683,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
 
           <div>
             <label style={lbl()}>Body</label>
-            <textarea rows={4} value={form.body || ""} onChange={e => set("body", e.target.value)} onPaste={e => onMagnetPaste(e, form.body || "", v => set("body", v))} placeholder="Draft copy, description, or internal notes…" style={inp({ lineHeight: 1.55 })} />
+            <RichMentionField multiline value={form.body || ""} onChange={v => set("body", v)} placeholder="Draft copy, description, or internal notes…" style={inp({ lineHeight: 1.55, minHeight: 92 })} />
           </div>
 
           {/* Channel-specific fields */}
@@ -742,7 +742,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
               <div style={{ fontSize: 12, fontWeight: 700, color: C.moss, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>Instagram Details</div>
               <div>
                 <label style={lbl()}>Caption</label>
-                <textarea rows={3} value={form.caption || ""} onChange={e => set("caption", e.target.value)} onPaste={e => onMagnetPaste(e, form.caption || "", v => set("caption", v))} placeholder="What actually posts…" style={inp({ lineHeight: 1.55 })} />
+                <RichMentionField multiline value={form.caption || ""} onChange={v => set("caption", v)} placeholder="What actually posts…" style={inp({ lineHeight: 1.55, minHeight: 74 })} />
               </div>
               <div>
                 <label style={lbl()}>Hashtags</label>
@@ -791,7 +791,7 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
 
           <div>
             <label style={lbl()}>Internal notes</label>
-            <textarea rows={2} value={form.notes || ""} onChange={e => set("notes", e.target.value)} onPaste={e => onMagnetPaste(e, form.notes || "", v => set("notes", v))} placeholder="Not published — team notes only…" style={inp({ lineHeight: 1.55 })} />
+            <RichMentionField multiline value={form.notes || ""} onChange={v => set("notes", v)} placeholder="Not published — team notes only…" style={inp({ lineHeight: 1.55, minHeight: 56 })} />
           </div>
         </div>
 
@@ -827,7 +827,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
           </div>
           <div>
             <label style={lbl()}>Description</label>
-            <textarea rows={3} value={form.description} onChange={e => set("description", e.target.value)} onPaste={e => onMagnetPaste(e, form.description || "", v => set("description", v))} placeholder="What's this campaign about?" style={inp({ lineHeight: 1.55 })} />
+            <RichMentionField multiline value={form.description || ""} onChange={v => set("description", v)} placeholder="What's this campaign about?" style={inp({ lineHeight: 1.55, minHeight: 74 })} />
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 140px" }}>

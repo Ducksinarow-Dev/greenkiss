@@ -10,7 +10,7 @@ import {
   linkifyMagnets, parseMentionText, createTaskFromItem, taskPrefillFromItem,
   emptyTaskShape as emptyForm,
 } from '../globals.js';
-import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, MentionField, MentionText, onMagnetPaste, Segmented, Modal } from './shared.jsx';
+import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, RichMentionField, MentionText, Segmented, Modal } from './shared.jsx';
 
 /* ─────────────────────────────────────────────────────────────────────
    #8 — Compact month-grid date picker (no external library). Shared by
@@ -448,11 +448,11 @@ function TaskModal({ initial, users, sops, projects, tags, onSave, onDelete, onC
           </div>
           <div>
             <label style={labelStyle}>Title</label>
-            <input autoFocus value={form.title} onChange={e => set("title", e.target.value)} onPaste={e => onMagnetPaste(e, form.title, v => set("title", v))} placeholder="Task title…" style={inp()} />
+            <RichMentionField autoFocus value={form.title} onChange={v => set("title", v)} placeholder="Task title…" style={inp()} />
           </div>
           <div>
             <label style={labelStyle}>Description</label>
-            <MentionField multiline rows={3} value={form.description || ""} onChange={v => set("description", v)} placeholder="Optional details… (@ to link a person, SOP, product…)" style={inp({ lineHeight: 1.55 })} />
+            <RichMentionField multiline value={form.description || ""} onChange={v => set("description", v)} placeholder="Optional details… (@ to link a person, SOP, product…)" style={inp({ lineHeight: 1.55, minHeight: 74 })} />
           </div>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

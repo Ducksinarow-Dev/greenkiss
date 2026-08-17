@@ -10,7 +10,7 @@ import {
   confirmDelete, triggerSaved, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem, startCallbackForProduct,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText, onMagnetPaste, Segmented, Modal } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Avatar, lbl, ItemLink, MentionText, RichMentionField, Segmented, Modal } from './shared.jsx';
 
 /* Waitlist & Callbacks (Batch 4). Clients waitlist for out-of-stock products;
    when stock lands, ops logs a callback that alerts sales staff/group (see
@@ -356,7 +356,7 @@ function CallbackForm({ user, products, users, groups, onClose, onSaved, initial
         </div>
         <div>
           <label style={lbl()}>Note (optional)</label>
-          <input value={draft.note} onChange={e => set({ note: e.target.value })} onPaste={e => onMagnetPaste(e, draft.note || "", v => set({ note: v }))} placeholder="How many arrived, hold policy…" style={inp()} />
+          <RichMentionField value={draft.note} onChange={v => set({ note: v })} placeholder="How many arrived, hold policy…" style={inp()} />
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, position: "sticky", bottom: 0, margin: "0 -26px -26px", padding: "16px 26px", background: C.sur, borderTop: `1.5px solid ${C.bdr}`, zIndex: 3 }}>
           <OBtn onClick={onClose}>Cancel</OBtn>

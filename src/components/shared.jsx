@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, linkifyMagnets, isUserOnline, subscribePresence, inp } from '../globals.js';
+import { C, FONT_CAPS, getContacts, getMentionCandidates, parseMentionText, getLinkSearchCandidates, isMagnet, openMagnet, navigateItem, linkifyMagnets, escapeHtml, isUserOnline, subscribePresence, inp } from '../globals.js';
 
 /** Small online/offline presence dot for a user (#49). Reads the cached
  * presence map and re-renders whenever the app's presence poll refreshes it. */
@@ -309,7 +309,7 @@ function MentionText({ text, onNavigate }) {
               else (onNavigate || navigateItem)(kind, id);
             }}
             onKeyDown={e => { if (e.key === "Enter") e.currentTarget.click(); }}
-            style={{ display: "inline-flex", padding: "0 6px", borderRadius: 5, background: C.mossSoft, color: C.moss, fontWeight: 600, cursor: "pointer", fontSize: "0.94em" }}
+            style={{ display: "inline-flex", padding: "1px 9px", borderRadius: 999, background: C.mossSoft, color: C.moss, fontWeight: 600, cursor: "pointer", fontSize: "0.94em" }}
           >{label}</span>
         );
       })}
@@ -384,6 +384,123 @@ const MentionField = React.forwardRef(function MentionField({ value, onChange, m
       <Tag ref={setRefs} value={value} onChange={handleChange} onPaste={e => onMagnetPaste(e, value, onChange)} {...rest} />
       {mentionState && <MentionPopover query={mentionState.query} anchorRect={mentionState.anchorRect} onPick={insertMention} onClose={() => setMentionState(null)} />}
     </>
+  );
+});
+
+/* ─── RICH MENTION FIELD ──────────────────────────────────────────────
+   A contentEditable drop-in that renders @[Label](kind:id) tokens as inline,
+   fully-rounded PILLS while you edit — not the raw token text. Serializes
+   back to the same token string the rest of the app stores, so it's a
+   transparent swap for a plain input/textarea. Supports @-to-mention and
+   paste (a pasted gk: code becomes a pill). Value only re-writes the DOM on
+   external changes, so the caret is preserved while typing. */
+function mpillHtml(kind, id, label) {
+  return `<span class="gk-mpill" contenteditable="false" data-kind="${kind}" data-id="${id}" style="display:inline-flex;align-items:center;padding:1px 9px;margin:0 1px;border-radius:999px;background:${C.mossSoft};color:${C.moss};font-weight:600;font-size:0.94em;white-space:nowrap;">${escapeHtml(label)}</span>`;
+}
+function mentionValueToHtml(value) {
+  const segs = parseMentionText(value || "");
+  return segs.map(s => s.text !== undefined
+    ? escapeHtml(s.text).replace(/\n/g, "<br>")
+    : mpillHtml(s.mention.kind, s.mention.id, s.mention.label)).join("");
+}
+function serializeMentionDom(root) {
+  let out = "";
+  const walk = (node) => {
+    node.childNodes.forEach(n => {
+      if (n.nodeType === 3) out += n.nodeValue;
+      else if (n.nodeType === 1) {
+        if (n.classList && n.classList.contains("gk-mpill")) {
+          out += `@[${(n.textContent || "").replace(/[[\]]/g, "")}](${n.dataset.kind}:${n.dataset.id})`;
+        } else if (n.tagName === "BR") { out += "\n"; }
+        else { if ((n.tagName === "DIV" || n.tagName === "P") && out && !out.endsWith("\n")) out += "\n"; walk(n); }
+      }
+    });
+  };
+  walk(root);
+  return out.replace(/\u00A0/g, " ");
+}
+const RichMentionField = React.forwardRef(function RichMentionField({ value, onChange, multiline, placeholder, style, autoFocus }, forwardedRef) {
+  const ref = useRef(null);
+  const [mention, setMention] = useState(null); // {query, anchorRect}
+  const setRefs = (node) => { ref.current = node; if (typeof forwardedRef === "function") forwardedRef(node); else if (forwardedRef) forwardedRef.current = node; };
+
+  // External value → DOM (mount + programmatic changes); skip while the DOM
+  // already matches so typing never resets the caret.
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    if (serializeMentionDom(el) !== (value || "")) el.innerHTML = mentionValueToHtml(value);
+  }, [value]);
+  useEffect(() => { if (autoFocus && ref.current) ref.current.focus(); }, [autoFocus]);
+
+  const emit = () => { if (ref.current) onChange(serializeMentionDom(ref.current)); };
+
+  const detectMention = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0);
+      if (r.collapsed && r.startContainer.nodeType === 3) {
+        const before = r.startContainer.nodeValue.slice(0, r.startOffset);
+        const m = before.match(/@([^\s@]*)$/);
+        if (m) {
+          const rect = r.getBoundingClientRect();
+          const anchor = (rect.width || rect.height) ? rect : ref.current.getBoundingClientRect();
+          setMention({ query: m[1], anchorRect: anchor });
+          return;
+        }
+      }
+    }
+    setMention(null);
+  };
+  const handleInput = () => { emit(); detectMention(); };
+
+  const insertMention = (item) => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0);
+    if (r.startContainer.nodeType === 3) {
+      const node = r.startContainer;
+      const before = node.nodeValue.slice(0, r.startOffset);
+      const m = before.match(/@([^\s@]*)$/);
+      if (m) {
+        const start = r.startOffset - m[0].length;
+        node.nodeValue = node.nodeValue.slice(0, start) + node.nodeValue.slice(r.startOffset);
+        r.setStart(node, start); r.setEnd(node, start);
+      }
+    }
+    const frag = document.createRange().createContextualFragment(mpillHtml(item.kind, item.id, item.label) + " ");
+    r.insertNode(frag);
+    sel.collapseToEnd();
+    setMention(null);
+    emit();
+    ref.current && ref.current.focus();
+  };
+
+  const handlePaste = (e) => {
+    const text = e.clipboardData ? e.clipboardData.getData("text") : "";
+    if (text == null) return;
+    e.preventDefault();
+    const html = mentionValueToHtml(linkifyMagnets(text));
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0);
+      r.deleteContents();
+      const frag = document.createRange().createContextualFragment(html || "");
+      r.insertNode(frag);
+      sel.collapseToEnd();
+    }
+    emit();
+  };
+
+  const handleKeyDown = (e) => { if (!multiline && e.key === "Enter") e.preventDefault(); };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={setRefs} contentEditable suppressContentEditableWarning className="gk-richfield"
+        onInput={handleInput} onPaste={handlePaste} onKeyDown={handleKeyDown} onBlur={() => setTimeout(() => setMention(null), 120)}
+        data-placeholder={placeholder || ""}
+        style={{ ...style, whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }} />
+      {mention && <MentionPopover query={mention.query} anchorRect={mention.anchorRect} onPick={insertMention} onClose={() => setMention(null)} />}
+    </div>
   );
 });
 
@@ -514,4 +631,4 @@ function Modal({ onClose, children, scrim = 0.35, zIndex = 550, align = "center"
   );
 }
 
-export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, LinkPopover, ItemLink, onMagnetPaste, PresenceDot, Segmented, Modal };
+export { Icon, Btn, OBtn, IconBtn, Pill, Chk, SectionHeader, EmptyState, Avatar, lbl, SlideOver, MetaIconBtn, Popover, MentionText, MentionField, RichMentionField, LinkPopover, ItemLink, onMagnetPaste, PresenceDot, Segmented, Modal };

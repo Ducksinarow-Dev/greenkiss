@@ -1939,7 +1939,7 @@ const escapeHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
  * plain regex replace over the markup is safe. */
 function mentionTokensToHtml(html) {
   return (html || "").replace(new RegExp(MENTION_RE.source, "g"), (_, label, kind, id) =>
-    `<span data-mention="${kind}:${id}" style="display:inline-flex;padding:0 6px;border-radius:5px;background:${C.mossSoft};color:${C.moss};font-weight:600;cursor:pointer;font-size:0.94em">${escapeHtml(label)}</span>`);
+    `<span data-mention="${kind}:${id}" style="display:inline-flex;padding:1px 9px;border-radius:999px;background:${C.mossSoft};color:${C.moss};font-weight:600;cursor:pointer;font-size:0.94em">${escapeHtml(label)}</span>`);
 }
 
 /** Every document/playbook-section that mentions the given target,

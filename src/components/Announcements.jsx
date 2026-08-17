@@ -8,7 +8,7 @@ import {
   hasAckedAnnouncement, announcementAckList, ackAnnouncement,
   confirmDelete, triggerSaved, linkifyMagnets,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText, Modal, onMagnetPaste } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText, Modal, RichMentionField } from './shared.jsx';
 
 /* Announcements + Current News (Batch 2). One page, two kinds: active
    announcements (toast / full-screen, acknowledge-tracked) and passive news
@@ -101,11 +101,11 @@ function Composer({ draft: initial, onClose, onSaved }) {
 
         <div>
           <label style={lbl()}>Title</label>
-          <input value={draft.title} onChange={e => set({ title: e.target.value })} onPaste={e => onMagnetPaste(e, draft.title || "", v => set({ title: v }))} placeholder={isNews ? "e.g. Spring gift-with-purchase is live" : "e.g. Store closes early Friday"} style={field} autoFocus />
+          <RichMentionField value={draft.title} onChange={v => set({ title: v })} placeholder={isNews ? "e.g. Spring gift-with-purchase is live" : "e.g. Store closes early Friday"} style={field} autoFocus />
         </div>
         <div>
           <label style={lbl()}>{isNews ? "Details" : "Message"}</label>
-          <textarea value={draft.body} onChange={e => set({ body: e.target.value })} onPaste={e => onMagnetPaste(e, draft.body || "", v => set({ body: v }))} rows={4} placeholder="Write the details…" style={{ ...field, resize: "vertical", lineHeight: 1.5 }} />
+          <RichMentionField multiline value={draft.body} onChange={v => set({ body: v })} placeholder="Write the details…" style={{ ...field, resize: "vertical", lineHeight: 1.5, minHeight: 92 }} />
         </div>
 
         {isNews ? (
