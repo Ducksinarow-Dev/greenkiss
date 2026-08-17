@@ -2902,6 +2902,65 @@ async function backupList() {
   const res = await apiCall("backup_list", { method: "GET" });
   return { backups: res.backups || [], offsite: res.offsite || { configured: false } };
 }
+/* ─── Backup health (dashboard warning) ───────────────────────────────
+   A backup system that quietly stopped looks exactly like one that works,
+   right up until you need it. Admin Panel → Backups already shows the last
+   result, but nobody opens that page unprompted — so the same signal is
+   surfaced on the admin dashboard, where it can't be missed.
+
+   PURE function of backupList()'s payload so it's checkable without a
+   server (see scripts/test_backup_health.mjs).
+
+   The 26h thresholds are "a daily cron plus slack". Note local snapshot
+   staleness alone is a WEAK signal — maybeAutoBackup piggybacks on writes,
+   so a genuinely quiet weekend produces no snapshot and that's fine. What's
+   NOT fine is the cron missing too, and the cron runs backup_run
+   unconditionally every day — so >26h with no snapshot means the cron isn't
+   running (or the site is down), which is worth saying out loud. */
+const BACKUP_STALE_HOURS = 26;
+/** @returns {{level:"ok"|"warn"|"bad", problems:string[], detail:string}} */
+function backupHealth({ backups = [], offsite = {} } = {}, now = Date.now()) {
+  const problems = [];
+  let level = "ok";
+  const bad = (m) => { problems.push(m); level = "bad"; };
+  const warn = (m) => { problems.push(m); if (level !== "bad") level = "warn"; };
+  const hoursSince = (iso) => {
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return Number.isFinite(t) ? (now - t) / 3600000 : null;
+  };
+
+  // Local snapshots.
+  if (backups.length === 0) {
+    bad("No backups exist on the server at all.");
+  } else {
+    const age = hoursSince(backups[0].createdAt);
+    if (age === null) warn("The newest backup has an unreadable date.");
+    else if (age > BACKUP_STALE_HOURS) {
+      warn(`No new backup in ${Math.floor(age)}h — the daily cron may have stopped.`);
+    }
+  }
+
+  // Off-site copy. `configured:false` means the B2 keys are absent or still
+  // placeholders; ok:null means configured but never yet attempted.
+  if (offsite.configured === false) {
+    bad("Off-site copies are off — backups exist only on this server.");
+  } else if (offsite.ok === false) {
+    bad("Off-site copy FAILED" + (offsite.error ? ` — ${offsite.error}` : "."));
+  } else if (offsite.ok === null || offsite.ok === undefined) {
+    warn("No off-site copy has run yet.");
+  } else {
+    const age = hoursSince(offsite.at);
+    if (age === null) warn("The last off-site copy has an unreadable date.");
+    else if (age > BACKUP_STALE_HOURS) {
+      // The single most valuable case: uploads succeeded once (so credentials
+      // are fine) and then stopped — a dead or never-created cron.
+      bad(`No off-site copy in ${Math.floor(age)}h — the daily cron may have stopped.`);
+    }
+  }
+
+  return { level, problems, detail: problems.join(" ") };
+}
+
 function backupDownloadUrl(file) {
   const t = _getToken();
   return API_BASE + "?action=backup_download&file=" + encodeURIComponent(file) + (t ? "&token=" + encodeURIComponent(t) : "");
@@ -3029,6 +3088,6 @@ export {
   CONTENT_TYPES, contentTypeLabel, assigneesOf, isAssignedTo,
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
-  backupRun, backupList, backupDownloadUrl, backupRestore, exportAllData, importAllData,
+  backupRun, backupList, backupHealth, BACKUP_STALE_HOURS, backupDownloadUrl, backupRestore, exportAllData, importAllData,
   adminDeploy, fetchLastDeploy, releaseList, releaseRollback,
 };

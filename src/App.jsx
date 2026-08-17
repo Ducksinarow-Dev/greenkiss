@@ -185,7 +185,7 @@ function App() {
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
       <Sidebar section={section} setSection={s => { setSection(s); if (s !== "library" && s !== "forms") setSopFocus(null); if (s !== "projects") setProjectFocus(null); if (s !== "calendar") { setContentFocus(null); setCampaignFocus(null); } if (s !== "playbook") setPlaybookFocus(null); }} user={user} onLogout={() => setUser(null)} onToggleTheme={toggleTheme} chatUnread={chatUnread} />
       <div style={{ flex: 1, padding: "32px 40px", maxWidth: 1400, minWidth: 0 }}>
-        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} onOpenCallback={goToCallback} chatUnread={chatUnread} onOpenChat={() => setSection("chat")} />}
+        {section === "dashboard" && <MyDashboard user={user} onOpenProject={goToProject} onOpenContent={goToContent} onOpenCampaign={goToCampaign} onOpenSubmission={goToSubmission} onNavigateOut={onNavigateOut} onOpenStore={() => setSection("store")} onOpenAnnouncements={() => setSection("announcements")} onOpenCallback={goToCallback} chatUnread={chatUnread} onOpenChat={() => setSection("chat")} onOpenAdmin={() => setSection("admin")} />}
         {section === "store" && <StoreUpdate user={user} />}
         {section === "library" && (
           <SOPLibrary user={user} kind="sop" focusId={sopFocus?.id} focusMode={sopFocus?.mode} focusBlockId={sopFocus?.blockId} onClearFocus={() => setSopFocus(null)} onNavigateOut={onNavigateOut} onOpenTasks={() => setSection("tasks")} />

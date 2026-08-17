@@ -7,7 +7,7 @@ import {
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
   announcementsForUser, newsSectionMeta, isAssignedTo,
   openCallbacksForUser, hasAckedCallback, getProducts, waitlistForProduct,
-  linkifyMagnets,
+  linkifyMagnets, REMOTE_MODE, backupList, backupHealth,
 } from '../globals.js';
 import { Icon, IconBtn, Pill, MentionText } from './shared.jsx';
 import { Speedometer } from './StoreUpdate.jsx';
@@ -266,6 +266,61 @@ function ChatStrip({ count, onOpen }) {
   );
 }
 
+/* ── Backup health warning (admins only) ────────────────────────────
+   A dead backup looks identical to a working one until the day it's needed,
+   and Admin Panel → Backups is a page nobody opens unprompted. So the same
+   signal lands where the admins actually look. Silent when healthy — this
+   must never become another banner people learn to scroll past.
+
+   Remote-only: dev mode has no server to back up, matching the Backups panel
+   precedent. Verdict logic lives in globals (`backupHealth`, pure + tested in
+   scripts/test_backup_health.mjs); this component only renders it. */
+function BackupHealthStrip({ user, onOpenAdmin }) {
+  const [health, setHealth] = useState(null);
+  useEffect(() => {
+    if (!REMOTE_MODE || (user?.role !== "admin")) return;
+    let alive = true;
+    backupList()
+      .then(res => { if (alive) setHealth(backupHealth(res)); })
+      // A failed status fetch is NOT reported as a backup failure — that would
+      // cry wolf on any transient network blip. Admin Panel stays the source
+      // of truth.
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [user]);
+
+  if (!health || health.level === "ok") return null;
+  const isBad = health.level === "bad";
+  const accent = isBad ? C.red : C.clay;
+  return (
+    <div style={{
+      marginBottom: 22, background: accent + "0d", border: `1.5px solid ${accent}59`,
+      borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "12px 15px",
+      display: "flex", alignItems: "flex-start", gap: 11,
+    }}>
+      <Icon name={isBad ? "cloud_off" : "warning"} size={20} style={{ color: accent, flexShrink: 0, marginTop: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: C.txt }}>
+          {isBad ? "Backups need attention" : "Backup warning"}
+        </div>
+        <div style={{ fontSize: 13, color: C.txt2, marginTop: 2, lineHeight: 1.45 }}>
+          {health.problems.map((p, i) => <div key={i}>{p}</div>)}
+        </div>
+      </div>
+      {onOpenAdmin && (
+        <button type="button" onClick={onOpenAdmin}
+          style={{
+            flexShrink: 0, background: "none", border: `1.5px solid ${accent}59`, borderRadius: 8,
+            color: accent, fontWeight: 700, fontSize: 12, fontFamily: FONT_CAPS, textTransform: "uppercase",
+            letterSpacing: "0.06em", padding: "6px 11px", cursor: "pointer",
+          }}>
+          Open Backups
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ── Merged "Needs your attention" bar ──────────────────────────────
    Collapses the four notification channels (callbacks, unread chat, news,
    alerts) into ONE bar with a per-channel count, instead of up to five
@@ -351,7 +406,7 @@ const DashSection = ({ title, extra, children }) => (
   </div>
 );
 
-function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback, chatUnread = 0, onOpenChat }) {
+function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpenSubmission, onNavigateOut, onOpenStore, onOpenAnnouncements, onOpenCallback, chatUnread = 0, onOpenChat, onOpenAdmin }) {
   const [refresh, setRefresh] = useState(0);
   const [modal, setModal] = useState(null); // {task, isNew}
   const bump = () => setRefresh(r => r + 1);
@@ -480,6 +535,10 @@ function MyDashboard({ user, onOpenProject, onOpenContent, onOpenCampaign, onOpe
         <div style={{ fontSize: 26, fontWeight: 600, color: C.txt, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.05em" }}>{greeting}, {user.name}</div>
         <div style={{ fontSize: 14, color: C.mut, marginTop: 6 }}>{dateStr}</div>
       </div>
+
+      {/* Above the attention bar on purpose: a broken backup outranks any
+          per-user notification, and must not sit collapsed behind a "Show". */}
+      <BackupHealthStrip user={user} onOpenAdmin={onOpenAdmin} />
 
       {/* One merged bar instead of up to five stacked notification strips.
           Expands to the original strips, which keep their own behavior. */}
