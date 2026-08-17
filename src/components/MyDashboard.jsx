@@ -7,8 +7,9 @@ import {
   confirmDelete, triggerSaved, fmtDateShort, isOverdue, isDueToday, isDueThisWeek,
   announcementsForUser, newsSectionMeta, isAssignedTo,
   openCallbacksForUser, hasAckedCallback, getProducts, waitlistForProduct,
+  linkifyMagnets,
 } from '../globals.js';
-import { Icon, IconBtn, Pill } from './shared.jsx';
+import { Icon, IconBtn, Pill, MentionText } from './shared.jsx';
 import { Speedometer } from './StoreUpdate.jsx';
 import { TaskModal } from './TaskManager.jsx';
 import { ProjectCard } from './Projects.jsx';
@@ -229,8 +230,8 @@ function NewsStrip({ user, onOpen }) {
               onMouseEnter={e => e.currentTarget.style.borderColor = C.bdr2}
               onMouseLeave={e => e.currentTarget.style.borderColor = C.bdr}>
               <Pill color={meta.color}>{meta.label}</Pill>
-              <div style={{ fontSize: 14.5, fontWeight: 800, color: C.txt, marginTop: 7 }}>{a.title}</div>
-              {a.body && <div style={{ fontSize: 13, color: C.txt2, marginTop: 3, lineHeight: 1.45, maxHeight: 58, overflow: "hidden" }}>{a.body}</div>}
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: C.txt, marginTop: 7 }}><MentionText text={linkifyMagnets(a.title || "")} /></div>
+              {a.body && <div style={{ fontSize: 13, color: C.txt2, marginTop: 3, lineHeight: 1.45, maxHeight: 58, overflow: "hidden" }}><MentionText text={linkifyMagnets(a.body)} /></div>}
             </div>
           );
         })}

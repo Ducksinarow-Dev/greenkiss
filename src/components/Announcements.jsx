@@ -8,7 +8,7 @@ import {
   hasAckedAnnouncement, announcementAckList, ackAnnouncement,
   confirmDelete, triggerSaved, linkifyMagnets,
 } from '../globals.js';
-import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText, Modal } from './shared.jsx';
+import { Icon, Btn, OBtn, IconBtn, Pill, SectionHeader, EmptyState, Chk, lbl, MentionText, Modal, onMagnetPaste } from './shared.jsx';
 
 /* Announcements + Current News (Batch 2). One page, two kinds: active
    announcements (toast / full-screen, acknowledge-tracked) and passive news
@@ -101,11 +101,11 @@ function Composer({ draft: initial, onClose, onSaved }) {
 
         <div>
           <label style={lbl()}>Title</label>
-          <input value={draft.title} onChange={e => set({ title: e.target.value })} placeholder={isNews ? "e.g. Spring gift-with-purchase is live" : "e.g. Store closes early Friday"} style={field} autoFocus />
+          <input value={draft.title} onChange={e => set({ title: e.target.value })} onPaste={e => onMagnetPaste(e, draft.title || "", v => set({ title: v }))} placeholder={isNews ? "e.g. Spring gift-with-purchase is live" : "e.g. Store closes early Friday"} style={field} autoFocus />
         </div>
         <div>
           <label style={lbl()}>{isNews ? "Details" : "Message"}</label>
-          <textarea value={draft.body} onChange={e => set({ body: e.target.value })} rows={4} placeholder="Write the details…" style={{ ...field, resize: "vertical", lineHeight: 1.5 }} />
+          <textarea value={draft.body} onChange={e => set({ body: e.target.value })} onPaste={e => onMagnetPaste(e, draft.body || "", v => set({ body: v }))} rows={4} placeholder="Write the details…" style={{ ...field, resize: "vertical", lineHeight: 1.5 }} />
         </div>
 
         {isNews ? (
@@ -226,7 +226,7 @@ function AnnouncementCard({ a, user, editor, onEdit, onDelete, onChange }) {
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 13, padding: "15px 17px" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}>{a.title}</div>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}><MentionText text={linkifyMagnets(a.title || "")} /></div>
           {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}><MentionText text={linkifyMagnets(a.body)} /></div>}
         </div>
         {editor && (
@@ -265,7 +265,7 @@ function NewsCard({ a, editor, onEdit, onDelete }) {
             <Pill color={meta.color}>{meta.label}</Pill>
             {!live && <Pill color={C.faint}>Expired</Pill>}
           </div>
-          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}>{a.title}</div>
+          <div style={{ fontSize: 15.5, fontWeight: 800, color: C.txt }}><MentionText text={linkifyMagnets(a.title || "")} /></div>
           {a.body && <div style={{ fontSize: 13.5, color: C.txt2, marginTop: 4, whiteSpace: "pre-wrap", lineHeight: 1.5 }}><MentionText text={linkifyMagnets(a.body)} /></div>}
           {a.expiresAt && <div style={{ fontSize: 12, color: C.faint, marginTop: 8 }}>Expires {fmtDate(a.expiresAt)}</div>}
         </div>

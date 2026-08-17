@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  C, REMOTE_MODE, refreshCache,
+  C, REMOTE_MODE, refreshCache, linkifyMagnets,
   announcementsForUser, hasAckedAnnouncement, ackAnnouncement, triggerSaved,
 } from '../globals.js';
-import { Icon, Btn } from './shared.jsx';
+import { Icon, Btn, MentionText } from './shared.jsx';
 
 /* Announcement delivery surfaces (Batch 2). Sits alongside LoginReminders in
    App and turns live announcements into either:
@@ -24,8 +24,8 @@ function FullscreenBlocker({ a, onAck, onDismiss }) {
         <div style={{ width: 56, height: 56, borderRadius: 99, background: C.mossSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
           <Icon name="campaign" size={28} style={{ color: C.moss }} />
         </div>
-        <div style={{ fontSize: 21, fontWeight: 800, color: C.txt, marginBottom: 10 }}>{a.title}</div>
-        {a.body && <div style={{ fontSize: 14.5, color: C.txt2, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 24 }}>{a.body}</div>}
+        <div style={{ fontSize: 21, fontWeight: 800, color: C.txt, marginBottom: 10 }}><MentionText text={linkifyMagnets(a.title || "")} /></div>
+        {a.body && <div style={{ fontSize: 14.5, color: C.txt2, lineHeight: 1.6, whiteSpace: "pre-wrap", marginBottom: 24 }}><MentionText text={linkifyMagnets(a.body)} /></div>}
         <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
           {a.requireAck
             ? <Btn onClick={onAck} style={{ padding: "12px 26px", fontSize: 15 }}><Icon name="check" size={17} />Acknowledge</Btn>
@@ -41,12 +41,12 @@ function Toast({ a, onAck, onDismiss, onOpen }) {
     <div className="gk-fade-in" style={{ background: C.sur, border: `1.5px solid ${a.requireAck ? C.moss : C.bdr}`, borderRadius: 13, boxShadow: C.shadowMd, padding: "13px 15px", width: 330 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: a.body ? 6 : 0 }}>
         <Icon name="campaign" size={17} style={{ color: C.moss }} />
-        <div onClick={onOpen} style={{ fontSize: 13.5, fontWeight: 800, color: C.txt, flex: 1, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.title}</div>
+        <div onClick={onOpen} style={{ fontSize: 13.5, fontWeight: 800, color: C.txt, flex: 1, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><MentionText text={linkifyMagnets(a.title || "")} /></div>
         <button onClick={onDismiss} title="Dismiss" style={{ background: "none", border: "none", cursor: "pointer", color: C.mut, padding: 2, display: "flex" }}>
           <Icon name="close" size={16} />
         </button>
       </div>
-      {a.body && <div style={{ fontSize: 12.5, color: C.txt2, lineHeight: 1.45, maxHeight: 54, overflow: "hidden" }}>{a.body}</div>}
+      {a.body && <div style={{ fontSize: 12.5, color: C.txt2, lineHeight: 1.45, maxHeight: 54, overflow: "hidden" }}><MentionText text={linkifyMagnets(a.body)} /></div>}
       {a.requireAck && (
         <div style={{ marginTop: 10 }}>
           <Btn onClick={onAck} style={{ padding: "7px 14px", fontSize: 12.5 }}><Icon name="check" size={15} />Acknowledge</Btn>
