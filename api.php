@@ -839,12 +839,23 @@ switch ($action) {
         break;
 
     case 'backup_run':
-        $cronKey = $_GET['cron_key'] ?? ($body['cron_key'] ?? '');
-        if (defined('CRON_KEY') && CRON_KEY !== '' && strpos(CRON_KEY, 'PASTE_') !== 0 && $cronKey !== '' && hash_equals(CRON_KEY, (string)$cronKey)) {
-            // cron path — no user token needed
-        } else {
-            $user = requireAuth($pdo, $body);
-            requireRole($user, ['admin']);
+        $cronKey = (string)($_GET['cron_key'] ?? ($body['cron_key'] ?? ''));
+        switch (cronKeyVerdict($cronKey, defined('CRON_KEY') ? CRON_KEY : null)) {
+            case 'accept':
+                break; // cron path — no user token needed
+            case 'no_key':
+                $user = requireAuth($pdo, $body);
+                requireRole($user, ['admin']);
+                break;
+            default:
+                // A cron_key WAS supplied and rejected. Saying so beats falling
+                // through to a bare "login required", which is what every
+                // misconfigured cron used to report — identical message for a
+                // typo, a stray space, an unencoded character and an untouched
+                // PASTE_ placeholder, with nothing to act on. This reveals only
+                // that the supplied key was rejected, which the caller already
+                // knows from being denied; the key itself is never echoed.
+                respond(403, ['error' => cronKeyHint(defined('CRON_KEY') ? CRON_KEY : null)]);
         }
         $file = runBackupOrFail($pdo);
         // Off-site copy rides the explicit backup path only (this action = the
@@ -892,6 +903,13 @@ switch ($action) {
         $raw = @gzdecode(file_get_contents($path));
         $data = $raw !== false ? json_decode($raw, true) : null;
         if (!is_array($data)) respond(500, ['error' => 'Backup file is corrupt or unreadable']);
+        // Second line of defence behind the purge in ensureBackupsDir: an
+        // off-site copy pulled back from B2 and dropped in by hand never passed
+        // through that purge, and restoring it would delete every table this
+        // dump predates rather than roll it back.
+        if ((int)($data['format'] ?? 0) < GK_BACKUP_FORMAT) {
+            respond(400, ['error' => 'This backup predates the current data format and can no longer be restored — it would delete data it never captured.']);
+        }
         // Safety snapshot of current state before we overwrite anything.
         runBackupOrFail($pdo);
         restoreFromBackupData($pdo, $data);
@@ -1274,6 +1292,12 @@ function ensureLoginSessionsTable($pdo) {
     );
 }
 
+// The chat tables, in dump/restore order (channels before members before
+// messages). Named in one place so runBackup() and restoreFromBackupData()
+// iterate the same list instead of each hardcoding one — same reason
+// $GK_RECORD_TABLES exists, and asserted by scripts/test_record_tables.php.
+$GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
+
 // Lazily create the chat tables (Phase 1) so a live DB picks up staff chat on
 // the next deploy — no manual import. Idempotent + static-guarded.
 function ensureChatTables($pdo) {
@@ -1297,6 +1321,75 @@ function ensureChatTables($pdo) {
         body TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         edited_at DATETIME NULL, deleted_at DATETIME NULL, INDEX idx_chat_messages_channel (channel_id, id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+// ─── Per-record tables (#41, step 1) ─────────────────────────────────
+// The hot collections are moving off kv_store, where each one is a single
+// JSON blob and every write is a read-modify-write of the whole thing (see
+// kvMutate below — correct, but a whole-collection lock). One row per record
+// makes a write a single statement.
+//
+// STEP 1 IS SCHEMA ONLY: these tables are created and backed up, but nothing
+// reads or writes them yet — every action still goes through kv_store. That
+// keeps this step independently revertable (drop the tables, no data moved).
+//
+// Table name == the kv key it will replace, so the mapping needs no lookup.
+// Shape is deliberately thin: `data` holds the whole record as JSON and the
+// only real columns are the ones worth filtering or sorting on server-side.
+// Resisting a column per field is what keeps this from becoming a week of
+// schema design — the JSON column carries the long tail.
+//
+// ponytail: the backlog note also listed an `assignee_id` column, deliberately
+// dropped — tasks and content are MULTI-assignee (`assigneeIds[]`) since Batch
+// 3, so one column can't answer "assigned to me" anyway. That filter stays in
+// the JSON (and client-side, where it already runs). Add a proper
+// record_assignees join table if assignment ever needs a server-side query.
+//
+// `version` is here for #40 (optimistic concurrency: client sends the version
+// it last saw, server rejects a stale write). Free to add now while the schema
+// is being written; retrofitting it across every table later is pure rework.
+$GK_RECORD_TABLES = [
+    'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
+    'content'    => ['status' => 'VARCHAR(24)', 'publish_date' => 'DATE', 'campaign_id' => 'VARCHAR(24)'],
+    'projects'   => ['status' => 'VARCHAR(24)'],
+    'campaigns'  => ['status' => 'VARCHAR(24)'],
+    'instances'  => ['status' => 'VARCHAR(24)', 'doc_id' => 'VARCHAR(24)'],
+    'categories' => [],
+    'contacts'   => [],
+    'tags'       => [],
+];
+
+// The CREATE for one record table. Shared by ensureRecordTables() and the
+// DB-free check in scripts/test_record_tables.php, so the test asserts against
+// the same SQL that actually runs.
+function recordTableSql($table, array $cols) {
+    $extra = '';
+    $index = '';
+    foreach ($cols as $col => $type) {
+        $extra .= "        $col $type NULL,\n";
+        $index .= ",\n        INDEX idx_{$table}_{$col} ($col)";
+    }
+    // LONGTEXT, not the JSON type: nothing here uses MySQL JSON functions, and
+    // LONGTEXT works on every MySQL/MariaDB version cPanel might be running.
+    return "CREATE TABLE IF NOT EXISTS $table (
+        id VARCHAR(24) NOT NULL PRIMARY KEY,
+        data LONGTEXT NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+$extra        INDEX idx_{$table}_updated (updated_at)$index
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+}
+
+// Lazily created like ensureChatTables/ensureLoginSessionsTable, so a live DB
+// picks these up on the next deploy with no manual schema import.
+function ensureRecordTables($pdo) {
+    global $GK_RECORD_TABLES;
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    foreach ($GK_RECORD_TABLES as $table => $cols) {
+        $pdo->exec(recordTableSql($table, $cols));
+    }
 }
 
 // Can this user see the channel? Public channels are visible to all; others
@@ -1706,6 +1799,20 @@ function ensureUploadsDir($monthFolder) {
     return $dir;
 }
 
+// Dump format version. BUMP THIS whenever a table joins the dump, and old
+// snapshots are purged on the next deploy (see ensureBackupsDir).
+//
+//   1 — kv_store, users, revisions
+//   2 — + per-record tables (#41) and chat
+//
+// Why purge rather than keep and tolerate: restoreFromBackupData EMPTIES every
+// table it manages, so restoring a format-1 dump doesn't roll chat back, it
+// deletes it — the older the snapshot, the more it destroys. A backup you must
+// not restore isn't a backup, so it doesn't get to sit in the list looking like
+// one. Cost is real and one-time: the existing ~60 days of kv/users/revisions
+// history goes with it, and history restarts at the first post-deploy backup.
+define('GK_BACKUP_FORMAT', 2);
+
 function ensureBackupsDir() {
     $dir = GK_BACKUPS_DIR;
     if (!is_dir($dir)) mkdir($dir, 0755, true);
@@ -1713,17 +1820,52 @@ function ensureBackupsDir() {
     if (!file_exists($htaccess)) {
         file_put_contents($htaccess, "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n");
     }
+    // One-time purge of stale-format snapshots. The marker lives in the backups
+    // dir, not kv_store, so this needs no DB handle and no migration hook — the
+    // first backup path touched after a deploy does it, exactly once. A fresh
+    // install has nothing to delete and just gets the marker.
+    $marker = $dir . '/.format';
+    $have = is_file($marker) ? (int)trim((string)file_get_contents($marker)) : 0;
+    if ($have !== GK_BACKUP_FORMAT) {
+        foreach (glob($dir . '/gk_*.json.gz') as $old) @unlink($old);
+        file_put_contents($marker, (string)GK_BACKUP_FORMAT);
+    }
     return $dir;
 }
 
 function runBackup($pdo) {
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
     $dir = ensureBackupsDir();
     $stamp = gmdate('Ymd_His');
-    $data = ['createdAt' => gmdate('c'), 'kv' => [], 'users' => [], 'revisions' => []];
+    $data = ['createdAt' => gmdate('c'), 'format' => GK_BACKUP_FORMAT, 'kv' => [], 'users' => [], 'revisions' => [], 'records' => [], 'chat' => []];
     foreach ($pdo->query("SELECT k, v, updated_at FROM kv_store") as $row) $data['kv'][] = $row;
     // Hashes only — never plaintext PINs — so users are safe to keep in the dump.
     foreach ($pdo->query("SELECT id, name, pin_hash, role, created_at FROM users") as $row) $data['users'][] = $row;
     foreach ($pdo->query("SELECT id, sop_id, snapshot, saved_at, saved_by FROM revisions") as $row) $data['revisions'][] = $row;
+
+    // Per-record tables (#41). Backed up from step 1, BEFORE anything writes to
+    // them — because this function and restoreFromBackupData both enumerate
+    // tables explicitly, so a table added here later than the code that fills it
+    // means backups silently stop covering data that moved out of kv_store.
+    // That is the single most likely way this migration loses data; the coverage
+    // assertion in scripts/test_record_tables.php exists to keep it impossible.
+    // Empty tables just dump as empty arrays while the migration is unfinished.
+    ensureRecordTables($pdo);
+    foreach (array_keys($GK_RECORD_TABLES) as $table) {
+        $rows = [];
+        foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
+        $data['records'][$table] = $rows;
+    }
+
+    // Chat (channels/members/messages). Same trap as the record tables: these
+    // were live for months while this function dumped only kv_store, users and
+    // revisions, so every chat message was outside every backup.
+    ensureChatTables($pdo);
+    foreach ($GK_CHAT_TABLES as $table) {
+        $rows = [];
+        foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
+        $data['chat'][$table] = $rows;
+    }
 
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
@@ -1815,9 +1957,50 @@ function maybeAutoBackup($pdo) {
 // move to it if B2 ever retires v2.
 function offsiteConfigured() {
     foreach (['B2_KEY_ID', 'B2_APPLICATION_KEY'] as $c) {
-        if (!defined($c) || constant($c) === '' || strpos((string)constant($c), 'PASTE_') === 0) return false;
+        if (!defined($c)) return false;
+        // trim(): these are pasted into config.php through cPanel's File
+        // Manager, which makes a trailing space or newline easy to include and
+        // invisible afterwards. Untrimmed, one stray character produces a B2
+        // "401 bad_auth_token" that looks exactly like a wrong key.
+        $v = trim((string)constant($c));
+        if ($v === '' || strncmp($v, 'PASTE_', 6) === 0) return false;
     }
     return true;
+}
+
+// Credentials as B2 should receive them — trimmed, so pasted whitespace can't
+// break the Basic-auth handshake. Single source for every B2 call.
+function b2Credentials() {
+    return [trim((string)B2_KEY_ID), trim((string)B2_APPLICATION_KEY)];
+}
+
+// Is this request's cron_key good enough to skip the admin login? Pure, so the
+// four outcomes are checkable without a server (scripts/test_backup_auth.php).
+//   accept               -> run as the cron
+//   no_key               -> nothing supplied; fall back to normal admin auth
+//   reject_unconfigured  -> key supplied, but CRON_KEY isn't usable in config
+//   reject_mismatch      -> key supplied, doesn't match
+function cronKeyVerdict($supplied, $configured) {
+    $supplied = trim((string)$supplied);
+    if ($supplied === '') return 'no_key';
+    $configured = trim((string)($configured ?? ''));
+    if ($configured === '' || strncmp($configured, 'PASTE_', 6) === 0) return 'reject_unconfigured';
+    // hash_equals: constant-time, so a wrong key can't be discovered byte by
+    // byte from response timing.
+    return hash_equals($configured, $supplied) ? 'accept' : 'reject_mismatch';
+}
+
+// What to tell whoever is setting the cron up. Names the likely causes rather
+// than the value, which must never appear in a response.
+function cronKeyHint($configured) {
+    $c = trim((string)($configured ?? ''));
+    if ($c === '' || strncmp($c, 'PASTE_', 6) === 0) {
+        return 'cron_key was supplied, but CRON_KEY is not set in config.php (or is still the PASTE_… placeholder). '
+             . 'Set it to a long random value, then use that same value in the cron URL.';
+    }
+    return 'cron_key does not match CRON_KEY in config.php. Check for a typo, a stray space in either place, '
+         . 'that you replaced YOUR_CRON_KEY in the URL with the real value, and that the key contains no '
+         . 'characters that need URL-encoding (& + % # or spaces) — letters and digits only is safest.';
 }
 
 // B2 puts the useful text in "code" ("bad_auth_token", "unauthorized") and
@@ -1842,7 +2025,7 @@ function b2Authorize() {
     curl_setopt_array($ch, [
         CURLOPT_URL => 'https://api.backblazeb2.com/b2api/v2/b2_authorize_account',
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_USERPWD => B2_KEY_ID . ':' . B2_APPLICATION_KEY,
+        CURLOPT_USERPWD => implode(':', b2Credentials()),
         CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
@@ -2081,6 +2264,9 @@ function rollbackToRelease($name) {
 }
 
 function restoreFromBackupData($pdo, $data) {
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
+    ensureRecordTables($pdo); // must exist before the DELETE/INSERT below
+    ensureChatTables($pdo);
     $pdo->beginTransaction();
     try {
         $pdo->exec("DELETE FROM kv_store");
@@ -2098,6 +2284,51 @@ function restoreFromBackupData($pdo, $data) {
         foreach (($data['revisions'] ?? []) as $row) {
             $stmt->execute([$row['id'], $row['sop_id'], $row['snapshot'], $row['saved_at'], $row['saved_by']]);
         }
+        // Per-record tables (#41). A backup taken BEFORE the migration has no
+        // 'records' key at all — the tables are still emptied, which is correct:
+        // that snapshot's data lives in its kv rows, restored above.
+        foreach (array_keys($GK_RECORD_TABLES) as $table) {
+            $pdo->exec("DELETE FROM $table");
+            $rows = $data['records'][$table] ?? [];
+            if (!$rows) continue;
+            // Column list comes from the row itself, so a schema that gains a
+            // column doesn't need this function edited too.
+            $cols = array_keys($rows[0]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO $table (" . implode(', ', $cols) . ")
+                 VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")"
+            );
+            foreach ($rows as $row) {
+                $stmt->execute(array_map(fn($c) => $row[$c] ?? null, $cols));
+            }
+        }
+
+        // Chat. Deleted in reverse order (messages, members, channels) so the
+        // rows never outlive the channel they belong to, then reinserted in
+        // declaration order. Column list comes from the row, which means
+        // chat_messages.id is written EXPLICITLY rather than left to
+        // AUTO_INCREMENT — required, because chat_members.last_read_msg_id
+        // points at those ids and renumbering would silently mark whole
+        // channels unread (or read).
+        //
+        // A pre-chat-backup dump has no 'chat' key: the tables are still
+        // emptied, which is correct — that snapshot predates the messages, and
+        // leaving them behind would attach live chat rows to a restored,
+        // different-era user and channel set.
+        foreach (array_reverse($GK_CHAT_TABLES) as $table) $pdo->exec("DELETE FROM $table");
+        foreach ($GK_CHAT_TABLES as $table) {
+            $rows = $data['chat'][$table] ?? [];
+            if (!$rows) continue;
+            $cols = array_keys($rows[0]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO $table (" . implode(', ', $cols) . ")
+                 VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")"
+            );
+            foreach ($rows as $row) {
+                $stmt->execute(array_map(fn($c) => $row[$c] ?? null, $cols));
+            }
+        }
+
         // The restored user set may not match who's currently logged in —
         // clear all tokens so everyone gets a clean re-login post-restore.
         $pdo->exec("DELETE FROM tokens");
