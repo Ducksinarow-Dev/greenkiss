@@ -30,8 +30,11 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **Chat (all 4 phases):** public + private channels, 1:1 DMs, group DMs; near-real-time short-polling; admin-managed channels; sidebar unread badge + @mention/DM toast + dashboard strip; @mentions; edit/delete own; archive; history pagination. Built self-contained (`chat_*` API, `Chat.jsx`) to be **portable to DuckTracks** later.
 - **Refinements:** type-ahead client/product pickers (search-or-create inline) in Waitlist/Callbacks; **universal magnets (#47)** — magnet/@mention pills for people/products/clients/content/campaigns/callbacks, clickable everywhere via an app-wide nav surface, rendered in chat + notes + announcement bodies, plus **"Create task from this"** on any chat message.
 
-## Remaining / next
-- **Track X (needs external setup):** PWA + Web Push (biggest buildable win; iOS needs "Add to Home Screen"); GBP posting API (needs Google Cloud OAuth — see `GBP_PUSH.md`); two Google Calendars for email/IG campaign assignment.
+## Remaining / next (open backlog — full detail in `BACKLOG.md`)
+- **Blocked on the user / external:** **#57** AI suggestions for content fields (headline/CTA/caption) — needs an LLM key in `config.php` + a new `api.php` proxy action (same pattern as `omnisendApiCall`); recommend Anthropic/Claude. **#22** GBP push to live Google Business Profile — needs Google Cloud OAuth (see `GBP_PUSH.md`).
+- **Big / greenlit for pre-launch:** **#41** migrate the hot kv collections to real per-record tables (greenlit by Hayden to do *before* go-live; multi-day, touches ~20 api.php actions + the storage layer). **#40** same-record concurrent-edit conflict → reload toast (approved; needs a `version`/`updated_at` check, mind SOPEditor's 500ms autosave).
+- **Buildable features (each standalone):** #27 drag-to-reschedule content on the calendar · #28 recurring content items · #29 inline Omnisend stats on chips/rows/cards · #30 Store-Goals pace/comparison · #31 per-day target overrides · #33 full mobile/responsive pass · #34 "copy GBP post text".
+- **Track X (external setup):** PWA + Web Push (iOS needs "Add to Home Screen"); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.
 
 ## Shipped Aug 2026 (on `release` as v0.1.45; awaits the Update Now click)
@@ -55,7 +58,7 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 - **#49 presence dots** (chat DMs + admin): api.php `presence` action, `refreshPresence`/`isUserOnline` (5-min window) + `subscribePresence`, 30s poll in App. Dev derives from the login-history mirror.
 - **#50 Image Repository Letter Finder in edit mode** — shared `LetterFinder` filters the flat edit list to one letter.
 - **#52 Content Calendar "Add" menu** (Content / Campaign / Report) replacing "New Content".
-- **#53 Notion-style per-project views:** Board (drag Kanban) | Timeline (Gantt) toggle in `ProjectDetail`; tasks gained `startDate` + `onCalendar`, projects gained `includeTasksOnCalendar` (`taskOnCalendar()` = either); calendar-flagged tasks render on the Content Calendar + ICS feed. **NOTE for a follow-up:** #51 (saved dynamic-range reports) is still backlog.
+- **#53 Notion-style per-project views:** Board (drag Kanban) | Timeline (Gantt) toggle in `ProjectDetail`; tasks gained `startDate` + `onCalendar`, projects gained `includeTasksOnCalendar` (`taskOnCalendar()` = either); calendar-flagged tasks render on the Content Calendar + ICS feed.
 
 ## Post-deploy TODOs on the production DB (seed only applies to fresh DBs)
 - Add **Jessica & Liz** via Admin Panel → Users (or the `INSERT`s in `schema.sql`).
