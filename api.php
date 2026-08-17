@@ -149,6 +149,12 @@ $GK_RECORD_TABLES = [
     'categories' => [],
     'contacts'   => [],
     'tags'       => [],
+    // sops covers Forms too (`kind` is 'sop'|'form'); the library filters on
+    // both of these. NOTE: sop_save deliberately does NOT run the #40 conflict
+    // check — SOPEditor autosaves every 500ms and a 409 would fight that loop.
+    // Give SOPs conflict detection only with save/close-only semantics.
+    'sops'       => ['category_id' => 'VARCHAR(24)', 'kind' => 'VARCHAR(16)'],
+    'alerts'     => [],
 ];
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
@@ -277,22 +283,49 @@ switch ($action) {
         maybeAutoBackup($pdo);
         // Snapshot-then-replace inside the row lock, so a concurrent save can't
         // slip between the revision write and the list write.
-        $sops = kvMutate($pdo, 'sops', function ($sops) use ($pdo, $sop) {
-            if (!is_array($sops)) $sops = [];
-            $idx = null;
-            foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $sop['id']) { $idx = $i; break; } }
-            if ($idx !== null) {
-                $old = $sops[$idx];
-                if (sopContentChanged($old, $sop)) {
-                    saveRevision($pdo, $sop['id'], $old, $old['updatedBy'] ?? '');
+        ensureCollectionMigrated($pdo, 'sops');
+        // Snapshot-then-replace under a row lock, so a concurrent save can't
+        // slip between the revision write and the record write. Same guarantee
+        // the kvMutate version gave, now scoped to ONE row instead of the whole
+        // library — two people editing different SOPs no longer serialize.
+        // No #40 conflict check here on purpose: SOPEditor autosaves every
+        // 500ms and a 409 would fight the autosave loop rather than inform
+        // anyone (see $GK_RECORD_TABLES).
+        // Existence is checked BEFORE opening a transaction, and the lock is
+        // only taken when the row actually exists. `SELECT ... FOR UPDATE` on a
+        // MISSING row takes a gap lock rather than a row lock (the same trap
+        // kvMutate documents), so locking unconditionally made ten people
+        // creating ten different new SOPs contend on the same gap — measured as
+        // a hang, not a slowdown. A new SOP has no previous version to snapshot,
+        // so it needs no lock at all: the upsert is a single statement.
+        //
+        // The row can still vanish between the check and the lock; that's
+        // harmless — FOR UPDATE finds nothing, no revision is written, and the
+        // upsert re-creates it.
+        $exists = $pdo->prepare("SELECT 1 FROM sops WHERE id = ? LIMIT 1");
+        $exists->execute([(string)$sop['id']]);
+        if (!$exists->fetch()) {
+            recordUpsert($pdo, 'sops', $sop);
+        } else {
+            $pdo->beginTransaction();
+            try {
+                $s = $pdo->prepare("SELECT data FROM sops WHERE id = ? FOR UPDATE");
+                $s->execute([(string)$sop['id']]);
+                $cur = $s->fetch();
+                if ($cur) {
+                    $old = json_decode($cur['data'], true);
+                    if (is_array($old) && sopContentChanged($old, $sop)) {
+                        saveRevision($pdo, $sop['id'], $old, $old['updatedBy'] ?? '');
+                    }
                 }
-                $sops[$idx] = $sop;
-            } else {
-                $sops[] = $sop;
+                recordUpsert($pdo, 'sops', $sop);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $e;
             }
-            return $sops;
-        });
-        respond(200, ['ok' => true, 'sops' => $sops]);
+        }
+        respond(200, ['ok' => true, 'sops' => recordAll($pdo, 'sops')]);
         break;
 
     case 'sop_delete':
@@ -305,7 +338,9 @@ switch ($action) {
         $id = $body['id'] ?? '';
         if ($id === '') respond(400, ['error' => 'Missing id']);
         maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'sops' => collectionDelete($pdo, 'sops', $id)]);
+        ensureCollectionMigrated($pdo, 'sops');
+        $pdo->prepare("DELETE FROM sops WHERE id = ?")->execute([$id]);
+        respond(200, ['ok' => true, 'sops' => recordAll($pdo, 'sops')]);
         break;
 
     case 'doc_item_save':
@@ -430,7 +465,8 @@ switch ($action) {
         // Cascade: the category's SOPs become uncategorized rather than deleted.
         $user = requireAuth($pdo, $body);
         handleCollectionDelete($pdo, $body, $user, 'categories', function ($pdo, $id) {
-            return ['sops' => collectionMapAll($pdo, 'sops', function ($s) use ($id) {
+            ensureCollectionMigrated($pdo, 'sops'); // rows now (#41 step 5)
+            return ['sops' => recordMapAll($pdo, 'sops', function ($s) use ($id) {
                 if (($s['categoryId'] ?? '') === $id) $s['categoryId'] = '';
                 return $s;
             })];
@@ -464,7 +500,9 @@ switch ($action) {
         $alert = $body['alert'] ?? null;
         if (!is_array($alert) || empty($alert['id'])) respond(400, ['error' => 'Missing alert']);
         maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'alerts' => collectionUpsert($pdo, 'alerts', $alert)]);
+        ensureCollectionMigrated($pdo, 'alerts');
+        recordUpsert($pdo, 'alerts', $alert);
+        respond(200, ['ok' => true, 'alerts' => recordAll($pdo, 'alerts')]);
         break;
 
     case 'alert_delete':
@@ -474,14 +512,18 @@ switch ($action) {
         $user = requireAuth($pdo, $body);
         $id = $body['id'] ?? '';
         if ($id === '') respond(400, ['error' => 'Missing id']);
-        $alerts = kvGet($pdo, 'alerts') ?: [];
+        // From rows, not the frozen kv doc — reading the old copy would find no
+        // target and skip the ownership check entirely.
+        ensureCollectionMigrated($pdo, 'alerts');
+        $alerts = recordAll($pdo, 'alerts');
         $target = null;
         foreach ($alerts as $a) { if (($a['id'] ?? null) === $id) { $target = $a; break; } }
         if ($target === null) respond(200, ['ok' => true, 'alerts' => $alerts]);
         $isOwner = $target['toUserId'] === $user['id'] || $target['fromUserId'] === $user['id'];
         if (!$isOwner && $user['role'] !== 'admin') respond(403, ['error' => 'Insufficient permissions for this action']);
         maybeAutoBackup($pdo);
-        respond(200, ['ok' => true, 'alerts' => collectionDelete($pdo, 'alerts', $id)]);
+        $pdo->prepare("DELETE FROM alerts WHERE id = ?")->execute([$id]);
+        respond(200, ['ok' => true, 'alerts' => recordAll($pdo, 'alerts')]);
         break;
 
     case 'template_save':
@@ -797,22 +839,40 @@ switch ($action) {
         maybeAutoBackup($pdo);
         $snapshot = json_decode($rev['snapshot'], true);
         $restored = null;
-        kvMutate($pdo, 'sops', function ($sops) use ($pdo, $rev, $snapshot, $user, &$restored) {
-            if (!is_array($sops)) $sops = [];
-            $idx = null;
-            foreach ($sops as $i => $s) { if (($s['id'] ?? '') === $rev['sop_id']) { $idx = $i; break; } }
-            // Leave the list untouched and report afterwards — respond() exits,
-            // and exiting from inside the row lock is not worth relying on.
-            if ($idx === null) return $sops;
-            saveRevision($pdo, $rev['sop_id'], $sops[$idx], $sops[$idx]['updatedBy'] ?? '');
-            $restored = array_merge($sops[$idx], $snapshot, [
-                'id' => $rev['sop_id'],
-                'updatedAt' => gmdate('c'),
-                'updatedBy' => $user['name'],
-            ]);
-            $sops[$idx] = $restored;
-            return $sops;
-        });
+        ensureCollectionMigrated($pdo, 'sops');
+        // Snapshot the current version before overwriting it, under the same
+        // row lock, so the restore is itself undoable and a concurrent save
+        // can't interleave. Missing SOP: leave everything alone and report
+        // after the transaction — respond() exits, and exiting from inside an
+        // open transaction is not worth relying on.
+        // Restoring only ever targets an EXISTING sop, so FOR UPDATE here takes
+        // a real row lock — but check first anyway, so a restore aimed at a
+        // deleted SOP doesn't open a transaction just to gap-lock and bail.
+        $exists = $pdo->prepare("SELECT 1 FROM sops WHERE id = ? LIMIT 1");
+        $exists->execute([(string)$rev['sop_id']]);
+        if (!$exists->fetch()) respond(404, ['error' => 'SOP no longer exists']);
+        $pdo->beginTransaction();
+        try {
+            $s = $pdo->prepare("SELECT data FROM sops WHERE id = ? FOR UPDATE");
+            $s->execute([(string)$rev['sop_id']]);
+            $cur = $s->fetch();
+            if ($cur) {
+                $old = json_decode($cur['data'], true);
+                if (is_array($old)) {
+                    saveRevision($pdo, $rev['sop_id'], $old, $old['updatedBy'] ?? '');
+                    $restored = array_merge($old, $snapshot, [
+                        'id' => $rev['sop_id'],
+                        'updatedAt' => gmdate('c'),
+                        'updatedBy' => $user['name'],
+                    ]);
+                    recordUpsert($pdo, 'sops', $restored);
+                }
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         if ($restored === null) respond(404, ['error' => 'SOP no longer exists']);
         respond(200, ['ok' => true, 'sop' => $restored]);
         break;
@@ -1731,17 +1791,12 @@ function collectionDelete($pdo, $key, $id) {
     });
 }
 
-// Rewrites every record in a collection through $fn — for the cascades that
-// follow a delete (uncategorize a category's SOPs, unlink a project's tasks,
-// uncampaign a campaign's content). These used to run CLIENT-side as a blind
-// whole-array kv_set built from a cache warmed at login, so deleting one
-// project could wipe every task a coworker had created since your page load.
-function collectionMapAll($pdo, $key, callable $fn) {
-    return kvMutate($pdo, $key, function ($list) use ($fn) {
-        if (!is_array($list)) $list = [];
-        return array_values(array_map($fn, $list));
-    });
-}
+// collectionMapAll() was deleted by #41 step 5 — every cascade it served
+// (category->sops, project->tasks, campaign->content) now runs on rows via
+// recordMapAll(). collectionUpsert/collectionDelete below survive because
+// `taskTemplates` is still a kv collection, and kvMutate survives because
+// navAccess, the three acks maps and icsTokens are merge-maps that genuinely
+// need a locked read-modify-write — that is what it is for, not a leftover.
 
 // The kv docs that are a single document wrapping one list of identified items
 // (Image Repository, Tools & Prompts, the Playbook's pages). Per-item writes

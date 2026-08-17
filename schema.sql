@@ -223,3 +223,26 @@ CREATE TABLE IF NOT EXISTS revisions (
   saved_by  VARCHAR(100) NULL,
   INDEX idx_revisions_sop (sop_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- sops (covers Forms too — `kind` is 'sop'|'form') and alerts, moved out of
+-- kv_store by #41 step 5. api.php also creates these lazily via
+-- ensureRecordTables(), so an existing install needs no manual import.
+CREATE TABLE IF NOT EXISTS sops (
+  id          VARCHAR(24) NOT NULL PRIMARY KEY,
+  data        LONGTEXT    NOT NULL,
+  version     INT         NOT NULL DEFAULT 1,
+  updated_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  category_id VARCHAR(24) NULL,
+  kind        VARCHAR(16) NULL,
+  INDEX idx_sops_updated (updated_at),
+  INDEX idx_sops_category_id (category_id),
+  INDEX idx_sops_kind (kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS alerts (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_alerts_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

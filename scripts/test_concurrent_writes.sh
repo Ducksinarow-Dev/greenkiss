@@ -118,8 +118,9 @@ echo "== sop_delete is server-side =="
 post sop_save '{"sop":{"id":"s1","title":"Mine"}}'
 post sop_save '{"sop":{"id":"s2","title":"Coworker SOP"}}'
 post sop_delete '{"id":"s1"}'
-ok "coworker's SOP survived" "$(q "SELECT v FROM kv_store WHERE k='sops';" | grep -c 'Coworker SOP')" "1"
-ok "target SOP gone" "$(q "SELECT v FROM kv_store WHERE k='sops';" | grep -c '"Mine"')" "0"
+# Served, not kv_store — sops moved to rows in #41 step 5.
+ok "coworker's SOP survived" "$(served sops | grep -c 'Coworker SOP')" "1"
+ok "target SOP gone" "$(served sops | grep -c '"Mine"')" "0"
 
 echo "== nav_access_save merges per user (two admins, different staff) =="
 post nav_access_save '{"userId":"u_a","sections":["tasks"]}'
@@ -127,6 +128,25 @@ post nav_access_save '{"userId":"u_b","sections":["imagerepo","calendar"]}'
 NAV=$(q "SELECT v FROM kv_store WHERE k='navAccess';")
 ok "first admin's grant survived" "$(echo "$NAV" | grep -c 'u_a')" "1"
 ok "second admin's grant survived" "$(echo "$NAV" | grep -c 'u_b')" "1"
+
+echo "== 10 concurrent NEW sops (gap-lock regression) =="
+# sop_save snapshots the previous version under a row lock before overwriting.
+# Taking that lock unconditionally gap-locks when the row does NOT exist yet, so
+# ten people creating ten different SOPs at once contended on the same gap and
+# the whole thing HUNG rather than slowed down. Existence is now checked before
+# any transaction is opened; a new SOP needs no lock at all.
+for i in $(seq 1 10); do
+  bg sop_save "{\"sop\":{\"id\":\"par$i\",\"title\":\"Parallel $i\",\"kind\":\"sop\"}}"
+done
+waitall
+ok "all 10 new sops created" "$(served sops | grep -o 'Parallel [0-9]*' | sort -u | wc -l | tr -d ' ')" "10"
+# Editing the SAME sop concurrently must still snapshot exactly one revision
+# per content change, not one per request.
+REV_BEFORE=$(q "SELECT COUNT(*) FROM revisions;")
+post sop_save '{"sop":{"id":"par1","title":"Parallel 1","kind":"sop","blocks":[{"id":"b","type":"text","text":"v2"}]}}'
+ok "a content change writes exactly one revision" "$(q "SELECT COUNT(*) FROM revisions;")" "$((REV_BEFORE+1))"
+post sop_save '{"sop":{"id":"par1","title":"Parallel 1","kind":"sop","blocks":[{"id":"b","type":"text","text":"v2"}],"updatedAt":"2026-08-17T12:00:00Z"}}'
+ok "a metadata-only save writes none" "$(q "SELECT COUNT(*) FROM revisions;")" "$((REV_BEFORE+1))"
 
 echo "== #40 optimistic concurrency (stale write refused, not merged) =="
 post content_save '{"item":{"id":"v1","title":"Original"}}'
@@ -150,7 +170,7 @@ ok "current version saves" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 
 ok "_v is not persisted inside the record" "$(q "SELECT data FROM content WHERE id='v1';" | grep -c '_v')" "0"
 
 echo "== step 4: every migrated collection is served from its table =="
-for c in content projects campaigns categories contacts tags instances tasks; do
+for c in content projects campaigns categories contacts tags instances tasks sops alerts; do
   ok "$c served from its row table" "$(q "SELECT COUNT(*) FROM $c;")" "$(count_ids $c)"
 done
 
