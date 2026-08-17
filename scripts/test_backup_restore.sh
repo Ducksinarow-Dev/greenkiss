@@ -121,18 +121,21 @@ ok "stale-format backup refused" "$(curl -s -X POST "$B?action=backup_restore" -
 ok "chat survived that attempt" "$(q "SELECT COUNT(*) FROM chat_messages;")" "1"
 ok "current backups carry a format stamp" "$(curl -s -X POST "$B?action=backup_run" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["file"] ?? "";' | { read f; has "$BK/$f" '"format":2'; })" "yes"
 
-echo "== deploy purge drops snapshots of an older format =="
-# Dropping the marker is exactly what a format bump looks like to the next
-# request: the first backup path touched afterwards wipes the old snapshots.
+echo "== a format bump must NOT destroy existing snapshots =="
+# An earlier revision purged every snapshot whose format marker didn't match, so
+# on any existing install the first backup after a deploy silently destroyed the
+# whole local backup history — irreversibly, to keep unrestorable files out of a
+# list. Old snapshots still hold real kv/users/revisions data, they stay
+# downloadable, and the stale-format restore refusal above already makes them
+# harmless. These assertions exist so nobody reintroduces the purge.
 BEFORE=$(ls "$BK"/gk_*.json.gz | wc -l | tr -d ' ')
-ok "snapshots exist before the purge" "$([ "$BEFORE" -gt 0 ] && echo yes || echo no)" "yes"
-rm -f "$BK/.format"
+ok "snapshots exist beforehand" "$([ "$BEFORE" -gt 0 ] && echo yes || echo no)" "yes"
+rm -f "$BK/.format"   # exactly what a format bump looks like to the next request
 curl -s "$B?action=backup_list" -H "$AH" >/dev/null
-ok "old snapshots purged" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "0"
-ok "marker rewritten so it happens once" "$(cat "$BK/.format" 2>/dev/null)" "2"
-curl -s "$B?action=backup_list" -H "$AH" >/dev/null
+ok "listing keeps every old snapshot" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "$BEFORE"
 curl -s -X POST "$B?action=backup_run" -H "$AH" >/dev/null
-ok "backups resume after the purge" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "1"
+ok "a new backup ADDS to history, never replaces it" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "$((BEFORE+1))"
+ok "no backup path deletes snapshots outside retention" "$(grep -c 'foreach (glob($dir . ./gk_\*.json.gz.) as $old) @unlink' "$ROOT/api.php")" "0"
 
 echo "== off-site copy: unconfigured is safe and honest =="
 R=$(curl -s --max-time 20 -X POST "$B?action=backup_run" -H "$AH")

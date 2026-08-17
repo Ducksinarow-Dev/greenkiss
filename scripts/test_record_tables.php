@@ -65,6 +65,17 @@ foreach (array_keys($globals) as $g) {
     ok("global $g is assigned before the switch",
         $assignPos !== false && $assignPos < $switchPos);
 }
+
+// define() has the SAME trap and cost the same outage from a different symbol:
+// GK_BACKUP_FORMAT was declared at line 1833 beside the code it documents, so
+// it did not exist while any request ran and every backup died on "Undefined
+// constant". define() is a runtime call, not a hoisted declaration — so any
+// constant this file declares itself must be declared before the switch.
+preg_match_all("/^define\('([A-Z0-9_]+)'/m", $api, $dm);
+foreach (array_unique($dm[1]) as $const) {
+    $pos = strpos($api, "define('$const'");
+    ok("constant $const is defined before the switch", $pos !== false && $pos < $switchPos);
+}
 echo "  (collections: " . implode(', ', array_keys($spec)) . ")\n";
 
 // ── The coverage assertions this file exists for ──────────────────────
@@ -127,15 +138,19 @@ ok('chat restore preserves explicit ids', str_contains($restoreSrc, '$cols = arr
     && !preg_match('/unset\(\$?\w*\[?.?id.?\]?\)/', $restoreSrc));
 
 // ── Dump format version ──────────────────────────────────────────────
-// The purge in ensureBackupsDir is what keeps un-restorable snapshots out of
-// the list, and it only fires when the format number changes.
+// An old-format dump is made harmless by REFUSING to restore it, not by
+// deleting it. ensureBackupsDir used to purge every snapshot whose format
+// marker didn't match, which on any existing install meant the first backup
+// after a deploy silently destroyed the whole local backup history — to keep
+// unrestorable files out of a list. Assert the purge stays gone.
 $dirSrc = gk_lift($api, '/function ensureBackupsDir\(\) \{.*?\n\}/s', 'ensureBackupsDir()');
 ok('backup format constant defined', preg_match('/define\(.GK_BACKUP_FORMAT., (\d+)\)/', $api, $fm) === 1);
 ok('runBackup stamps the format into the dump',
     str_contains($backupSrc, "'format' => GK_BACKUP_FORMAT"));
-ok('ensureBackupsDir purges stale-format snapshots',
-    str_contains($dirSrc, "glob(\$dir . '/gk_*.json.gz')") && str_contains($dirSrc, '@unlink($old)')
-    && str_contains($dirSrc, 'GK_BACKUP_FORMAT'));
+ok('ensureBackupsDir does NOT delete snapshots', !str_contains($dirSrc, '@unlink'));
+ok('the only snapshot deletion left is retention pruning',
+    preg_match_all('/@unlink\(\$old\)/', $api) === 1
+    && preg_match('/array_slice\(\$files, 240\).*?@unlink\(\$old\)/s', $api) === 1);
 ok('restore refuses a stale-format dump',
     preg_match('/\(int\)\(\$data\[.format.\] \?\? 0\) < GK_BACKUP_FORMAT/', $api) === 1);
 
