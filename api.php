@@ -107,6 +107,31 @@ try {
     exit;
 }
 
+// ─── Table specs — MUST stay above the switch ─────────────────────────
+// These are variable ASSIGNMENTS, and PHP does not hoist them the way it
+// hoists function declarations. Defined further down the file (next to the
+// functions that use them, which is where they read best) they were still
+// NULL for the entire request, because the switch below runs long before
+// execution ever reaches them — so `global $GK_RECORD_TABLES` inside
+// runBackup() saw null, array_keys(null) threw a TypeError, and because
+// TypeError extends Error rather than Exception it sailed straight past
+// runBackupOrFail's `catch (Exception)` into the generic 500 handler. Net
+// effect: every backup failed, and any write that tripped the 6-hourly
+// staleness check 500'd with it.
+// Anything a request-time function reaches for via `global` belongs HERE.
+// scripts/test_record_tables.php asserts that ordering.
+$GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
+$GK_RECORD_TABLES = [
+    'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
+    'content'    => ['status' => 'VARCHAR(24)', 'publish_date' => 'DATE', 'campaign_id' => 'VARCHAR(24)'],
+    'projects'   => ['status' => 'VARCHAR(24)'],
+    'campaigns'  => ['status' => 'VARCHAR(24)'],
+    'instances'  => ['status' => 'VARCHAR(24)', 'doc_id' => 'VARCHAR(24)'],
+    'categories' => [],
+    'contacts'   => [],
+    'tags'       => [],
+];
+
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $method = $_SERVER['REQUEST_METHOD'];
 $isMultipart = strpos($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data') !== false;
@@ -1296,7 +1321,8 @@ function ensureLoginSessionsTable($pdo) {
 // messages). Named in one place so runBackup() and restoreFromBackupData()
 // iterate the same list instead of each hardcoding one — same reason
 // $GK_RECORD_TABLES exists, and asserted by scripts/test_record_tables.php.
-$GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
+// DEFINED ABOVE THE SWITCH (see the note there) — a `global` in a request-time
+// function can't see an assignment that lives further down the file.
 
 // Lazily create the chat tables (Phase 1) so a live DB picks up staff chat on
 // the next deploy — no manual import. Idempotent + static-guarded.
@@ -1348,16 +1374,9 @@ function ensureChatTables($pdo) {
 // `version` is here for #40 (optimistic concurrency: client sends the version
 // it last saw, server rejects a stale write). Free to add now while the schema
 // is being written; retrofitting it across every table later is pure rework.
-$GK_RECORD_TABLES = [
-    'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
-    'content'    => ['status' => 'VARCHAR(24)', 'publish_date' => 'DATE', 'campaign_id' => 'VARCHAR(24)'],
-    'projects'   => ['status' => 'VARCHAR(24)'],
-    'campaigns'  => ['status' => 'VARCHAR(24)'],
-    'instances'  => ['status' => 'VARCHAR(24)', 'doc_id' => 'VARCHAR(24)'],
-    'categories' => [],
-    'contacts'   => [],
-    'tags'       => [],
-];
+// The spec itself is DEFINED ABOVE THE SWITCH (see the note there): it's a
+// variable assignment, so a `global` in a request-time function can only see it
+// if the assignment already ran.
 
 // The CREATE for one record table. Shared by ensureRecordTables() and the
 // DB-free check in scripts/test_record_tables.php, so the test asserts against

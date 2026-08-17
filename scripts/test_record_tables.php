@@ -37,6 +37,34 @@ eval(gk_lift($api, '/function recordTableSql\(.*?\n\}/s', 'recordTableSql()'));
 
 $spec = $GK_RECORD_TABLES;
 ok('spec lifted from api.php', count($spec) > 0);
+
+// ── Ordering: specs must be assigned BEFORE the request switch ────────
+// The bug this caught the hard way: PHP hoists function declarations but NOT
+// variable assignments. With these arrays defined below `switch ($action)` they
+// were null for the whole request, so `global $GK_RECORD_TABLES` in runBackup()
+// gave array_keys(null) -> TypeError. TypeError extends Error, not Exception, so
+// it bypassed runBackupOrFail's catch and 500'd every backup — and every write
+// that tripped the staleness check. Shipped to production before anyone noticed,
+// because every other assertion here checks the code's SHAPE, not its execution.
+$switchPos = strpos($api, 'switch ($action)');
+ok('found the request switch', $switchPos !== false);
+foreach (['$GK_RECORD_TABLES', '$GK_CHAT_TABLES'] as $var) {
+    $assignPos = strpos($api, $var . ' = [');
+    ok("$var is assigned before switch (\$action)",
+        $assignPos !== false && $switchPos !== false && $assignPos < $switchPos);
+}
+// Any OTHER global a request-time function reaches for must satisfy the same
+// rule, so a future spec can't reintroduce this.
+preg_match_all('/global (\$[A-Za-z_][A-Za-z0-9_]*(?:, *\$[A-Za-z_][A-Za-z0-9_]*)*);/', $api, $gm);
+$globals = [];
+foreach ($gm[1] as $decl) {
+    foreach (preg_split('/, */', $decl) as $g) $globals[trim($g)] = true;
+}
+foreach (array_keys($globals) as $g) {
+    $assignPos = strpos($api, $g . ' = ');
+    ok("global $g is assigned before the switch",
+        $assignPos !== false && $assignPos < $switchPos);
+}
 echo "  (collections: " . implode(', ', array_keys($spec)) . ")\n";
 
 // ── The coverage assertions this file exists for ──────────────────────
