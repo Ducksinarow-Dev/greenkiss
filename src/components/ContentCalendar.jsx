@@ -534,6 +534,46 @@ function MetricsSection({ form, setMetric, set }) {
   );
 }
 
+/* Compact multi-select staff dropdown (#62) — a closed control showing the
+   picked names/count that opens a checklist, so assignees take one field's
+   worth of space instead of a wrapping chip row. */
+function MultiSelectStaff({ users, selectedIds, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const selected = users.filter(u => selectedIds.includes(u.id));
+  const label = selected.length === 0 ? "Unassigned"
+    : selected.length <= 2 ? selected.map(u => u.name.split(" ")[0]).join(", ")
+    : `${selected.length} staff`;
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ ...inp(), display: "flex", alignItems: "center", gap: 8, cursor: "pointer", textAlign: "left" }}>
+        <span style={{ flex: 1, minWidth: 0, color: selected.length ? C.txt : C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+        <Icon name="expand_more" size={18} style={{ color: C.mut, flexShrink: 0 }} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, zIndex: 41, background: C.sur, border: `1.5px solid ${C.bdr2}`, borderRadius: 10, boxShadow: C.shadowMd, maxHeight: 230, overflowY: "auto", padding: 6 }}>
+            {users.length === 0 && <div style={{ padding: "8px 10px", fontSize: 12.5, color: C.faint }}>No staff yet.</div>}
+            {users.map(u => {
+              const on = selectedIds.includes(u.id);
+              return (
+                <button key={u.id} type="button" onClick={() => onToggle(u.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "7px 9px", background: on ? C.mossSoft : "transparent", border: "none", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                  onMouseEnter={e => { if (!on) e.currentTarget.style.background = C.s2; }} onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                  <span style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, border: `1.5px solid ${on ? C.moss : C.bdr2}`, background: on ? C.moss : C.sur, display: "flex", alignItems: "center", justifyContent: "center" }}>{on && <Icon name="check" size={13} style={{ color: "#fff" }} />}</span>
+                  <Avatar name={u.name} size={20} />
+                  <span style={{ fontSize: 14, color: C.txt }}>{u.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ─── CONTENT ITEM SLIDE-OUT EDITOR ──────────────────────────────────── */
 function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, onClose, isNew }) {
   const [form, setForm] = useState(initial);
@@ -593,21 +633,16 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <label style={lbl()}>Channel</label>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {CONTENT_CHANNELS.map(ch => (
-                <button key={ch.key} type="button" onClick={() => setForm(f => ({ ...f, channel: ch.key, type: "" }))}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 9, cursor: "pointer",
-                    fontFamily: FONT_CAPS, fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em",
-                    border: `1.5px solid ${form.channel === ch.key ? C.moss : C.bdr}`,
-                    background: form.channel === ch.key ? C.mossSoft : C.sur,
-                    color: form.channel === ch.key ? C.moss : C.txt2,
-                  }}>
-                  <Icon name={ch.icon} size={15} />{ch.label}
-                </button>
-              ))}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 180px" }}>
+              <label style={lbl()}>Channel</label>
+              <select value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value, type: "" }))} style={inp()}>
+                {CONTENT_CHANNELS.map(ch => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: "1 1 180px" }}>
+              <label style={lbl()}>Assignees</label>
+              <MultiSelectStaff users={users} selectedIds={itemAssigneeIds} onToggle={toggleAssignee} />
             </div>
           </div>
 
@@ -644,22 +679,6 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 100%" }}>
-              <label style={lbl()}>Assignees</label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {users.map(u => {
-                  const on = itemAssigneeIds.includes(u.id);
-                  return (
-                    <button key={u.id} type="button" onClick={() => toggleAssignee(u.id)}
-                      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 9px", borderRadius: 8, cursor: "pointer",
-                        border: `1.5px solid ${on ? C.moss : C.bdr}`, background: on ? C.mossSoft : C.sur, color: on ? C.moss : C.mut, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
-                      <Avatar name={u.name} size={18} />{u.name.split(" ")[0]}{on && <Icon name="check" size={14} />}
-                    </button>
-                  );
-                })}
-                {users.length === 0 && <span style={{ fontSize: 12.5, color: C.faint }}>No staff yet.</span>}
-              </div>
-            </div>
-            <div style={{ flex: "1 1 140px" }}>
               <label style={lbl()}>Campaign</label>
               {addingCampaign ? (
                 <div style={{ display: "flex", gap: 6 }}>
@@ -1128,24 +1147,24 @@ function CampaignDetail({ campaign, allItems, users, editable, onBack, onOpenIte
         {editable && <OBtn onClick={() => onEditCampaign(campaign)}><Icon name="edit" size={16} />Edit</OBtn>}
       </div>
 
-      <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "24px 28px", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
-          <div style={{ width: 8, height: 40, borderRadius: 99, background: campaign.color || C.moss, flexShrink: 0 }} />
+      <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "14px 20px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ width: 5, alignSelf: "stretch", minHeight: 34, borderRadius: 99, background: campaign.color || C.moss, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <Pill color={sm.col}>{sm.label}</Pill>
+              <div style={{ fontSize: 19, fontWeight: 800, color: C.txt }}>{campaign.name || "Untitled campaign"}</div>
               {(campaign.startDate || campaign.endDate) && (
                 <span style={{ fontSize: 12, color: C.mut, fontFamily: "'IBM Plex Mono',monospace" }}>
-                  {campaign.startDate ? fmtDate(campaign.startDate) : "…"} – {campaign.endDate ? fmtDate(campaign.endDate) : "…"}
+                  · {campaign.startDate ? fmtDate(campaign.startDate) : "…"} – {campaign.endDate ? fmtDate(campaign.endDate) : "…"}
                 </span>
               )}
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: C.txt, marginBottom: 6 }}>{campaign.name || "Untitled campaign"}</div>
-            {campaign.description && <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.55, maxWidth: 640 }}><MentionText text={linkifyMagnets(campaign.description)} /></div>}
+            {campaign.description && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, maxWidth: 640, marginTop: 3 }}><MentionText text={linkifyMagnets(campaign.description)} /></div>}
           </div>
           {staff.length > 0 && (
             <div style={{ display: "flex" }}>
-              {staff.slice(0, 6).map((u, i) => <div key={u.id} style={{ marginLeft: i === 0 ? 0 : -6, border: `2px solid ${C.sur}`, borderRadius: 99 }}><Avatar name={u.name} size={26} /></div>)}
+              {staff.slice(0, 6).map((u, i) => <div key={u.id} style={{ marginLeft: i === 0 ? 0 : -6, border: `2px solid ${C.sur}`, borderRadius: 99 }}><Avatar name={u.name} size={24} /></div>)}
             </div>
           )}
         </div>

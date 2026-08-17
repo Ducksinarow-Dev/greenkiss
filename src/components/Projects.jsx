@@ -421,20 +421,20 @@ function ProjectDetail({ project, users, sops, allProjects, editable, currentUse
         {editable && <OBtn onClick={() => setEditing(true)}><Icon name="edit" size={16} />Edit</OBtn>}
       </div>
 
-      <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 16, padding: "24px 28px", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
-          <div style={{ width: 8, height: 40, borderRadius: 99, background: project.color || C.moss, flexShrink: 0 }} />
+      <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "14px 20px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ width: 5, alignSelf: "stretch", minHeight: 34, borderRadius: 99, background: project.color || C.moss, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <Pill color={sm.col}>{sm.label}</Pill>
-              {lead && <span style={{ fontSize: 12, color: C.mut }}>Led by <strong style={{ color: C.txt2 }}>{lead.name}</strong></span>}
+              <div style={{ fontSize: 19, fontWeight: 800, color: C.txt }}>{project.name || "Untitled project"}</div>
+              {lead && <span style={{ fontSize: 12, color: C.mut }}>· Led by <strong style={{ color: C.txt2 }}>{lead.name}</strong></span>}
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: C.txt, marginBottom: 6 }}>{project.name || "Untitled project"}</div>
-            {project.description && <div style={{ fontSize: 14, color: C.mut, lineHeight: 1.55, maxWidth: 640 }}>{project.description}</div>}
+            {project.description && <div style={{ fontSize: 13.5, color: C.mut, lineHeight: 1.5, maxWidth: 640, marginTop: 3 }}>{project.description}</div>}
           </div>
           <MemberStack users={users} ids={[project.leadId, ...(project.memberIds || [])].filter(Boolean)} max={6} />
         </div>
-        <TimelineStrip project={project} tasks={tasks} />
+        {project.startDate && project.dueDate && <TimelineStrip project={project} tasks={tasks} />}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
