@@ -11,6 +11,7 @@ import {
   emptyTaskShape as emptyForm,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Chk, Avatar, SectionHeader, EmptyState, lbl, SlideOver, MetaIconBtn, Popover, LinkPopover, ItemLink, RichMentionField, MentionText, Segmented, Modal } from './shared.jsx';
+import ImportZenkitButton from './ZenkitImporter.jsx';
 
 /* ─────────────────────────────────────────────────────────────────────
    #8 — Compact month-grid date picker (no external library). Shared by
@@ -1194,6 +1195,7 @@ function TaskManager({ user, onOpenSop, focusTaskId, onClearFocus, onNavigateOut
             value={view} onChange={changeView}
             btnStyle={{ padding: "7px 13px" }} />
           <OBtn onClick={() => setShowDone(true)}><Icon name="task_alt" size={16} />Done ({doneTasks.length})</OBtn>
+          {editable && <ImportZenkitButton user={user} onImported={() => bump()} />}
           {editable && <Btn onClick={openNew}><Icon name="add" size={17} />New Task</Btn>}
         </>} />
 

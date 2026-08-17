@@ -217,6 +217,33 @@ function BrandGroup({ brand, blocks }) {
 /* Group a letter's title blocks by brand (#58): branded galleries collapse
    under one heading; un-branded titles + notes render inline as before,
    preserving first-appearance order. */
+/* Distinct existing brand names across all title blocks, deduped
+   case-insensitively/trimmed, keeping the first exact spelling seen (#63).
+   Feeds the edit-mode brand datalist and the on-blur canonicalizer so staff
+   reuse one spelling instead of spawning "Bathorium" / "bathorium " / etc. */
+function distinctBrands(blocks) {
+  const seen = {}, out = [];
+  blocks.forEach(b => {
+    if (b.type !== "title") return;
+    const brand = (b.brand || "").trim();
+    if (!brand) return;
+    const key = brand.toLowerCase();
+    if (!seen[key]) { seen[key] = true; out.push(brand); }
+  });
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
+/* Snap a typed brand to an existing one that matches case-insensitively once
+   trimmed, so a stray case/whitespace difference collapses into the same
+   BrandGroup instead of fragmenting the letter (#63). Returns the trimmed
+   value when there's no match. */
+function canonicalBrand(value, brands) {
+  const trimmed = (value || "").trim();
+  if (!trimmed) return "";
+  const hit = brands.find(x => x.toLowerCase() === trimmed.toLowerCase());
+  return hit || trimmed;
+}
+
 function groupByBrand(items) {
   const nodes = [];
   const idx = {};
@@ -269,6 +296,11 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
   // Letter Finder in edit mode (#50) — filter the flat edit list to one letter
   // so a long A–Z repository isn't a garbled wall of rows while editing.
   const [active, setActive] = useState(null);
+  // Distinct existing brands for the autofill datalist + on-blur canonicalizer
+  // (#63). Recomputed from the live blocks so a just-typed brand becomes a
+  // suggestion for the next gallery too.
+  const brands = distinctBrands(blocks);
+  const brandListId = "gk-brand-suggestions";
   const has = (l) => blocks.some(b => letterOf(b) === l);
   const groups = [...DIGITS.filter(has), ...LETTERS];
   const shown = active === null ? blocks : blocks.filter(b => letterOf(b) === active);
@@ -284,6 +316,10 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
   );
   return (
     <div style={{ maxWidth: 760 }}>
+      {/* Existing brand names, offered as autofill on every brand field (#63). */}
+      <datalist id={brandListId}>
+        {brands.map(x => <option key={x} value={x} />)}
+      </datalist>
       {/* Add controls float at the top and stick on scroll (#36) so they stay
           reachable while editing a long A–Z list. */}
       <div style={{
@@ -315,7 +351,9 @@ function EditView({ blocks, onPatch, onRemove, onAdd, onDone }) {
                 <>
                   {/* Optional brand group (#58) — galleries sharing a brand
                       nest under one collapsible heading in the viewer. */}
-                  <input value={b.brand || ""} onChange={e => onPatch(b.id, { brand: e.target.value })}
+                  <input value={b.brand || ""} list={brandListId}
+                    onChange={e => onPatch(b.id, { brand: e.target.value })}
+                    onBlur={e => { const c = canonicalBrand(e.target.value, brands); if (c !== (b.brand || "")) onPatch(b.id, { brand: c }); }}
                     placeholder="Brand group (optional — groups galleries)" style={inp({ fontSize: 13, color: C.txt2 })} />
                   <input value={b.text} onChange={e => onPatch(b.id, { text: e.target.value })}
                     placeholder={(b.brand || "").trim() ? "Gallery / collection name" : "Brand name"} style={inp({ fontSize: 14, fontWeight: 600 })} />
