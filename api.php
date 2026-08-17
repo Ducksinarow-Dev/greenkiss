@@ -839,12 +839,23 @@ switch ($action) {
         break;
 
     case 'backup_run':
-        $cronKey = $_GET['cron_key'] ?? ($body['cron_key'] ?? '');
-        if (defined('CRON_KEY') && CRON_KEY !== '' && strpos(CRON_KEY, 'PASTE_') !== 0 && $cronKey !== '' && hash_equals(CRON_KEY, (string)$cronKey)) {
-            // cron path — no user token needed
-        } else {
-            $user = requireAuth($pdo, $body);
-            requireRole($user, ['admin']);
+        $cronKey = (string)($_GET['cron_key'] ?? ($body['cron_key'] ?? ''));
+        switch (cronKeyVerdict($cronKey, defined('CRON_KEY') ? CRON_KEY : null)) {
+            case 'accept':
+                break; // cron path — no user token needed
+            case 'no_key':
+                $user = requireAuth($pdo, $body);
+                requireRole($user, ['admin']);
+                break;
+            default:
+                // A cron_key WAS supplied and rejected. Saying so beats falling
+                // through to a bare "login required", which is what every
+                // misconfigured cron used to report — identical message for a
+                // typo, a stray space, an unencoded character and an untouched
+                // PASTE_ placeholder, with nothing to act on. This reveals only
+                // that the supplied key was rejected, which the caller already
+                // knows from being denied; the key itself is never echoed.
+                respond(403, ['error' => cronKeyHint(defined('CRON_KEY') ? CRON_KEY : null)]);
         }
         $file = runBackupOrFail($pdo);
         // Off-site copy rides the explicit backup path only (this action = the
@@ -1946,9 +1957,50 @@ function maybeAutoBackup($pdo) {
 // move to it if B2 ever retires v2.
 function offsiteConfigured() {
     foreach (['B2_KEY_ID', 'B2_APPLICATION_KEY'] as $c) {
-        if (!defined($c) || constant($c) === '' || strpos((string)constant($c), 'PASTE_') === 0) return false;
+        if (!defined($c)) return false;
+        // trim(): these are pasted into config.php through cPanel's File
+        // Manager, which makes a trailing space or newline easy to include and
+        // invisible afterwards. Untrimmed, one stray character produces a B2
+        // "401 bad_auth_token" that looks exactly like a wrong key.
+        $v = trim((string)constant($c));
+        if ($v === '' || strncmp($v, 'PASTE_', 6) === 0) return false;
     }
     return true;
+}
+
+// Credentials as B2 should receive them — trimmed, so pasted whitespace can't
+// break the Basic-auth handshake. Single source for every B2 call.
+function b2Credentials() {
+    return [trim((string)B2_KEY_ID), trim((string)B2_APPLICATION_KEY)];
+}
+
+// Is this request's cron_key good enough to skip the admin login? Pure, so the
+// four outcomes are checkable without a server (scripts/test_backup_auth.php).
+//   accept               -> run as the cron
+//   no_key               -> nothing supplied; fall back to normal admin auth
+//   reject_unconfigured  -> key supplied, but CRON_KEY isn't usable in config
+//   reject_mismatch      -> key supplied, doesn't match
+function cronKeyVerdict($supplied, $configured) {
+    $supplied = trim((string)$supplied);
+    if ($supplied === '') return 'no_key';
+    $configured = trim((string)($configured ?? ''));
+    if ($configured === '' || strncmp($configured, 'PASTE_', 6) === 0) return 'reject_unconfigured';
+    // hash_equals: constant-time, so a wrong key can't be discovered byte by
+    // byte from response timing.
+    return hash_equals($configured, $supplied) ? 'accept' : 'reject_mismatch';
+}
+
+// What to tell whoever is setting the cron up. Names the likely causes rather
+// than the value, which must never appear in a response.
+function cronKeyHint($configured) {
+    $c = trim((string)($configured ?? ''));
+    if ($c === '' || strncmp($c, 'PASTE_', 6) === 0) {
+        return 'cron_key was supplied, but CRON_KEY is not set in config.php (or is still the PASTE_… placeholder). '
+             . 'Set it to a long random value, then use that same value in the cron URL.';
+    }
+    return 'cron_key does not match CRON_KEY in config.php. Check for a typo, a stray space in either place, '
+         . 'that you replaced YOUR_CRON_KEY in the URL with the real value, and that the key contains no '
+         . 'characters that need URL-encoding (& + % # or spaces) — letters and digits only is safest.';
 }
 
 // B2 puts the useful text in "code" ("bad_auth_token", "unauthorized") and
@@ -1973,7 +2025,7 @@ function b2Authorize() {
     curl_setopt_array($ch, [
         CURLOPT_URL => 'https://api.backblazeb2.com/b2api/v2/b2_authorize_account',
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_USERPWD => B2_KEY_ID . ':' . B2_APPLICATION_KEY,
+        CURLOPT_USERPWD => implode(':', b2Credentials()),
         CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
