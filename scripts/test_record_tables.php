@@ -33,6 +33,7 @@ function gk_lift($src, $pattern, $what) {
 }
 eval(gk_lift($api, '/\$GK_RECORD_TABLES = \[.*?\n\];/s', '$GK_RECORD_TABLES'));
 eval(gk_lift($api, '/\$GK_CHAT_TABLES = \[.*?\];/s', '$GK_CHAT_TABLES'));
+eval(gk_lift($api, '/\$GK_PLAIN_TABLES = \[.*?\];/s', '$GK_PLAIN_TABLES'));
 eval(gk_lift($api, '/function recordTableSql\(.*?\n\}/s', 'recordTableSql()'));
 
 $spec = $GK_RECORD_TABLES;
@@ -108,6 +109,29 @@ ok('restore tolerates a pre-migration backup with no records key',
     str_contains($restoreSrc, "\$data['records'][\$table] ?? []"));
 ok('restore creates the tables before deleting from them',
     preg_match('/ensureRecordTables\(\$pdo\);.*?DELETE FROM kv_store/s', $restoreSrc) === 1);
+
+// Plain tables (login_sessions) — same explicit-enumeration trap.
+ok('runBackup dumps the plain tables', str_contains($backupSrc, "\$data['tables'][\$table]"));
+ok('runBackup iterates the plain-table spec', str_contains($backupSrc, 'foreach ($GK_PLAIN_TABLES'));
+ok('runBackup creates login_sessions before selecting', str_contains($backupSrc, 'ensureLoginSessionsTable($pdo)'));
+ok('restore restores the plain tables', str_contains($restoreSrc, 'foreach ($GK_PLAIN_TABLES'));
+// The rule that let login_sessions be added without a format bump: a section the
+// dump does not carry is left ALONE, so an older dump can't delete data it never
+// captured. An explicitly empty section still clears.
+ok('restore skips a plain table the dump omits',
+    preg_match('/foreach \(\$GK_PLAIN_TABLES as \$table\) \{\s*if \(!isset\(\$data\[.tables.\]\[\$table\]\)\) continue;/s', $restoreSrc) === 1);
+ok('every table in the DB is covered by the backup', (function () use ($api, $GK_RECORD_TABLES, $GK_CHAT_TABLES, $GK_PLAIN_TABLES) {
+    // Everything api.php or schema.sql creates must be dumped somewhere, be
+    // tokens (deliberately cleared on restore, never restored), or this fails.
+    preg_match_all('/CREATE TABLE IF NOT EXISTS ([a-z_]+)/', $api . file_get_contents(dirname(__DIR__) . '/schema.sql'), $m);
+    $covered = array_merge(
+        ['kv_store', 'users', 'revisions', 'tokens'],
+        array_keys($GK_RECORD_TABLES), $GK_CHAT_TABLES, $GK_PLAIN_TABLES
+    );
+    $missing = array_diff(array_unique($m[1]), $covered);
+    if ($missing) echo "    (uncovered: " . implode(', ', $missing) . ")\n";
+    return count($missing) === 0;
+})());
 
 // ── Chat tables: same two-sided coverage ─────────────────────────────
 // Chat shipped while runBackup() dumped only kv_store/users/revisions, so every

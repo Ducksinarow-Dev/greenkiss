@@ -130,6 +130,12 @@ try {
 define('GK_BACKUP_FORMAT', 2);
 
 $GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
+
+// Tables that are neither kv nor chat nor per-record, dumped verbatim. tokens is
+// deliberately absent: restore clears it so everyone re-logs in against the
+// restored user set. login_sessions is the login history behind Admin Panel and
+// presence — it was outside every backup until now.
+$GK_PLAIN_TABLES = ['login_sessions'];
 $GK_RECORD_TABLES = [
     'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
     'content'    => ['status' => 'VARCHAR(24)', 'publish_date' => 'DATE', 'campaign_id' => 'VARCHAR(24)'],
@@ -1869,10 +1875,10 @@ function ensureBackupsDir() {
 }
 
 function runBackup($pdo) {
-    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES, $GK_PLAIN_TABLES;
     $dir = ensureBackupsDir();
     $stamp = gmdate('Ymd_His');
-    $data = ['createdAt' => gmdate('c'), 'format' => GK_BACKUP_FORMAT, 'kv' => [], 'users' => [], 'revisions' => [], 'records' => [], 'chat' => []];
+    $data = ['createdAt' => gmdate('c'), 'format' => GK_BACKUP_FORMAT, 'kv' => [], 'users' => [], 'revisions' => [], 'records' => [], 'chat' => [], 'tables' => []];
     foreach ($pdo->query("SELECT k, v, updated_at FROM kv_store") as $row) $data['kv'][] = $row;
     // Hashes only — never plaintext PINs — so users are safe to keep in the dump.
     foreach ($pdo->query("SELECT id, name, pin_hash, role, created_at FROM users") as $row) $data['users'][] = $row;
@@ -1900,6 +1906,14 @@ function runBackup($pdo) {
         $rows = [];
         foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
         $data['chat'][$table] = $rows;
+    }
+
+    // Plain tables (login history). Same explicit-enumeration trap as above.
+    ensureLoginSessionsTable($pdo);
+    foreach ($GK_PLAIN_TABLES as $table) {
+        $rows = [];
+        foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
+        $data['tables'][$table] = $rows;
     }
 
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -2299,9 +2313,10 @@ function rollbackToRelease($name) {
 }
 
 function restoreFromBackupData($pdo, $data) {
-    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES, $GK_PLAIN_TABLES;
     ensureRecordTables($pdo); // must exist before the DELETE/INSERT below
     ensureChatTables($pdo);
+    ensureLoginSessionsTable($pdo);
     $pdo->beginTransaction();
     try {
         $pdo->exec("DELETE FROM kv_store");
@@ -2353,6 +2368,27 @@ function restoreFromBackupData($pdo, $data) {
         foreach (array_reverse($GK_CHAT_TABLES) as $table) $pdo->exec("DELETE FROM $table");
         foreach ($GK_CHAT_TABLES as $table) {
             $rows = $data['chat'][$table] ?? [];
+            if (!$rows) continue;
+            $cols = array_keys($rows[0]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO $table (" . implode(', ', $cols) . ")
+                 VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")"
+            );
+            foreach ($rows as $row) {
+                $stmt->execute(array_map(fn($c) => $row[$c] ?? null, $cols));
+            }
+        }
+
+        // Plain tables. Unlike chat above, a section the dump DOESN'T carry is
+        // left alone rather than emptied — that's what lets an older format-2
+        // dump (taken before login_sessions was covered) restore without
+        // destroying login history it simply never captured, and is why adding
+        // this needed no format bump. An explicitly empty section still clears,
+        // so a genuine "no sessions" snapshot restores faithfully.
+        foreach ($GK_PLAIN_TABLES as $table) {
+            if (!isset($data['tables'][$table])) continue;
+            $pdo->exec("DELETE FROM $table");
+            $rows = $data['tables'][$table];
             if (!$rows) continue;
             $cols = array_keys($rows[0]);
             $stmt = $pdo->prepare(

@@ -73,6 +73,10 @@ ok "backup holds revisions" "$(php -r "\$d=json_decode(gzdecode(file_get_content
 ok "backup holds users" "$(has "$BK/$F" pin_hash)" "yes"
 ok "backup holds chat messages" "$(has "$BK/$F" 'Lavender restock is in')" "yes"
 ok "backup holds chat channels" "$(has "$BK/$F" chat_channels)" "yes"
+# Login history (login_sessions) — the last table that was outside every dump.
+# The login above created a session row, so it must appear.
+ok "backup holds login history" "$(has "$BK/$F" login_sessions)" "yes"
+ok "login history has real rows" "$(php -r "\$d=json_decode(gzdecode(file_get_contents('$BK/$F')),true); echo count(\$d['tables']['login_sessions'] ?? [])>0?'yes':'no';")" "yes"
 ok "listed in backup_list" "$(curl -s "$B?action=backup_list" -H "$AH" | grep -c "$F")" "1"
 
 set_kv imagerepo '{"blocks":[]}'
@@ -120,6 +124,46 @@ php -r 'file_put_contents("'"$BK"'/gk_20200101_000000.json.gz", gzencode(json_en
 ok "stale-format backup refused" "$(curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_20200101_000000.json.gz"}' | grep -c 'predates the current data format')" "1"
 ok "chat survived that attempt" "$(q "SELECT COUNT(*) FROM chat_messages;")" "1"
 ok "current backups carry a format stamp" "$(curl -s -X POST "$B?action=backup_run" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["file"] ?? "";' | { read f; has "$BK/$f" '"format":2'; })" "yes"
+
+echo "== a dump predating login-history coverage must not delete it =="
+# Adding login_sessions deliberately did NOT bump the format, so format-2 dumps
+# taken before this change are still restorable. They carry no 'tables' section,
+# and restoring one must leave login history ALONE rather than empty it — the
+# same "only clear what the dump carries" rule, so no format bump was needed.
+# Fixtures are built by EDITING A REAL BACKUP, not hand-rolled from scratch: a
+# synthetic dump with "users":[] restores as "delete every user", after which no
+# login works and every later assertion in this file fails for an unrelated
+# reason. Deriving from a real dump keeps users/kv intact so the only variable is
+# the section under test.
+# Counts come from `q` (straight to mysql) so they can be read before the
+# re-login each successful restore forces — logging back in would itself add a
+# login_sessions row and mask what's being measured.
+relogin(){ TOK=$(curl -s -X POST "$B?action=login" -H "$J" -d '{"name":"Hayden","pin":"1234"}' | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["token"] ?? "";'); AH="Authorization: Bearer $TOK"; }
+edit_dump(){ # <source-file> <dest-name> <php-mutation on $d>
+  php -r "\$p='$BK/'; \$d=json_decode(gzdecode(file_get_contents(\$p.'$1')),true); $3; file_put_contents(\$p.'$2', gzencode(json_encode(\$d)));"
+}
+BASE=$(curl -s -X POST "$B?action=backup_run" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["file"] ?? "";')
+q "INSERT INTO login_sessions (token,user_id,user_name) VALUES ('tok-keep','u1','Hayden');"
+
+# A dump with NO 'tables' section (what every format-2 backup taken before this
+# change looks like) must leave login history untouched.
+edit_dump "$BASE" gk_20260101_000000.json.gz 'unset($d["tables"])'
+SESS_BEFORE=$(q "SELECT COUNT(*) FROM login_sessions;")
+curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_20260101_000000.json.gz"}' >/dev/null
+ok "login history survived a pre-coverage restore" "$(q "SELECT COUNT(*) FROM login_sessions;")" "$SESS_BEFORE"
+relogin
+
+# ...but a dump that explicitly carries an EMPTY section still clears it, so a
+# genuine "no sessions" snapshot restores faithfully instead of being ignored.
+edit_dump "$BASE" gk_20260102_000000.json.gz '$d["tables"]["login_sessions"]=[]'
+curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_20260102_000000.json.gz"}' >/dev/null
+ok "an explicitly empty section does clear" "$(q "SELECT COUNT(*) FROM login_sessions;")" "0"
+relogin
+# And a dump WITH rows puts them back, so the coverage is a real round trip.
+edit_dump "$BASE" gk_20260103_000000.json.gz '$d["tables"]["login_sessions"]=[["id"=>901,"token"=>"tok-restored","user_id"=>"u1","user_name"=>"Hayden","login_at"=>"2026-01-03 09:00:00","last_seen"=>"2026-01-03 09:05:00","logout_at"=>null]]'
+curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_20260103_000000.json.gz"}' >/dev/null
+ok "login history rows restore" "$(q "SELECT user_name FROM login_sessions WHERE token='tok-restored';")" "Hayden"
+relogin
 
 echo "== a format bump must NOT destroy existing snapshots =="
 # An earlier revision purged every snapshot whose format marker didn't match, so
