@@ -1299,6 +1299,75 @@ function ensureChatTables($pdo) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+// ─── Per-record tables (#41, step 1) ─────────────────────────────────
+// The hot collections are moving off kv_store, where each one is a single
+// JSON blob and every write is a read-modify-write of the whole thing (see
+// kvMutate below — correct, but a whole-collection lock). One row per record
+// makes a write a single statement.
+//
+// STEP 1 IS SCHEMA ONLY: these tables are created and backed up, but nothing
+// reads or writes them yet — every action still goes through kv_store. That
+// keeps this step independently revertable (drop the tables, no data moved).
+//
+// Table name == the kv key it will replace, so the mapping needs no lookup.
+// Shape is deliberately thin: `data` holds the whole record as JSON and the
+// only real columns are the ones worth filtering or sorting on server-side.
+// Resisting a column per field is what keeps this from becoming a week of
+// schema design — the JSON column carries the long tail.
+//
+// ponytail: the backlog note also listed an `assignee_id` column, deliberately
+// dropped — tasks and content are MULTI-assignee (`assigneeIds[]`) since Batch
+// 3, so one column can't answer "assigned to me" anyway. That filter stays in
+// the JSON (and client-side, where it already runs). Add a proper
+// record_assignees join table if assignment ever needs a server-side query.
+//
+// `version` is here for #40 (optimistic concurrency: client sends the version
+// it last saw, server rejects a stale write). Free to add now while the schema
+// is being written; retrofitting it across every table later is pure rework.
+$GK_RECORD_TABLES = [
+    'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
+    'content'    => ['status' => 'VARCHAR(24)', 'publish_date' => 'DATE', 'campaign_id' => 'VARCHAR(24)'],
+    'projects'   => ['status' => 'VARCHAR(24)'],
+    'campaigns'  => ['status' => 'VARCHAR(24)'],
+    'instances'  => ['status' => 'VARCHAR(24)', 'doc_id' => 'VARCHAR(24)'],
+    'categories' => [],
+    'contacts'   => [],
+    'tags'       => [],
+];
+
+// The CREATE for one record table. Shared by ensureRecordTables() and the
+// DB-free check in scripts/test_record_tables.php, so the test asserts against
+// the same SQL that actually runs.
+function recordTableSql($table, array $cols) {
+    $extra = '';
+    $index = '';
+    foreach ($cols as $col => $type) {
+        $extra .= "        $col $type NULL,\n";
+        $index .= ",\n        INDEX idx_{$table}_{$col} ($col)";
+    }
+    // LONGTEXT, not the JSON type: nothing here uses MySQL JSON functions, and
+    // LONGTEXT works on every MySQL/MariaDB version cPanel might be running.
+    return "CREATE TABLE IF NOT EXISTS $table (
+        id VARCHAR(24) NOT NULL PRIMARY KEY,
+        data LONGTEXT NOT NULL,
+        version INT NOT NULL DEFAULT 1,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+$extra        INDEX idx_{$table}_updated (updated_at)$index
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+}
+
+// Lazily created like ensureChatTables/ensureLoginSessionsTable, so a live DB
+// picks these up on the next deploy with no manual schema import.
+function ensureRecordTables($pdo) {
+    global $GK_RECORD_TABLES;
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    foreach ($GK_RECORD_TABLES as $table => $cols) {
+        $pdo->exec(recordTableSql($table, $cols));
+    }
+}
+
 // Can this user see the channel? Public channels are visible to all; others
 // require a chat_members row. Archived channels are hidden.
 function chatCanSee($pdo, $channelId, $userId) {
@@ -1717,13 +1786,28 @@ function ensureBackupsDir() {
 }
 
 function runBackup($pdo) {
+    global $GK_RECORD_TABLES;
     $dir = ensureBackupsDir();
     $stamp = gmdate('Ymd_His');
-    $data = ['createdAt' => gmdate('c'), 'kv' => [], 'users' => [], 'revisions' => []];
+    $data = ['createdAt' => gmdate('c'), 'kv' => [], 'users' => [], 'revisions' => [], 'records' => []];
     foreach ($pdo->query("SELECT k, v, updated_at FROM kv_store") as $row) $data['kv'][] = $row;
     // Hashes only — never plaintext PINs — so users are safe to keep in the dump.
     foreach ($pdo->query("SELECT id, name, pin_hash, role, created_at FROM users") as $row) $data['users'][] = $row;
     foreach ($pdo->query("SELECT id, sop_id, snapshot, saved_at, saved_by FROM revisions") as $row) $data['revisions'][] = $row;
+
+    // Per-record tables (#41). Backed up from step 1, BEFORE anything writes to
+    // them — because this function and restoreFromBackupData both enumerate
+    // tables explicitly, so a table added here later than the code that fills it
+    // means backups silently stop covering data that moved out of kv_store.
+    // That is the single most likely way this migration loses data; the coverage
+    // assertion in scripts/test_record_tables.php exists to keep it impossible.
+    // Empty tables just dump as empty arrays while the migration is unfinished.
+    ensureRecordTables($pdo);
+    foreach (array_keys($GK_RECORD_TABLES) as $table) {
+        $rows = [];
+        foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
+        $data['records'][$table] = $rows;
+    }
 
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
@@ -2081,6 +2165,8 @@ function rollbackToRelease($name) {
 }
 
 function restoreFromBackupData($pdo, $data) {
+    global $GK_RECORD_TABLES;
+    ensureRecordTables($pdo); // must exist before the DELETE/INSERT below
     $pdo->beginTransaction();
     try {
         $pdo->exec("DELETE FROM kv_store");
@@ -2098,6 +2184,25 @@ function restoreFromBackupData($pdo, $data) {
         foreach (($data['revisions'] ?? []) as $row) {
             $stmt->execute([$row['id'], $row['sop_id'], $row['snapshot'], $row['saved_at'], $row['saved_by']]);
         }
+        // Per-record tables (#41). A backup taken BEFORE the migration has no
+        // 'records' key at all — the tables are still emptied, which is correct:
+        // that snapshot's data lives in its kv rows, restored above.
+        foreach (array_keys($GK_RECORD_TABLES) as $table) {
+            $pdo->exec("DELETE FROM $table");
+            $rows = $data['records'][$table] ?? [];
+            if (!$rows) continue;
+            // Column list comes from the row itself, so a schema that gains a
+            // column doesn't need this function edited too.
+            $cols = array_keys($rows[0]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO $table (" . implode(', ', $cols) . ")
+                 VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")"
+            );
+            foreach ($rows as $row) {
+                $stmt->execute(array_map(fn($c) => $row[$c] ?? null, $cols));
+            }
+        }
+
         // The restored user set may not match who's currently logged in —
         // clear all tokens so everyone gets a clean re-login post-restore.
         $pdo->exec("DELETE FROM tokens");

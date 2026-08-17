@@ -115,6 +115,103 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   INDEX idx_chat_messages_channel (channel_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── per-record tables (#41) ──────────────────────────────────────────
+-- The hot collections move off kv_store, where each is one JSON blob and
+-- every write rewrites the whole thing. One row per record = one statement
+-- per write. api.php creates these lazily (ensureRecordTables) so an
+-- already-live DB picks them up on the next deploy without a manual import;
+-- they are listed here for fresh installs. Keep in sync with
+-- $GK_RECORD_TABLES in api.php — scripts/test_record_tables.php asserts it.
+--
+-- Shape is deliberately thin: `data` holds the whole record as JSON, and the
+-- only real columns are what's worth filtering/sorting server-side. `version`
+-- is for #40 (optimistic concurrency — reject a write based on stale data).
+-- NOTE: no assignee_id column on purpose — tasks/content are multi-assignee
+-- (assigneeIds[]), so one column can't answer that query.
+CREATE TABLE IF NOT EXISTS tasks (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  status     VARCHAR(24) NULL,
+  due_date   DATE        NULL,
+  project_id VARCHAR(24) NULL,
+  INDEX idx_tasks_updated (updated_at),
+  INDEX idx_tasks_status (status),
+  INDEX idx_tasks_due_date (due_date),
+  INDEX idx_tasks_project_id (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS content (
+  id           VARCHAR(24) NOT NULL PRIMARY KEY,
+  data         LONGTEXT    NOT NULL,
+  version      INT         NOT NULL DEFAULT 1,
+  updated_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  status       VARCHAR(24) NULL,
+  publish_date DATE        NULL,
+  campaign_id  VARCHAR(24) NULL,
+  INDEX idx_content_updated (updated_at),
+  INDEX idx_content_status (status),
+  INDEX idx_content_publish_date (publish_date),
+  INDEX idx_content_campaign_id (campaign_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS projects (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  status     VARCHAR(24) NULL,
+  INDEX idx_projects_updated (updated_at),
+  INDEX idx_projects_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS campaigns (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  status     VARCHAR(24) NULL,
+  INDEX idx_campaigns_updated (updated_at),
+  INDEX idx_campaigns_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS instances (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  status     VARCHAR(24) NULL,
+  doc_id     VARCHAR(24) NULL,
+  INDEX idx_instances_updated (updated_at),
+  INDEX idx_instances_status (status),
+  INDEX idx_instances_doc_id (doc_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS categories (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_categories_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_contacts_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tags (
+  id         VARCHAR(24) NOT NULL PRIMARY KEY,
+  data       LONGTEXT    NOT NULL,
+  version    INT         NOT NULL DEFAULT 1,
+  updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_tags_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── revisions ────────────────────────────────────────────────────────
 -- SOP version history. Capped at 20 snapshots per sop_id (oldest pruned on
 -- insert — see sop_save / revision_restore in api.php).
