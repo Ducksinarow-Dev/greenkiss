@@ -128,6 +128,32 @@ NAV=$(q "SELECT v FROM kv_store WHERE k='navAccess';")
 ok "first admin's grant survived" "$(echo "$NAV" | grep -c 'u_a')" "1"
 ok "second admin's grant survived" "$(echo "$NAV" | grep -c 'u_b')" "1"
 
+echo "== #40 optimistic concurrency (stale write refused, not merged) =="
+post content_save '{"item":{"id":"v1","title":"Original"}}'
+V=$(served content | php -r '$d=json_decode(stream_get_contents(STDIN),true); foreach($d as $x){ if($x["id"]==="v1"){ echo $x["_v"]; return; } } echo "";')
+ok "records carry a version (_v)" "$([ -n "$V" ] && echo yes || echo no)" "yes"
+# Someone else saves first, moving the row on.
+post content_save '{"item":{"id":"v1","title":"Coworker edit"}}'
+# Our client still holds the version it read BEFORE that.
+CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$B?action=content_save" -H "$AH" -H "$J" -d "{\"item\":{\"id\":\"v1\",\"title\":\"My stale overwrite\",\"_v\":$V}}")
+ok "stale save refused with 409" "$CODE" "409"
+ok "coworker's edit was NOT overwritten" "$(served content | grep -c 'Coworker edit')" "1"
+ok "the stale title never landed" "$(served content | grep -c 'My stale overwrite')" "0"
+# A client that doesn't track versions (older build, or a brand-new record)
+# must still be able to write — this can't become a wall.
+ok "save without _v still works" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$B?action=content_save" -H "$AH" -H "$J" -d '{"item":{"id":"v1","title":"No version sent"}}')" "200"
+# And the CURRENT version always saves.
+V2=$(served content | php -r '$d=json_decode(stream_get_contents(STDIN),true); foreach($d as $x){ if($x["id"]==="v1"){ echo $x["_v"]; return; } } echo "";')
+ok "current version saves" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$B?action=content_save" -H "$AH" -H "$J" -d "{\"item\":{\"id\":\"v1\",\"title\":\"Fresh edit\",\"_v\":$V2}}")" "200"
+# _v is server-managed metadata; storing it inside data would freeze a stale
+# number into the JSON and make every later comparison meaningless.
+ok "_v is not persisted inside the record" "$(q "SELECT data FROM content WHERE id='v1';" | grep -c '_v')" "0"
+
+echo "== step 4: every migrated collection is served from its table =="
+for c in content projects campaigns categories contacts tags instances tasks; do
+  ok "$c served from its row table" "$(q "SELECT COUNT(*) FROM $c;")" "$(count_ids $c)"
+done
+
 echo "== doc_item_save is allowlisted =="
 ok "cannot be aimed at tasks" "$(curl -s --max-time 10 -X POST "$B?action=doc_item_save" -H "$AH" -H "$J" -d '{"key":"tasks","item":{"id":"x"}}' | grep -c 'Unknown document')" "1"
 

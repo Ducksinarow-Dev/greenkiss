@@ -394,7 +394,15 @@ async function apiCall(action, opts = {}) {
   }
   let data = null;
   try { data = await res.json(); } catch {}
-  if (!res.ok) throw new Error((data && data.error) || ("Request failed (" + res.status + ")"));
+  if (!res.ok) {
+    const err = new Error((data && data.error) || ("Request failed (" + res.status + ")"));
+    // Carry the status and body so callers can tell a real failure from a
+    // handled outcome — a #40 save conflict is a 409 with the current data
+    // attached, not a network problem, and must not be reported as "offline".
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data || {};
 }
 
@@ -1173,7 +1181,25 @@ function _remoteCollectionSave(action, bodyKey, item) {
   apiCall(action, { method: "POST", body: { [bodyKey]: item } }).then(res => {
     _applyServerCollections(res);
     _setOffline(false);
-  }).catch(() => _setOffline(true));
+  }).catch(err => {
+    // #40: a coworker changed this record while it was being edited. The
+    // server refused the write rather than overwriting their changes, and sent
+    // the current data back. Apply that so the UI shows their version, and say
+    // so plainly — silently swallowing this is exactly the "my edit vanished"
+    // failure the whole check exists to prevent. Not an offline state.
+    if (err && err.status === 409 && err.data && err.data.conflict) {
+      _applyServerCollections(err.data);
+      _setOffline(false);
+      triggerToast(err.message);
+      // Deliberately NOT forcing a re-render: the approved behaviour is
+      // "toast, discard nothing, let them re-apply". The cache now holds the
+      // coworker's version for the next read, while what the user typed stays
+      // on screen — pulling their text out from under them mid-edit would lose
+      // the very work this check exists to protect.
+      return;
+    }
+    _setOffline(true);
+  });
 }
 function _remoteCollectionDelete(action, id) {
   apiCall(action, { method: "POST", body: { id } }).then(res => {

@@ -240,12 +240,15 @@ switch ($action) {
         $rows = $pdo->query("SELECT k, v FROM kv_store");
         $out = new stdClass();
         foreach ($rows as $r) { $out->{$r['k']} = json_decode($r['v'], true); }
-        // Tasks come from their own table now (#41 step 3), overriding the kv
-        // doc of the same name — which is left frozen as the rollback. Serving
-        // them here is what keeps the whole client unchanged: it still warms one
-        // cache from one payload and never learns where anything is stored.
-        ensureTasksMigrated($pdo);
-        $out->tasks = recordAll($pdo, 'tasks');
+        // Migrated collections come from their own tables (#41), overriding the
+        // kv docs of the same name — which are left frozen as the rollback.
+        // Serving them here is what keeps the whole client unchanged: it still
+        // warms one cache from one payload and never learns where anything is
+        // stored. Reverting a collection = removing it from $GK_RECORD_TABLES.
+        foreach (array_keys($GK_RECORD_TABLES) as $table) {
+            ensureCollectionMigrated($pdo, $table);
+            $out->{$table} = recordAll($pdo, $table);
+        }
         respond(200, ['data' => $out]);
         break;
 
@@ -400,7 +403,8 @@ switch ($action) {
         // Cascade: the campaign's content items survive uncampaigned.
         $user = requireAuth($pdo, $body);
         handleCollectionDelete($pdo, $body, $user, 'campaigns', function ($pdo, $id) {
-            return ['content' => collectionMapAll($pdo, 'content', function ($c) use ($id) {
+            ensureCollectionMigrated($pdo, 'content'); // rows now (#41 step 4)
+            return ['content' => recordMapAll($pdo, 'content', function ($c) use ($id) {
                 if (($c['campaignId'] ?? '') === $id) $c['campaignId'] = '';
                 return $c;
             })];
@@ -1475,6 +1479,10 @@ function recordFieldForColumn($col) {
 // a lossless replacement for the JSON entry and nothing depends on having
 // modelled every field as a column.
 function recordRow(array $record, array $cols) {
+    // `_v` is the version column echoed back by recordAll, not a field of the
+    // record — storing it inside `data` would freeze a stale number into the
+    // JSON and make every later comparison meaningless.
+    unset($record['_v']);
     $row = [
         'id' => (string)$record['id'],
         'data' => json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -1520,9 +1528,13 @@ function recordUpsert($pdo, $table, array $record) {
 // so this only needs to be deterministic.
 function recordAll($pdo, $table) {
     $out = [];
-    foreach ($pdo->query("SELECT data FROM $table ORDER BY id") as $r) {
+    foreach ($pdo->query("SELECT data, version FROM $table ORDER BY id") as $r) {
         $rec = json_decode($r['data'], true);
-        if (is_array($rec)) $out[] = $rec;
+        // `_v` is server-managed metadata, not part of the record: stored as a
+        // column, injected on read, stripped on write (see recordRow). The
+        // client round-trips it without knowing what it is, which is what makes
+        // the #40 conflict check work with no client bookkeeping.
+        if (is_array($rec)) { $rec['_v'] = (int)$r['version']; $out[] = $rec; }
     }
     return $out;
 }
@@ -1549,23 +1561,49 @@ function recordMapAll($pdo, $table, callable $fn) {
 // insert-or-replace, so two concurrent first-requests can't duplicate anything.
 // The kv `tasks` doc is deliberately left in place, frozen, as the rollback —
 // nothing writes it again, and reverting means pointing reads back at it.
-function ensureTasksMigrated($pdo) {
-    static $done = false;
-    if ($done) return;
-    $done = true;
+function isRecordTable($key) {
+    global $GK_RECORD_TABLES;
+    return isset($GK_RECORD_TABLES[$key]);
+}
+
+function ensureCollectionMigrated($pdo, $key) {
+    static $done = [];
+    if (isset($done[$key])) return;
+    $done[$key] = true;
+    if (!isRecordTable($key)) return;
     ensureRecordTables($pdo);
-    $marker = kvGet($pdo, 'tasksRowsMigrated');
+    $marker = kvGet($pdo, $key . 'RowsMigrated');
     if (is_array($marker) && !empty($marker['at'])) return;
-    $legacy = kvGet($pdo, 'tasks');
+    $legacy = kvGet($pdo, $key);
     $n = 0;
     if (is_array($legacy)) {
-        foreach ($legacy as $t) {
-            if (!is_array($t) || ($t['id'] ?? '') === '') continue;
-            recordUpsert($pdo, 'tasks', $t);
+        foreach ($legacy as $rec) {
+            if (!is_array($rec) || ($rec['id'] ?? '') === '') continue;
+            recordUpsert($pdo, $key, $rec);
             $n++;
         }
     }
-    kvSet($pdo, 'tasksRowsMigrated', ['at' => gmdate('c'), 'count' => $n]);
+    kvSet($pdo, $key . 'RowsMigrated', ['at' => gmdate('c'), 'count' => $n]);
+}
+
+function ensureTasksMigrated($pdo) { ensureCollectionMigrated($pdo, 'tasks'); }
+
+// #40 optimistic concurrency. `_v` is injected into every record on read and
+// round-trips through the client untouched (the UI spreads records, so it
+// survives edits). If the row has moved on since the client last saw it, the
+// save is refused instead of silently overwriting a coworker's field changes.
+//
+// Absent `_v` means "client isn't tracking versions" (an older build, or a
+// record it just created), which must still save — this can't become a wall
+// that blocks writes from anything that hasn't been updated yet.
+// Returns the current version on conflict, null when the save may proceed.
+function recordConflict($pdo, $table, array $record) {
+    if (!isset($record['_v'])) return null;
+    $s = $pdo->prepare("SELECT version FROM $table WHERE id = ? LIMIT 1");
+    $s->execute([(string)$record['id']]);
+    $cur = $s->fetch();
+    if (!$cur) return null; // brand new record — nothing to conflict with
+    return ((int)$cur['version'] !== (int)$record['_v']) ? (int)$cur['version'] : null;
 }
 
 // Can this user see the channel? Public channels are visible to all; others
@@ -1744,11 +1782,32 @@ function docItemDelete($pdo, $key, $field, $id) {
 // alert_save/alert_delete stay hand-written in the switch above: any
 // authenticated user (not just editor/admin) may create one, and delete
 // has an ownership check instead of a plain role gate.
+// Collections listed in $GK_RECORD_TABLES are stored one row per record (#41);
+// everything else is still one JSON blob in kv_store. Routing both through here
+// means a collection migrates by joining that list — no per-endpoint edits —
+// and the response shape is identical either way, so the client never knows.
 function handleCollectionSave($pdo, $body, $user, $bodyKey, $kvKey) {
     requireRole($user, ['editor', 'admin']);
     $item = $body[$bodyKey] ?? null;
     if (!is_array($item) || empty($item['id'])) respond(400, ['error' => 'Missing ' . $bodyKey]);
     maybeAutoBackup($pdo);
+    if (isRecordTable($kvKey)) {
+        ensureCollectionMigrated($pdo, $kvKey);
+        $theirs = recordConflict($pdo, $kvKey, $item);
+        if ($theirs !== null) {
+            // #40: this record moved on since the client last read it. Refuse
+            // rather than overwrite a coworker's field changes, and send the
+            // current collection back so the UI can show their version. Nothing
+            // is discarded — the user still has their edit on screen.
+            respond(409, [
+                'error' => 'Someone else changed this while you were editing. Reload to see their version, then re-apply your change.',
+                'conflict' => true,
+                $kvKey => recordAll($pdo, $kvKey),
+            ]);
+        }
+        recordUpsert($pdo, $kvKey, $item);
+        respond(200, ['ok' => true, $kvKey => recordAll($pdo, $kvKey)]);
+    }
     respond(200, ['ok' => true, $kvKey => collectionUpsert($pdo, $kvKey, $item)]);
 }
 
@@ -1760,7 +1819,13 @@ function handleCollectionDelete($pdo, $body, $user, $kvKey, $cascade = null) {
     $id = $body['id'] ?? '';
     if ($id === '') respond(400, ['error' => 'Missing id']);
     maybeAutoBackup($pdo);
-    $out = ['ok' => true, $kvKey => collectionDelete($pdo, $kvKey, $id)];
+    if (isRecordTable($kvKey)) {
+        ensureCollectionMigrated($pdo, $kvKey);
+        $pdo->prepare("DELETE FROM $kvKey WHERE id = ?")->execute([$id]);
+        $out = ['ok' => true, $kvKey => recordAll($pdo, $kvKey)];
+    } else {
+        $out = ['ok' => true, $kvKey => collectionDelete($pdo, $kvKey, $id)];
+    }
     if ($cascade) $out = array_merge($out, $cascade($pdo, $id));
     respond(200, $out);
 }
