@@ -6,7 +6,7 @@ Snapshot for a new chat picking up work on this repo. Pair with `BACKLOG.md`, `D
 The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content calendar, image repository, announcements, waitlist/callbacks, and staff chat. Replaces Notion + scattered tools.
 - **Repo:** `Ducksinarow-Dev/greenkiss` (cloned at `/Users/super-dad/Projects/GK Hub/greenkiss`)
 - **Production:** https://hub.thegreenkiss.com · **Old tool being replaced:** https://team.thegreenkiss.com
-- **Latest release:** `0.1.45` (on the `release` branch)
+- **Latest release:** `0.1.52` (on the `release` branch)
 
 ## Stack & architecture
 - **Frontend:** React 18 + Vite, no router — `src/App.jsx` switches "sections" (nav keys). Components in `src/components/`. All shared state/data + helpers live in `src/globals.js` (~2.9k lines). Shared UI kit in `src/components/shared.jsx`.
@@ -16,7 +16,26 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 
 ## Running it
 - **Dev preview:** `npm --prefix greenkiss run dev` (or the `gk-dev` launch config, port 5173). Seed logins: **Hayden**/**Megan** (admin), **Jessica**/**Liz** (editor) — all PIN **1234**.
-- **Lint + build (the gate):** `npm run check` (eslint + vite build). Baseline is ~36 warnings (mostly an unused `React` import per file — matches existing convention); **0 errors** is the bar.
+- **Lint + build (the gate):** `npm run check` (eslint + vite build). Baseline is ~34 warnings (mostly an unused `React` import per file — matches existing convention); **0 errors** is the bar.
+- **⚠️ The REAL gate for any `api.php` change — needs a local mysql:**
+  ```
+  MYSQL_USER=root bash scripts/test_backup_restore.sh     # 40, executes api.php
+  MYSQL_USER=root bash scripts/test_concurrent_writes.sh  # 13, executes api.php
+  ```
+  **If these print `SKIP`, nothing is verified** (`brew services start mysql`).
+  On Aug 17 2026 they skipped all day while 131 source-shape assertions passed,
+  and two request-time crashes reached production behind that green wall — see
+  the Aug 17 section in `BACKLOG.md`. Source-regex assertions prove shape, never
+  execution. Static suites (no DB needed): `php scripts/test_record_tables.php`
+  (98, incl. the declaration-ordering guard), `php scripts/test_backup_auth.php`
+  (26), `php scripts/test_uploads_mirror.php` (20),
+  `node scripts/test_backup_health.mjs` (22),
+  `php scripts/migrate_kv_to_rows.php --self-test` (11).
+- **⚠️ api.php ordering rule:** PHP hoists function *declarations* but **not**
+  variable assignments or `define()`. `switch ($action)` starts ~line 120 —
+  anything a request-time function reaches for via `global`, or any constant it
+  uses, **must be declared above it**, or it simply doesn't exist during a
+  request. Asserted by `test_record_tables.php`.
 - **Publish a release:** `npm run release` (`scripts/release.sh`) — bumps patch, runs check, builds, replaces the `release` branch with the build output, pushes `release` **and** `main`. **Does not deploy live.**
 - **Go live:** an admin clicks **Admin Panel → Software Update → Update Now** on hub.thegreenkiss.com (or cPanel → Git Version Control → Manage → Pull/Deploy). **Claude cannot do this** — it needs a prod admin login + PIN, which Claude must not enter. Always hand this step to the user.
 - **Permissions:** `../.claude/settings.local.json` allowlists `git *` and `npm run release` so commits/releases aren't blocked by the auto-mode classifier. Run git/release as **bare** commands (a piped `| tail` can defeat the allow-rule match).
@@ -32,7 +51,8 @@ The Green Kiss internal ops hub ("GK Hub") — SOPs, tasks, projects, content ca
 
 ## Remaining / next (open backlog — full detail in `BACKLOG.md`)
 - **Blocked on the user / external:** **#57** AI suggestions for content fields (headline/CTA/caption) — needs an LLM key in `config.php` + a new `api.php` proxy action (same pattern as `omnisendApiCall`); recommend Anthropic/Claude. **#22** GBP push to live Google Business Profile — needs Google Cloud OAuth (see `GBP_PUSH.md`).
-- **Big / greenlit for pre-launch:** **#41** migrate the hot kv collections to real per-record tables (greenlit by Hayden to do *before* go-live; multi-day, touches ~20 api.php actions + the storage layer). **#40** same-record concurrent-edit conflict → reload toast (approved; needs a `version`/`updated_at` check, mind SOPEditor's 500ms autosave).
+- **Big / greenlit for pre-launch:** **#41** — **steps 1–3 of 5 are DONE (Aug 17 2026).** `tasks` is row-backed and live; the client is unchanged because `kv_all` serves tasks from the table under the same key (which is also the rollback). Remaining: **step 4** — the other seven collections, repeating the same shape (`recordUpsert`/`recordAll`/`recordMapAll` are already generic; add an `ensureXMigrated()` per collection and override its key in `kv_all`) — and **step 5**, deleting `kvMutate`/`collectionUpsert`/`collectionDelete`/`collectionMapAll` and moving `navAccess` onto `users`. **#40** same-record conflict → reload toast: do it **during step 4**, since `version` already increments on every `recordUpsert` and only needs a client-supplied compare. Mind SOPEditor's 500ms autosave (conflict-check on explicit save/close only).
+- **Verify after deploying 0.1.52:** the Task Manager against row-backed tasks **cannot be tested locally** — the dev preview is localStorage and never calls `api.php`. Also unverified: the `uploads/` mirror against real B2 credentials, and the #64 Zenkit importer with a real CSV.
 - **Buildable features (each standalone):** #27 drag-to-reschedule content on the calendar · #28 recurring content items · #29 inline Omnisend stats on chips/rows/cards · #30 Store-Goals pace/comparison · #31 per-day target overrides · #33 full mobile/responsive pass · #34 "copy GBP post text".
 - **Track X (external setup):** PWA + Web Push (iOS needs "Add to Home Screen"); two Google Calendars for email/IG campaign assignment.
 - **Pending on Maria (external):** content-calendar field list + campaign-types PDF.

@@ -109,7 +109,10 @@ function UserRow({ u, isSelf, onUpdate, onDelete, onChanged }) {
       onMouseEnter={e => e.currentTarget.style.background = C.s2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
       <span style={{ position: "relative", display: "flex", flexShrink: 0 }}>
         <Avatar name={u.name} size={28} />
-        <PresenceDot userId={u.id} size={10} style={{ position: "absolute", bottom: 0, right: 0 }} />
+        {/* Sits just OUTSIDE the avatar's edge. At bottom/right 0 it landed on
+            top of the initials, and the offline state (a transparent ring) read
+            as a stray circle smudging the letter rather than a status badge. */}
+        <PresenceDot userId={u.id} size={10} style={{ position: "absolute", bottom: -2, right: -2 }} />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.txt }}>{u.name}{isSelf && <span style={{ fontSize: 12, color: C.mut, fontWeight: 500 }}> (you)</span>}</div>

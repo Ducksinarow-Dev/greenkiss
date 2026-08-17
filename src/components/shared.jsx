@@ -10,7 +10,10 @@ function PresenceDot({ userId, size = 9, style }) {
   return (
     <span title={online ? "Online" : "Offline"} style={{
       width: size, height: size, borderRadius: "50%", flexShrink: 0, display: "inline-block",
-      background: online ? "#2Fb463" : "transparent",
+      // Offline is an OPAQUE ring, not a transparent one: over an avatar a
+      // see-through dot shows the initial through it and reads as a rendering
+      // glitch instead of a status badge.
+      background: online ? "#2Fb463" : C.sur,
       border: online ? "none" : `1.5px solid ${C.bdr2}`,
       boxShadow: online ? `0 0 0 2px ${C.sur}` : "none", ...style,
     }} />
