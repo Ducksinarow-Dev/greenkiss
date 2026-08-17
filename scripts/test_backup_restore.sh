@@ -61,20 +61,34 @@ set_kv imagerepo '{"blocks":[{"id":"b1","text":"Bathorium"}]}'
 curl -s -X POST "$B?action=task_save" -H "$AH" -H "$J" -d '{"task":{"id":"t1","title":"Restock lavender"}}' >/dev/null
 curl -s -X POST "$B?action=sop_save" -H "$AH" -H "$J" -d '{"sop":{"id":"s1","title":"Opening"}}' >/dev/null
 curl -s -X POST "$B?action=sop_save" -H "$AH" -H "$J" -d '{"sop":{"id":"s1","title":"Opening v2"}}' >/dev/null  # makes a revision
+# Chat rows go in at the DB level: the point is that runBackup/restore cover the
+# tables, not that the chat endpoints work (that's chat's own concern).
+q "INSERT INTO chat_channels (id,name,kind,visibility) VALUES ('c1','general','channel','public');"
+q "INSERT INTO chat_messages (id,channel_id,user_id,body) VALUES (4242,'c1','u1','Lavender restock is in');"
+q "INSERT INTO chat_members (channel_id,user_id,last_read_msg_id) VALUES ('c1','u1',4242);"
 F=$(curl -s -X POST "$B?action=backup_run" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["file"] ?? "";')
 ok "backup written" "$([ -n "$F" ] && [ -f "$BK/$F" ] && echo yes || echo no)" "yes"
 ok "backup holds kv data" "$(has "$BK/$F" Bathorium)" "yes"
 ok "backup holds revisions" "$(php -r "\$d=json_decode(gzdecode(file_get_contents('$BK/$F')),true); echo count(\$d['revisions'])?'yes':'no';")" "yes"
 ok "backup holds users" "$(has "$BK/$F" pin_hash)" "yes"
+ok "backup holds chat messages" "$(has "$BK/$F" 'Lavender restock is in')" "yes"
+ok "backup holds chat channels" "$(has "$BK/$F" chat_channels)" "yes"
 ok "listed in backup_list" "$(curl -s "$B?action=backup_list" -H "$AH" | grep -c "$F")" "1"
 
 set_kv imagerepo '{"blocks":[]}'
 curl -s -X POST "$B?action=task_delete" -H "$AH" -H "$J" -d '{"id":"t1"}' >/dev/null
 q "DELETE FROM revisions;"
+q "DELETE FROM chat_messages; DELETE FROM chat_members; DELETE FROM chat_channels;"
 curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d "{\"file\":\"$F\"}" >/dev/null
 ok "kv restored" "$(q "SELECT v FROM kv_store WHERE k='imagerepo';" | grep -c Bathorium)" "1"
 ok "tasks restored" "$(q "SELECT v FROM kv_store WHERE k='tasks';" | grep -c lavender)" "1"
 ok "revisions restored" "$(q 'SELECT COUNT(*) FROM revisions;')" "1"
+ok "chat channels restored" "$(q "SELECT COUNT(*) FROM chat_channels WHERE id='c1';")" "1"
+ok "chat message restored" "$(q "SELECT body FROM chat_messages;" | grep -c 'Lavender restock is in')" "1"
+# The id must come back as 4242, not renumbered by AUTO_INCREMENT — chat_members
+# .last_read_msg_id points at it, so a renumber silently breaks unread state.
+ok "chat message id preserved" "$(q 'SELECT id FROM chat_messages;')" "4242"
+ok "last_read pointer still valid" "$(q 'SELECT COUNT(*) FROM chat_members m JOIN chat_messages g ON g.id = m.last_read_msg_id;')" "1"
 ok "tokens cleared" "$(q 'SELECT COUNT(*) FROM tokens;')" "0"
 # 3 = first write's lazy auto-backup, the explicit backup_run, the pre-restore snapshot.
 ok "safety snapshot kept alongside" "$(ls "$BK"/gk_*.json.gz | wc -l | tr -d ' ')" "3"
@@ -97,6 +111,28 @@ printf 'not gzip' > "$BK/gk_99999999_999999.json.gz"
 ok "corrupt backup refused" "$(curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_99999999_999999.json.gz"}' | grep -c 'corrupt or unreadable')" "1"
 ok "data survived that attempt" "$(q "SELECT v FROM kv_store WHERE k='imagerepo';" | grep -c Bathorium)" "1"
 ok "path traversal refused" "$(curl -s "$B?action=backup_download&file=../config.php" -H "$AH" | grep -c 'Invalid filename')" "1"
+
+echo "== stale-format snapshots =="
+# A format-1 dump (pre-chat, pre-record-tables) restores as a DELETE of every
+# table it never captured, so it must be refused outright — this is the guard
+# for an off-site copy pulled back from B2 by hand, which the purge can't reach.
+php -r 'file_put_contents("'"$BK"'/gk_20200101_000000.json.gz", gzencode(json_encode(["createdAt"=>"2020-01-01T00:00:00Z","kv"=>[],"users"=>[],"revisions"=>[]])));'
+ok "stale-format backup refused" "$(curl -s -X POST "$B?action=backup_restore" -H "$AH" -H "$J" -d '{"file":"gk_20200101_000000.json.gz"}' | grep -c 'predates the current data format')" "1"
+ok "chat survived that attempt" "$(q "SELECT COUNT(*) FROM chat_messages;")" "1"
+ok "current backups carry a format stamp" "$(curl -s -X POST "$B?action=backup_run" -H "$AH" | php -r '$d=json_decode(stream_get_contents(STDIN),true); echo $d["file"] ?? "";' | { read f; has "$BK/$f" '"format":2'; })" "yes"
+
+echo "== deploy purge drops snapshots of an older format =="
+# Dropping the marker is exactly what a format bump looks like to the next
+# request: the first backup path touched afterwards wipes the old snapshots.
+BEFORE=$(ls "$BK"/gk_*.json.gz | wc -l | tr -d ' ')
+ok "snapshots exist before the purge" "$([ "$BEFORE" -gt 0 ] && echo yes || echo no)" "yes"
+rm -f "$BK/.format"
+curl -s "$B?action=backup_list" -H "$AH" >/dev/null
+ok "old snapshots purged" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "0"
+ok "marker rewritten so it happens once" "$(cat "$BK/.format" 2>/dev/null)" "2"
+curl -s "$B?action=backup_list" -H "$AH" >/dev/null
+curl -s -X POST "$B?action=backup_run" -H "$AH" >/dev/null
+ok "backups resume after the purge" "$(ls "$BK"/gk_*.json.gz 2>/dev/null | wc -l | tr -d ' ')" "1"
 
 echo "== off-site copy: unconfigured is safe and honest =="
 R=$(curl -s --max-time 20 -X POST "$B?action=backup_run" -H "$AH")

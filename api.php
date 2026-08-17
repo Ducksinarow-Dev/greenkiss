@@ -892,6 +892,13 @@ switch ($action) {
         $raw = @gzdecode(file_get_contents($path));
         $data = $raw !== false ? json_decode($raw, true) : null;
         if (!is_array($data)) respond(500, ['error' => 'Backup file is corrupt or unreadable']);
+        // Second line of defence behind the purge in ensureBackupsDir: an
+        // off-site copy pulled back from B2 and dropped in by hand never passed
+        // through that purge, and restoring it would delete every table this
+        // dump predates rather than roll it back.
+        if ((int)($data['format'] ?? 0) < GK_BACKUP_FORMAT) {
+            respond(400, ['error' => 'This backup predates the current data format and can no longer be restored — it would delete data it never captured.']);
+        }
         // Safety snapshot of current state before we overwrite anything.
         runBackupOrFail($pdo);
         restoreFromBackupData($pdo, $data);
@@ -1273,6 +1280,12 @@ function ensureLoginSessionsTable($pdo) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 }
+
+// The chat tables, in dump/restore order (channels before members before
+// messages). Named in one place so runBackup() and restoreFromBackupData()
+// iterate the same list instead of each hardcoding one — same reason
+// $GK_RECORD_TABLES exists, and asserted by scripts/test_record_tables.php.
+$GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
 
 // Lazily create the chat tables (Phase 1) so a live DB picks up staff chat on
 // the next deploy — no manual import. Idempotent + static-guarded.
@@ -1775,6 +1788,20 @@ function ensureUploadsDir($monthFolder) {
     return $dir;
 }
 
+// Dump format version. BUMP THIS whenever a table joins the dump, and old
+// snapshots are purged on the next deploy (see ensureBackupsDir).
+//
+//   1 — kv_store, users, revisions
+//   2 — + per-record tables (#41) and chat
+//
+// Why purge rather than keep and tolerate: restoreFromBackupData EMPTIES every
+// table it manages, so restoring a format-1 dump doesn't roll chat back, it
+// deletes it — the older the snapshot, the more it destroys. A backup you must
+// not restore isn't a backup, so it doesn't get to sit in the list looking like
+// one. Cost is real and one-time: the existing ~60 days of kv/users/revisions
+// history goes with it, and history restarts at the first post-deploy backup.
+define('GK_BACKUP_FORMAT', 2);
+
 function ensureBackupsDir() {
     $dir = GK_BACKUPS_DIR;
     if (!is_dir($dir)) mkdir($dir, 0755, true);
@@ -1782,14 +1809,24 @@ function ensureBackupsDir() {
     if (!file_exists($htaccess)) {
         file_put_contents($htaccess, "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n");
     }
+    // One-time purge of stale-format snapshots. The marker lives in the backups
+    // dir, not kv_store, so this needs no DB handle and no migration hook — the
+    // first backup path touched after a deploy does it, exactly once. A fresh
+    // install has nothing to delete and just gets the marker.
+    $marker = $dir . '/.format';
+    $have = is_file($marker) ? (int)trim((string)file_get_contents($marker)) : 0;
+    if ($have !== GK_BACKUP_FORMAT) {
+        foreach (glob($dir . '/gk_*.json.gz') as $old) @unlink($old);
+        file_put_contents($marker, (string)GK_BACKUP_FORMAT);
+    }
     return $dir;
 }
 
 function runBackup($pdo) {
-    global $GK_RECORD_TABLES;
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
     $dir = ensureBackupsDir();
     $stamp = gmdate('Ymd_His');
-    $data = ['createdAt' => gmdate('c'), 'kv' => [], 'users' => [], 'revisions' => [], 'records' => []];
+    $data = ['createdAt' => gmdate('c'), 'format' => GK_BACKUP_FORMAT, 'kv' => [], 'users' => [], 'revisions' => [], 'records' => [], 'chat' => []];
     foreach ($pdo->query("SELECT k, v, updated_at FROM kv_store") as $row) $data['kv'][] = $row;
     // Hashes only — never plaintext PINs — so users are safe to keep in the dump.
     foreach ($pdo->query("SELECT id, name, pin_hash, role, created_at FROM users") as $row) $data['users'][] = $row;
@@ -1807,6 +1844,16 @@ function runBackup($pdo) {
         $rows = [];
         foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
         $data['records'][$table] = $rows;
+    }
+
+    // Chat (channels/members/messages). Same trap as the record tables: these
+    // were live for months while this function dumped only kv_store, users and
+    // revisions, so every chat message was outside every backup.
+    ensureChatTables($pdo);
+    foreach ($GK_CHAT_TABLES as $table) {
+        $rows = [];
+        foreach ($pdo->query("SELECT * FROM $table") as $row) $rows[] = $row;
+        $data['chat'][$table] = $rows;
     }
 
     $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -2165,8 +2212,9 @@ function rollbackToRelease($name) {
 }
 
 function restoreFromBackupData($pdo, $data) {
-    global $GK_RECORD_TABLES;
+    global $GK_RECORD_TABLES, $GK_CHAT_TABLES;
     ensureRecordTables($pdo); // must exist before the DELETE/INSERT below
+    ensureChatTables($pdo);
     $pdo->beginTransaction();
     try {
         $pdo->exec("DELETE FROM kv_store");
@@ -2193,6 +2241,32 @@ function restoreFromBackupData($pdo, $data) {
             if (!$rows) continue;
             // Column list comes from the row itself, so a schema that gains a
             // column doesn't need this function edited too.
+            $cols = array_keys($rows[0]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO $table (" . implode(', ', $cols) . ")
+                 VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")"
+            );
+            foreach ($rows as $row) {
+                $stmt->execute(array_map(fn($c) => $row[$c] ?? null, $cols));
+            }
+        }
+
+        // Chat. Deleted in reverse order (messages, members, channels) so the
+        // rows never outlive the channel they belong to, then reinserted in
+        // declaration order. Column list comes from the row, which means
+        // chat_messages.id is written EXPLICITLY rather than left to
+        // AUTO_INCREMENT — required, because chat_members.last_read_msg_id
+        // points at those ids and renumbering would silently mark whole
+        // channels unread (or read).
+        //
+        // A pre-chat-backup dump has no 'chat' key: the tables are still
+        // emptied, which is correct — that snapshot predates the messages, and
+        // leaving them behind would attach live chat rows to a restored,
+        // different-era user and channel set.
+        foreach (array_reverse($GK_CHAT_TABLES) as $table) $pdo->exec("DELETE FROM $table");
+        foreach ($GK_CHAT_TABLES as $table) {
+            $rows = $data['chat'][$table] ?? [];
+            if (!$rows) continue;
             $cols = array_keys($rows[0]);
             $stmt = $pdo->prepare(
                 "INSERT INTO $table (" . implode(', ', $cols) . ")

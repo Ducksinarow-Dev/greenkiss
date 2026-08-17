@@ -72,6 +72,14 @@ Uploads use B2's native API (plain Basic auth) rather than its S3-compatible end
 
 To use Dropbox or Cloudflare R2 instead, replace `b2Authorize()` and `offsiteUpload()` in `api.php` — the status reporting and failure UI are destination-agnostic.
 
+### 5b. Backup format bumps wipe old snapshots
+
+`GK_BACKUP_FORMAT` in `api.php` is the version of the dump's shape. When a table joins the backup, that number goes up — and the first request after the deploy deletes every existing snapshot in `backups/`, because an older dump doesn't restore the new table, it *deletes* it (restore empties every table it manages before reinserting). Restoring a stale-format file is also refused outright, which covers off-site copies pulled back from B2 by hand.
+
+Practical effect: **history restarts at the first backup after such a deploy.** If you want a pre-deploy snapshot kept, download it (Admin Panel → Backups) before updating, and keep it as an archive — it won't be restorable through the app.
+
+Format 2 (chat + per-record tables) is the current version.
+
 ## 6. First login
 
 Visit the site, log in as **Hayden** or **Megan** / PIN **1234**, then immediately change the PIN (Sidebar → your name → Change my PIN). Add real staff accounts from Admin Panel → Users — non-admin staff default to editor (SOP/task/project/content work) or viewer (read-only); only Hayden and Megan need the admin role.
