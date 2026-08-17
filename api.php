@@ -120,6 +120,15 @@ try {
 // staleness check 500'd with it.
 // Anything a request-time function reaches for via `global` belongs HERE.
 // scripts/test_record_tables.php asserts that ordering.
+//
+// define() is a runtime CALL, so it has exactly the same problem: declared at
+// line 1833 (beside the backup code it documents) GK_BACKUP_FORMAT did not
+// exist while any request ran, and every backup died on "Undefined constant"
+// — the same outage as the specs below, from a different symbol.
+// Bumped when a backup's shape changes such that an older dump can no longer
+// be safely restored; backup_restore refuses anything below it.
+define('GK_BACKUP_FORMAT', 2);
+
 $GK_CHAT_TABLES = ['chat_channels', 'chat_members', 'chat_messages'];
 $GK_RECORD_TABLES = [
     'tasks'      => ['status' => 'VARCHAR(24)', 'due_date' => 'DATE', 'project_id' => 'VARCHAR(24)'],
@@ -1830,24 +1839,31 @@ function ensureUploadsDir($monthFolder) {
 // not restore isn't a backup, so it doesn't get to sit in the list looking like
 // one. Cost is real and one-time: the existing ~60 days of kv/users/revisions
 // history goes with it, and history restarts at the first post-deploy backup.
-define('GK_BACKUP_FORMAT', 2);
-
+// GK_BACKUP_FORMAT is defined ABOVE THE SWITCH — see the note there. define()
+// is a runtime call, so declaring it here left it undefined for every request.
+//
+// A format-1 dump genuinely must not be restored under format-2 code:
+// restoreFromBackupData EMPTIES every table it manages, and a dump with no
+// 'chat' key would delete chat rather than roll it back. That is handled by
+// REFUSING the restore (see backup_restore), which is where an unsafe restore
+// should be stopped.
+//
+// It is deliberately NOT handled by deleting the old snapshots. An earlier
+// revision of this function purged every gk_*.json.gz whose format marker
+// didn't match, which on any existing install meant the first backup after a
+// deploy silently destroyed the entire local backup history — irreversibly,
+// for the cosmetic benefit of keeping unrestorable files out of a list. Old
+// snapshots still hold real kv/users/revisions data worth having, they remain
+// downloadable, and the restore guard already makes them harmless. Never trade
+// a user's only local history for tidiness.
+// ponytail: if unrestorable snapshots in the Backups list ever actually
+// confuse anyone, label them in the UI from the `format` field — don't delete.
 function ensureBackupsDir() {
     $dir = GK_BACKUPS_DIR;
     if (!is_dir($dir)) mkdir($dir, 0755, true);
     $htaccess = $dir . '/.htaccess';
     if (!file_exists($htaccess)) {
         file_put_contents($htaccess, "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n");
-    }
-    // One-time purge of stale-format snapshots. The marker lives in the backups
-    // dir, not kv_store, so this needs no DB handle and no migration hook — the
-    // first backup path touched after a deploy does it, exactly once. A fresh
-    // install has nothing to delete and just gets the marker.
-    $marker = $dir . '/.format';
-    $have = is_file($marker) ? (int)trim((string)file_get_contents($marker)) : 0;
-    if ($have !== GK_BACKUP_FORMAT) {
-        foreach (glob($dir . '/gk_*.json.gz') as $old) @unlink($old);
-        file_put_contents($marker, (string)GK_BACKUP_FORMAT);
     }
     return $dir;
 }
