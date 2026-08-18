@@ -50,6 +50,37 @@ ok('zero override ignored', dayTargetFor('2026-09-05', targets, { '2026-09-05': 
 ok('negative override ignored', dayTargetFor('2026-09-05', targets, { '2026-09-05': -50 }).target === 1000);
 ok('non-numeric override ignored', dayTargetFor('2026-09-05', targets, { '2026-09-05': 'lots' }).target === 1000);
 
+// ── #30 salesPace ─────────────────────────────────────────────────────
+const { salesPace } = new Function(
+  lift('src/globals.js', /function dayTargetFor\([\s\S]*?\n\}/, 'dayTargetFor') + '\n' +
+  lift('src/globals.js', /function salesPace\([\s\S]*?\n\}/, 'salesPace') +
+  '\nreturn { salesPace };')();
+
+// September: 30,000 / 30 days = 1,000 a day. On the 11th, 10 days have
+// completed, so 10,000 was expected.
+const T = { 9: 30000 };
+const p10 = salesPace(12000, '2026-09-11', T, {});
+ok('expected = completed days x daily target', p10.expected === 10000);
+ok('today is NOT counted (10 completed on the 11th)', p10.days === 10);
+ok('ahead reports a positive delta', p10.ahead === true && p10.delta === 2000);
+ok('pct is against expected, not the month total', Math.round(p10.pct) === 120);
+const behind = salesPace(7000, '2026-09-11', T, {});
+ok('behind reports a negative delta', behind.ahead === false && behind.delta === -3000);
+
+// Per-day overrides must raise the bar only for their own day.
+const pOv = salesPace(12000, '2026-09-11', T, { '2026-09-03': 5000 });
+ok('override raises expected by the difference only', pOv.expected === 10000 - 1000 + 5000);
+ok('a market day can flip ahead to behind', pOv.ahead === false);
+
+// Nothing meaningful to say -> null, rather than a misleading zero.
+ok('1st of the month => null (no completed days)', salesPace(500, '2026-09-01', T, {}) === null);
+ok('no target for the month => null', salesPace(500, '2026-11-11', T, {}) === null);
+ok('zero sales still reports (behind), not null', salesPace(0, '2026-09-11', T, {}).delta === -10000);
+ok('non-numeric sales treated as 0, not NaN', Number.isFinite(salesPace('x', '2026-09-11', T, {}).delta));
+// Month length must come from the real month.
+ok('February expected uses 28 days',
+  salesPace(0, '2026-02-11', { 2: 2800 }, {}).expected === 1000);
+
 // ── #34 gbpPostText ───────────────────────────────────────────────────
 const src34 = lift('src/components/ContentCalendar.jsx', /function gbpPostText\([\s\S]*?\n\}/, 'gbpPostText');
 const { gbpPostText } = new Function(`

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, canEdit, isAdmin, inp, triggerSaved,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
-  getDayTargets, saveDayTargets, todayLocalISO, fmtDate,
+  getDayTargets, saveDayTargets, todayLocalISO, fmtDate, salesPace,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, SectionHeader, lbl, Modal } from './shared.jsx';
 
@@ -233,6 +233,9 @@ function StoreUpdate({ user }) {
   const todayVal = connected ? sales.today : daily * 0.62;
   const weekVal = connected ? sales.weekToDate : weekly * 0.62;
   const monthVal = connected ? sales.monthToDate : monthly * 0.62;
+  // #30: computed from the same figure the month gauge shows, so the sample
+  // state gets a coherent sample pace rather than a blank or a wrong one.
+  const pace = salesPace(monthVal);
 
   return (
     <div className="gk-fade-in">
@@ -260,6 +263,31 @@ function StoreUpdate({ user }) {
         <Speedometer label="This week" value={weekVal} target={weekly} currency={currency} sample={!connected} timePeriod="week" />
         <Speedometer label="Month to date" value={monthVal} target={monthly} currency={currency} sample={!connected} timePeriod="month" />
       </div>
+
+      {/* #30 pace — what the gauges can't say: is month-to-date ahead of or
+          behind what the targets called for by now. Completed days only. */}
+      {pace && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, marginTop: 14,
+          background: C.sur, border: `1.5px solid ${C.bdr}`,
+          borderLeft: `4px solid ${pace.ahead ? C.moss : C.clay}`,
+          borderRadius: 12, padding: "12px 16px",
+        }}>
+          <Icon name={pace.ahead ? "trending_up" : "trending_down"} size={22}
+            style={{ color: pace.ahead ? C.moss : C.clay, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: C.txt }}>
+              {currency}{Math.abs(Math.round(pace.delta)).toLocaleString()} {pace.ahead ? "ahead of" : "behind"} pace
+              {!connected && <span style={{ fontSize: 12, fontWeight: 500, color: C.faint }}> · sample</span>}
+            </div>
+            <div style={{ fontSize: 12.5, color: C.mut, marginTop: 2 }}>
+              {Math.round(pace.pct)}% of the {currency}{Math.round(pace.expected).toLocaleString()} expected
+              through {pace.days} completed {pace.days === 1 ? "day" : "days"} this month.
+              Today isn't counted yet.
+            </div>
+          </div>
+        </div>
+      )}
 
       {connected && (
         <div style={{ fontSize: 12, color: C.faint, marginTop: 10, textAlign: "right" }}>

@@ -2177,6 +2177,41 @@ function currentSalesTargets() {
   const { target: daily, overridden } = dayTargetFor(todayISO);
   return { monthly, daily, weekly: daily * 7, month: m, daysInMonth, dayOverridden: overridden, todayISO };
 }
+/** Sales pace (#30): how month-to-date compares with what the targets say
+ * should have been earned by now — the context a bare gauge fill can't give.
+ *
+ * Deliberately measures COMPLETED days only (1st through yesterday). Counting
+ * today would show "behind" from midnight until closing every single day,
+ * which is both discouraging and untrue; today's own progress is already the
+ * Today gauge's job. Per-day overrides (#31) are respected, so a flagged
+ * market day raises the bar for that day and not for the rest.
+ *
+ * Returns null when there is nothing meaningful to say — no monthly target
+ * set, or it's the 1st and no day has completed yet.
+ * @returns {{expected:number, delta:number, pct:number, ahead:boolean, days:number}|null}
+ */
+function salesPace(monthToDate, dateISO = todayLocalISO(), targets = getSalesTargets(), overrides = getDayTargets()) {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const completed = d - 1;
+  if (!(completed > 0)) return null;                 // 1st of the month
+  if (!(Number(targets[m]) > 0)) return null;        // no target for this month
+  let expected = 0;
+  for (let day = 1; day <= completed; day++) {
+    const iso = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    expected += dayTargetFor(iso, targets, overrides).target;
+  }
+  if (!(expected > 0)) return null;
+  const mtd = Number(monthToDate) || 0;
+  const delta = mtd - expected;
+  return {
+    expected,
+    delta,
+    pct: (mtd / expected) * 100,
+    ahead: delta >= 0,
+    days: completed,
+  };
+}
+
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const _mk = (title, blocks) => ({ id: uid(), title, blocks });
@@ -3143,7 +3178,7 @@ export {
   getToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
-  getDayTargets, saveDayTargets, dayTargetFor,
+  getDayTargets, saveDayTargets, dayTargetFor, salesPace,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,
