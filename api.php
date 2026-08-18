@@ -227,6 +227,23 @@ switch ($action) {
         respond(200, ['sessions' => $stmt->fetchAll()]);
         break;
 
+    case 'config_status':
+        // Which optional integrations are actually configured. Booleans and
+        // constant NAMES only — never a value, not even a masked one: this is
+        // read over the network and config.php holds the DB password, the B2
+        // keys and the Shopify token.
+        //
+        // Exists because every optional integration is defined()-gated, so a
+        // missing constant means the feature is silently OFF rather than
+        // broken. config.php is gitignored and the deploy is `cp -R *` from the
+        // release branch, so constants added to config.sample.php NEVER reach a
+        // live install — they have to be pasted in by hand, and nobody finds
+        // out until they wonder why Store Goals shows sample data.
+        $user = requireAuth($pdo, $body);
+        requireRole($user, ['admin']);
+        respond(200, ['config' => configStatus()]);
+        break;
+
     case 'presence':
         // Online/offline presence (#49). Any authed user may read it (for the
         // chat window + admin area). Returns the latest last_seen per user from
@@ -2260,6 +2277,52 @@ function maybeAutoBackup($pdo) {
 // replacing b2Authorize + offsiteUpload, not adding an interface.
 // ponytail: API v2. v3 is current and nests apiUrl under apiInfo.storageApi;
 // move to it if B2 ever retires v2.
+// Is one config constant usably set? Same test everything else uses: present,
+// non-empty, and not left on its PASTE_… placeholder.
+function configFlag($const) {
+    if (!defined($const)) return false;
+    $v = trim((string)constant($const));
+    return $v !== '' && strncmp($v, 'PASTE_', 6) !== 0;
+}
+
+// Per-integration configured/not, plus what stops working while it's off.
+// Returns constant NAMES so an admin knows what to paste; never values.
+function configStatus() {
+    $groups = [
+        ['key' => 'offsite', 'label' => 'Off-site backups (Backblaze B2)',
+         'consts' => ['B2_KEY_ID', 'B2_APPLICATION_KEY'],
+         'off' => 'Backups exist only on this server — one lost account loses everything.'],
+        ['key' => 'cron', 'label' => 'Backup cron key',
+         'consts' => ['CRON_KEY'],
+         'off' => 'The nightly backup cron cannot authenticate, so off-site copies never run automatically.'],
+        ['key' => 'shopify', 'label' => 'Shopify (Store Goals)',
+         'consts' => ['SHOPIFY_STORE_DOMAIN', 'SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'],
+         'off' => 'Store Goals shows sample figures instead of live sales.'],
+        ['key' => 'omnisend', 'label' => 'Omnisend (email stats)',
+         'consts' => ['OMNISEND_API_KEY'],
+         'off' => 'Content items show no live opens/clicks/revenue.'],
+        ['key' => 'deploy', 'label' => 'cPanel deploy (Update Now)',
+         'consts' => ['CPANEL_HOST', 'CPANEL_USERNAME', 'CPANEL_API_TOKEN', 'CPANEL_REPO_PATH'],
+         'off' => 'Update Now cannot deploy; use cPanel → Git Version Control instead.'],
+    ];
+    $out = [];
+    foreach ($groups as $g) {
+        $missing = [];
+        foreach ($g['consts'] as $c) { if (!configFlag($c)) $missing[] = $c; }
+        $out[] = [
+            'key' => $g['key'],
+            'label' => $g['label'],
+            'ok' => count($missing) === 0,
+            // Partial configuration is its own state: some keys pasted, others
+            // not, is far more confusing than nothing set at all.
+            'partial' => count($missing) > 0 && count($missing) < count($g['consts']),
+            'missing' => $missing,
+            'off' => $g['off'],
+        ];
+    }
+    return $out;
+}
+
 function offsiteConfigured() {
     foreach (['B2_KEY_ID', 'B2_APPLICATION_KEY'] as $c) {
         if (!defined($c)) return false;
