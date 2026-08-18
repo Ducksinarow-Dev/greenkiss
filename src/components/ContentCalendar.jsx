@@ -11,7 +11,7 @@ import {
   campaignChannelCounts, processAndStoreImage, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem,
   getTasks, getProjects, taskOnCalendar, navigateItem,
-  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast,
+  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast, RECURRENCE_OPTIONS, advanceDate, publishContentWithRecurrence,
   parseDate, todayLocalISO, daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, RichMentionField, Modal, Segmented } from './shared.jsx';
@@ -750,7 +750,22 @@ function ContentItemModal({ initial, users, campaigns, nav, onSave, onDelete, on
               <label style={lbl()}>Publish date</label>
               <input type="date" value={form.publishDate || ""} onChange={e => set("publishDate", e.target.value)} min={form.startDate || undefined} style={inp()} />
             </div>
+            {/* #28 — same options as task recurrence, deliberately, rather than
+                a second scheme for staff to learn. The next occurrence is
+                spawned when this item is PUBLISHED, not on a timer. */}
+            <div style={{ flex: "1 1 140px" }}>
+              <label style={lbl()}>Repeats</label>
+              <select value={form.recurrence || "none"} onChange={e => set("recurrence", e.target.value)} style={inp()}>
+                {RECURRENCE_OPTIONS.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
+            </div>
           </div>
+          {(form.recurrence && form.recurrence !== "none") && (
+            <div style={{ fontSize: 12, color: C.mut, marginTop: -4 }}>
+              When this is marked published, the next one is created as a draft
+              {form.publishDate ? ` for ${fmtDate(advanceDate(form.publishDate, form.recurrence))}` : ""}.
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 100%" }}>
@@ -1584,7 +1599,14 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   };
   const openEdit = (item) => setModal({ item: { ...item }, isNew: false });
   const saveItem = (form) => {
-    if (modal.isNew) addContentItem(form); else updateContentItem(form.id, form);
+    // #28: publishing a recurring item spawns the next occurrence. Routed
+    // through one helper so the spawn can't be forgotten by a future caller.
+    if (modal.isNew) {
+      addContentItem(form);
+    } else {
+      const spawned = publishContentWithRecurrence(form.id, form);
+      if (spawned) triggerToast("Published · next one drafted for " + fmtDate(spawned.publishDate));
+    }
     triggerSaved(); setModal(null); bump();
   };
   const deleteItem = async () => {
@@ -1680,14 +1702,18 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
           </>
         )} />
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
-        {VIEW_TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} style={tabStyle(tab === t.key)}>{t.label}</button>
-        ))}
-      </div>
+      {/* Tabs and filters share ONE row: two stacked bars pushed the calendar
+          down for no benefit. The filters sit to the right of the tabs and wrap
+          under them only when the window is genuinely too narrow. */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {VIEW_TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={tabStyle(tab === t.key)}>{t.label}</button>
+          ))}
+        </div>
 
-      {(tab === "calendar" || tab === "list") && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
+        {(tab === "calendar" || tab === "list") && (
+        <>
           <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
             <option value="">All channels</option>
             {CONTENT_CHANNELS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -1711,8 +1737,9 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
               Clear filters
             </OBtn>
           )}
-        </div>
-      )}
+        </>
+        )}
+      </div>
 
       {tab === "calendar" && (
         <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>

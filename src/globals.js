@@ -2827,6 +2827,42 @@ const updateContentItem = (id, changes) => {
   if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionSave("content_save", "item", next.find(c => c.id === id)); return; }
   saveContentItems(next);
 };
+/** Publishing a recurring content item spawns its next occurrence (#28) —
+ * the same shape as completeTaskWithRecurrence, deliberately reusing
+ * RECURRENCE_OPTIONS/advanceDate rather than inventing a second scheme.
+ *
+ * Spawns only on the idea/draft/scheduled -> published transition, so
+ * re-saving an already-published item (fixing a typo, attaching stats) can't
+ * quietly breed duplicates. The copy starts back at "draft" with its metrics
+ * and Omnisend linkage cleared: those belong to the occurrence that actually
+ * ran, and carrying them forward would report last week's numbers as this
+ * week's. startDate shifts by the same interval so a Gantt bar keeps its
+ * length instead of stretching back to the original start.
+ * @returns {Object|null} the spawned item, or null if nothing was spawned */
+function publishContentWithRecurrence(id, changes = {}) {
+  const before = getContentItems().find(c => c.id === id);
+  updateContentItem(id, changes);
+  const after = { ...(before || {}), ...changes };
+  const becamePublished = before && before.status !== "published" && after.status === "published";
+  const rec = after.recurrence;
+  if (!becamePublished || !rec || rec === "none") return null;
+
+  const basis = after.publishDate || todayLocalISO();
+  const nextPublish = advanceDate(basis, rec);
+  const { id: _drop, createdAt: _c, updatedAt: _u, ...rest } = after;
+  const next = {
+    ...rest,
+    status: "draft",
+    publishDate: nextPublish,
+    startDate: after.startDate ? advanceDate(after.startDate, rec) : "",
+    // Per-occurrence results, not template content.
+    metrics: undefined, omnisendCampaignId: undefined, stats: undefined,
+    publishedAt: undefined,
+  };
+  addContentItem(next);
+  return next;
+}
+
 const deleteContentItem = (id) => {
   const next = getContentItems().filter(c => c.id !== id);
   if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id); return; }
@@ -3184,7 +3220,7 @@ export {
   fileToCompressedDataURL, processAndStoreImage,
   getTasks, saveTasks, addTask, updateTask, deleteTask, TASK_STATUSES, TASK_BOARD_STATUSES, TASK_PRIORITIES, taskPriorityMeta,
   TASK_TYPES, taskTypeMeta, taskType,
-  RECURRENCE_OPTIONS, advanceDate, completeTaskWithRecurrence,
+  RECURRENCE_OPTIONS, advanceDate, completeTaskWithRecurrence, publishContentWithRecurrence,
   toggleFavourite, duplicateTask, mergeTaskInto, convertTaskToProject, convertTaskToSubtask, emptyTaskShape, taskOnCalendar,
   sortTasksForUser, dispatchTaskAction,
   isOverdue, isDueToday, isDueThisWeek,
