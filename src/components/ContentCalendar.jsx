@@ -75,14 +75,15 @@ function tabStyle(active) {
 }
 
 /* ─── CONTENT CHIP (calendar cell + list row glyph) ─────────────────── */
-function ContentChip({ item, campaign, onClick }) {
+function ContentChip({ item, campaign, onClick, onDragStart, draggable }) {
   const ch = contentChannelMeta[item.channel] || CONTENT_CHANNELS[0];
   const sm = contentStatusMeta[item.status] || CONTENT_STATUSES[0];
   const railColor = campaign?.color || C.faint;
   return (
     <div onClick={onClick} role="button" tabIndex={0}
+      draggable={draggable} onDragStart={onDragStart}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
-      title={`${item.title || "Untitled"} · ${sm.label}`}
+      title={`${item.title || "Untitled"} · ${sm.label}${draggable ? " · drag to another day to reschedule" : ""}`}
       style={{
         display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
         background: C.sur, border: `1px solid ${C.bdr}`, borderRadius: 5,
@@ -134,7 +135,29 @@ function weekBands(cells, bandCampaigns) {
   return { lanes: segs.filter(s => s.lane !== undefined), overflow };
 }
 
-function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpenTask, monthKey, setMonthKey, onOpenItem, onNewAt, onFilterCampaign }) {
+function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpenTask, monthKey, setMonthKey, onOpenItem, onNewAt, onFilterCampaign, onReschedule }) {
+  // #27 drag-to-reschedule. dragId is the item being dragged; overDay is the
+  // cell under the cursor, purely for the drop highlight. Both live here rather
+  // than in each cell so only one cell can ever look like the drop target.
+  const [dragId, setDragId] = useState(null);
+  const [overDay, setOverDay] = useState(null);
+  const canDrag = !!onReschedule;
+  const endDrag = () => { setDragId(null); setOverDay(null); };
+  const dropOn = (ds, e) => {
+    // Prefer the id carried by the drag itself over component state. State is
+    // one render behind if a drop lands in the same tick as the dragstart, and
+    // dataTransfer is what HTML5 drag-and-drop is actually for — the payload
+    // belongs to the drag, not to whatever the component last re-rendered with.
+    let id = dragId;
+    try { id = (e && e.dataTransfer && e.dataTransfer.getData("text/plain")) || id; } catch { /* not readable in some browsers */ }
+    endDrag();
+    if (!id || !ds) return;
+    const it = items.find(x => x.id === id);
+    // Same day => nothing to do. Without this a stray drop still fires a save,
+    // a toast and a re-render for no change.
+    if (!it || it.publishDate === ds) return;
+    onReschedule(id, ds);
+  };
   const { y, m, daysInMonth, days } = monthMeta(monthKey);
   const byDay = {};
   items.forEach(i => { if (i.publishDate) (byDay[i.publishDate] = byDay[i.publishDate] || []).push(i); });
@@ -164,7 +187,7 @@ function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpen
           <div key={d} style={{ padding: "8px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: C.faint, textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.06em" }}>{d}</div>
         ))}
       </div>
-      <div style={{ position: "relative" }}>
+      <div style={{ position: "relative" }} onDragEnd={canDrag ? endDrag : undefined}>
         {weeks.map((cells, wi) => {
           const { lanes, overflow } = weekBands(cells, bandCampaigns);
           const laneCount = lanes.reduce((mx, s) => Math.max(mx, s.lane + 1), 0);
@@ -179,9 +202,14 @@ function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpen
                   const isToday = cell.ds === today;
                   return (
                     <div key={cell.ds} onClick={() => onNewAt(cell.ds)}
+                      onDragOver={canDrag ? (e) => { e.preventDefault(); if (overDay !== cell.ds) setOverDay(cell.ds); } : undefined}
+                      onDragLeave={canDrag ? () => setOverDay(d => (d === cell.ds ? null : d)) : undefined}
+                      onDrop={canDrag ? (e) => { e.preventDefault(); dropOn(cell.ds, e); } : undefined}
                       style={{
                         minHeight: 92, padding: `${CELL_PAD}px 5px`, borderRight: ci < 6 ? `1px solid ${C.bdr}` : "none", borderBottom: `1px solid ${C.bdr}`,
-                        cursor: "pointer", position: "relative", background: isToday ? C.dew : C.sur,
+                        cursor: "pointer", position: "relative",
+                        background: overDay === cell.ds ? C.mossSoft : (isToday ? C.dew : C.sur),
+                        outline: overDay === cell.ds ? `2px solid ${C.moss}` : "none", outlineOffset: -2,
                       }}>
                       <div style={{
                         fontSize: 11, fontWeight: isToday ? 800 : 500, color: isToday ? C.moss : C.mut,
@@ -191,6 +219,13 @@ function CalendarView({ items, campaigns, bandCampaigns, tasksByDay = {}, onOpen
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         {dayItems.slice(0, 3).map(it => (
                           <ContentChip key={it.id} item={it} campaign={campaigns.find(c => c.id === it.campaignId)}
+                            draggable={canDrag}
+                            onDragStart={canDrag ? (e) => {
+                              setDragId(it.id);
+                              if (e?.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                              // Firefox refuses to start a drag without data set.
+                              try { e.dataTransfer.setData("text/plain", it.id); } catch { /* older browsers */ }
+                            } : undefined}
                             onClick={(e) => { e && e.stopPropagation && e.stopPropagation(); onOpenItem(it); }} />
                         ))}
                         {dayItems.length > 3 && <div style={{ fontSize: 10, color: C.faint, paddingLeft: 4 }}>+{dayItems.length - 3} more</div>}
@@ -1539,6 +1574,14 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const openNew = (dateStr) => setModal({ item: { ...defContentItem(), publishDate: dateStr || "" }, isNew: true });
   const openNewForCampaign = (campId) => setModal({ item: { ...defContentItem(), campaignId: campId }, isNew: true });
   const restatusItem = (id, status) => { updateContentItem(id, { status }); triggerSaved(); bump(); };
+  /* #27 drag-to-reschedule: move a content item to another day. Only
+     publishDate changes — status is deliberately untouched, since dragging a
+     published item to a future date shouldn't quietly un-publish it. */
+  const rescheduleItem = (id, ds) => {
+    updateContentItem(id, { publishDate: ds });
+    triggerToast("Moved to " + fmtDate(ds));
+    bump();
+  };
   const openEdit = (item) => setModal({ item: { ...item }, isNew: false });
   const saveItem = (form) => {
     if (modal.isNew) addContentItem(form); else updateContentItem(form.id, form);
@@ -1677,7 +1720,10 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
             <CalendarView items={items} campaigns={campaigns} bandCampaigns={activeCampaign ? [activeCampaign] : campaigns}
               tasksByDay={tasksByDay} onOpenTask={(t) => navigateItem("task", t.id)}
               monthKey={monthKey} setMonthKey={setMonthKey} onOpenItem={openEdit}
-              onNewAt={editable ? openNew : () => {}} onFilterCampaign={filterByCampaign} />
+              onNewAt={editable ? openNew : () => {}} onFilterCampaign={filterByCampaign}
+              /* #27 — editors only; a viewer dragging a chip would just fail a
+                 permission check on the server after appearing to work. */
+              onReschedule={editable ? rescheduleItem : undefined} />
           </div>
           <div style={{ flex: "1 1 280px", minWidth: 250, maxWidth: 360 }}>
             <ItemRail items={items} campaigns={campaigns} onOpenItem={openEdit} />
