@@ -391,25 +391,19 @@ switch ($action) {
     // read-modify-write under a lock. The RESPONSE shape is unchanged — still
     // the full `tasks` array — so the client needs no change at all.
     case 'task_save':
+        // Goes through the SHARED handler, not a bespoke body. This case used to
+        // inline its own upsert (from step 3, before the handler understood row
+        // tables) and so silently skipped the #40 conflict check that was later
+        // added there — leaving the most-edited collection in the app the one
+        // collection with no stale-write protection. Caught by driving the real
+        // UI against a real server; every unit assertion passed throughout.
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $task = $body['task'] ?? null;
-        if (!is_array($task) || empty($task['id'])) respond(400, ['error' => 'Missing task']);
-        ensureTasksMigrated($pdo);
-        maybeAutoBackup($pdo);
-        recordUpsert($pdo, 'tasks', $task);
-        respond(200, ['ok' => true, 'tasks' => recordAll($pdo, 'tasks')]);
+        handleCollectionSave($pdo, $body, $user, 'task', 'tasks');
         break;
 
     case 'task_delete':
         $user = requireAuth($pdo, $body);
-        requireRole($user, ['editor', 'admin']);
-        $id = $body['id'] ?? '';
-        if ($id === '') respond(400, ['error' => 'Missing id']);
-        ensureTasksMigrated($pdo);
-        maybeAutoBackup($pdo);
-        $pdo->prepare("DELETE FROM tasks WHERE id = ?")->execute([$id]);
-        respond(200, ['ok' => true, 'tasks' => recordAll($pdo, 'tasks')]);
+        handleCollectionDelete($pdo, $body, $user, 'tasks');
         break;
 
     case 'project_save':

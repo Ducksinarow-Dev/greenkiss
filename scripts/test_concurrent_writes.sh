@@ -169,6 +169,24 @@ ok "current version saves" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 
 # number into the JSON and make every later comparison meaningless.
 ok "_v is not persisted inside the record" "$(q "SELECT data FROM content WHERE id='v1';" | grep -c '_v')" "0"
 
+# EVERY collection must run the check, not just the ones sharing the handler.
+# task_save had its own inlined body (from step 3) and so silently skipped the
+# conflict check added later to handleCollectionSave — leaving the most-edited
+# collection in the app the one with no stale-write protection. Only driving
+# the real UI against a real server exposed it; every unit assertion passed.
+for coll in tasks content projects campaigns categories contacts tags instances; do
+  case "$coll" in
+    tasks) act=task_save; key=task ;;  content) act=content_save; key=item ;;
+    projects) act=project_save; key=project ;;  campaigns) act=campaign_save; key=campaign ;;
+    categories) act=category_save; key=category ;;  contacts) act=contact_save; key=contact ;;
+    tags) act=tag_save; key=tag ;;  instances) act=instance_save; key=instance ;;
+  esac
+  post "$act" "{\"$key\":{\"id\":\"cf1\",\"title\":\"first\",\"name\":\"first\"}}"
+  post "$act" "{\"$key\":{\"id\":\"cf1\",\"title\":\"second\",\"name\":\"second\"}}"
+  C=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$B?action=$act" -H "$AH" -H "$J" -d "{\"$key\":{\"id\":\"cf1\",\"title\":\"stale\",\"name\":\"stale\",\"_v\":1}}")
+  ok "$coll refuses a stale write" "$C" "409"
+done
+
 echo "== step 4: every migrated collection is served from its table =="
 for c in content projects campaigns categories contacts tags instances tasks sops alerts; do
   ok "$c served from its row table" "$(q "SELECT COUNT(*) FROM $c;")" "$(count_ids $c)"
