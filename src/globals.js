@@ -2921,6 +2921,12 @@ async function changeOwnPin(currentPin, newPin) {
    suspenders manual path): dev mode bundles the whole localStorage kv
    set; remote mode bundles the whole in-memory cache (already fully
    warm post-login). */
+/** Admin-only: which optional integrations config.php actually has set.
+ * Booleans + constant names only — the server never returns a value. */
+async function configStatus() {
+  const res = await apiCall("config_status", { method: "GET" });
+  return res.config || [];
+}
 async function backupRun() { return apiCall("backup_run", { method: "POST" }); }
 /** @returns {Promise<{backups:Array, offsite:Object}>} — off-site status rides
  * along so the Backups tile can show a dead uploader without being asked. */
@@ -3127,6 +3133,6 @@ export {
   CONTENT_TYPES, contentTypeLabel, assigneesOf, isAssignedTo,
   GBP_CTA_TYPES, GBP_CATEGORIES,
   getUsers, saveUsers, addUser, updateUser, deleteUser, fetchUsersFull, refreshRoster, changeOwnPin,
-  backupRun, backupList, backupHealth, BACKUP_STALE_HOURS, backupDownloadUrl, backupRestore, exportAllData, importAllData,
+  backupRun, backupList, backupHealth, configStatus, BACKUP_STALE_HOURS, backupDownloadUrl, backupRestore, exportAllData, importAllData,
   adminDeploy, fetchLastDeploy, releaseList, releaseRollback,
 };

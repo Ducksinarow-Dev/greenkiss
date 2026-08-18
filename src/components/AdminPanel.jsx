@@ -5,7 +5,7 @@ import {
   NAV_SECTIONS, getUserSections, setUserSections,
   getGroups, addGroup, updateGroup, deleteGroup, getUserGroups, setUserGroups, userIdsInGroup,
   fetchUsersFull, addUser, updateUser, deleteUser, fetchLoginHistory,
-  REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore,
+  REMOTE_MODE, backupRun, backupList, backupDownloadUrl, backupRestore, configStatus,
   exportAllData, importAllData, fmtDate, apiCall, adminDeploy, fetchLastDeploy,
   releaseList, releaseRollback,
 } from '../globals.js';
@@ -758,6 +758,69 @@ function PreviousBuildsSection({ onRolledBack }) {
   );
 }
 
+
+/* Which optional integrations config.php actually has set (Aug 2026).
+   Every integration is defined()-gated server-side, so a missing constant
+   means the feature is silently OFF, never an error — and because config.php
+   is gitignored and the deploy is `cp -R *`, constants added to
+   config.sample.php never reach a live install. Nobody finds out until they
+   wonder why Store Goals shows sample data. This makes it visible.
+
+   Shows constant NAMES to paste, never values — the server doesn't send them. */
+function ConfigPanel() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let alive = true;
+    configStatus().then(r => { if (alive) setRows(r); }).catch(e => { if (alive) setErr(e.message || "Could not read config"); });
+    return () => { alive = false; };
+  }, []);
+  const allOk = rows && rows.every(r => r.ok);
+  return (
+    <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <h3 style={{ ...lbl(), margin: 0, flex: 1 }}>Configuration</h3>
+        {rows && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: allOk ? C.moss : C.clay }}>
+            {allOk ? "All set" : `${rows.filter(r => !r.ok).length} not configured`}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: 12.5, color: C.mut, marginBottom: 12, lineHeight: 1.5 }}>
+        Anything not configured is silently switched off, not broken. Add the missing
+        lines to <code style={{ fontFamily: "'IBM Plex Mono',monospace" }}>config.php</code> on the
+        server (cPanel → File Manager → public_html) — updates never touch that file.
+      </div>
+      {err && <div style={{ fontSize: 13, color: C.red }}>{err}</div>}
+      {!rows && !err && <div style={{ fontSize: 13, color: C.mut }}>Checking…</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {(rows || []).map(r => (
+          <div key={r.key} style={{
+            display: "flex", alignItems: "flex-start", gap: 9, padding: "9px 11px",
+            background: C.inset, border: `1.5px solid ${r.ok ? C.bdr : C.clay + "59"}`, borderRadius: 9,
+          }}>
+            <Icon name={r.ok ? "check_circle" : (r.partial ? "error" : "radio_button_unchecked")} size={17}
+              style={{ color: r.ok ? C.moss : C.clay, flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: C.txt }}>
+                {r.label}{r.partial && <span style={{ color: C.clay, fontWeight: 600 }}> — partly set</span>}
+              </div>
+              {!r.ok && (
+                <>
+                  <div style={{ fontSize: 12.5, color: C.txt2, marginTop: 2, lineHeight: 1.45 }}>{r.off}</div>
+                  <div style={{ fontSize: 12, color: C.mut, marginTop: 3, fontFamily: "'IBM Plex Mono',monospace", wordBreak: "break-all" }}>
+                    Missing: {r.missing.join(", ")}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DeployPanel() {
   const [versionInfo, setVersionInfo] = useState(null);
   const [lastDeploy, setLastDeploy] = useState(null);
@@ -1029,6 +1092,7 @@ function AdminPanel() {
           Groups|Categories per the grid's row flow. */}
       <div className="gk-admin-grid" key={refresh}>
         <UsersPanel onChanged={bump} />
+        {REMOTE_MODE && <ConfigPanel />}
         {REMOTE_MODE && <DeployPanel />}
         <GroupsPanel bump={bump} />
         <CategoriesPanel bump={bump} />
