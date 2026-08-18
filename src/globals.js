@@ -2139,14 +2139,43 @@ async function fetchShopifySales() {
 /** Seasonal targets keyed by month number 1–12. @returns {{[m:string]:number}} */
 const getSalesTargets = () => db.getSync("salesTargets") || {};
 const saveSalesTargets = (t) => db.setSync("salesTargets", t);
-/** This month's target, and a daily target = monthly ÷ days in month. */
+/** Per-day target overrides (#31), keyed by "YYYY-MM-DD" — for the days the
+ * flat monthly÷days figure is simply wrong: a holiday, a sale, a market day.
+ * Stored separately from the monthly targets so clearing one never disturbs
+ * the other, and so an override can outlive a change to the month's total.
+ * @returns {{[date:string]: number}} */
+const getDayTargets = () => db.getSync("dayTargets") || {};
+const saveDayTargets = (t) => db.setSync("dayTargets", t);
+
+/** The target for one specific day: an override if that date has one,
+ * otherwise the month's target spread evenly. `overridden` lets the UI say
+ * WHICH it used — a gauge that silently swaps its basis is worse than one
+ * that's merely approximate. */
+function dayTargetFor(dateISO, targets = getSalesTargets(), overrides = getDayTargets()) {
+  const override = Number(overrides[dateISO]);
+  if (Number.isFinite(override) && override > 0) return { target: override, overridden: true };
+  const [y, m] = dateISO.split("-").map(Number);
+  const monthly = Number(targets[m]) || 0;
+  const daysInMonth = new Date(y, m, 0).getDate();
+  return { target: monthly ? monthly / daysInMonth : 0, overridden: false };
+}
+
+/** This month's target, and today's daily target — which is the per-day
+ * override when one is set, else monthly ÷ days in month.
+ *
+ * The MONTH total is deliberately left as the plain seasonal figure rather
+ * than the sum of overrides plus remaining days: overrides exist to say "today
+ * should be bigger", not to restate the month, and quietly inflating the
+ * monthly goal because someone flagged a market day would move the finish line
+ * without anyone asking for it. */
 function currentSalesTargets() {
   const now = new Date();
   const m = now.getMonth() + 1;
   const monthly = Number(getSalesTargets()[m]) || 0;
   const daysInMonth = new Date(now.getFullYear(), m, 0).getDate();
-  const daily = monthly ? monthly / daysInMonth : 0;
-  return { monthly, daily, weekly: daily * 7, month: m, daysInMonth };
+  const todayISO = todayLocalISO();
+  const { target: daily, overridden } = dayTargetFor(todayISO);
+  return { monthly, daily, weekly: daily * 7, month: m, daysInMonth, dayOverridden: overridden, todayISO };
 }
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -3042,7 +3071,7 @@ async function releaseRollback(name) { return apiCall("release_rollback", { meth
 const EXPORT_KEYS = [
   "sops", "categories", "tasks", "acks", "projects", "campaigns", "content",
   "contacts", "instances", "playbook", "playbookRevs", "tags", "alerts",
-  "taskTemplates", "imagerepo", "toolsPrompts", "navAccess", "salesTargets",
+  "taskTemplates", "imagerepo", "toolsPrompts", "navAccess", "salesTargets", "dayTargets",
   "groups", "userGroups", "announcements", "announcementAcks",
   "clients", "products", "waitlist", "callbacks", "callbackAcks",
 ];
@@ -3114,6 +3143,7 @@ export {
   getToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
   fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
+  getDayTargets, saveDayTargets, dayTargetFor,
   getRevisions, getRevision, restoreRevision,
   getAcks, saveAcks, ackSop, isAckStale,
   fileToCompressedDataURL, processAndStoreImage,

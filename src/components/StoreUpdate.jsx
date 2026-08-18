@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   C, FONT_CAPS, canEdit, isAdmin, inp, triggerSaved,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
+  getDayTargets, saveDayTargets, todayLocalISO, fmtDate,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, SectionHeader, lbl, Modal } from './shared.jsx';
 
@@ -119,11 +120,25 @@ function Speedometer({ value, target, label, currency = "$", size = 240, sample 
 function TargetEditor({ onClose }) {
   const [targets, setTargets] = useState(() => ({ ...getSalesTargets() }));
   const set = (m, v) => setTargets(t => ({ ...t, [m]: v }));
+  // Per-day overrides (#31) are edited alongside the monthly figures but
+  // stored separately, so one can be cleared without touching the other.
+  const [days, setDays] = useState(() => ({ ...getDayTargets() }));
+  const [dayDate, setDayDate] = useState(todayLocalISO());
+  const [dayAmt, setDayAmt] = useState("");
+  const addDay = () => {
+    const n = Number(dayAmt);
+    if (!dayDate || !(n > 0)) return; // a blank or zero override would just hide the monthly figure
+    setDays(d => ({ ...d, [dayDate]: n }));
+    setDayAmt("");
+  };
+  const removeDay = (d) => setDays(prev => { const next = { ...prev }; delete next[d]; return next; });
   const save = () => {
     // keep only real numbers, drop blanks
     const clean = {};
     for (let m = 1; m <= 12; m++) { const n = Number(targets[m]); if (n > 0) clean[m] = n; }
-    saveSalesTargets(clean); triggerSaved(); onClose();
+    const cleanDays = {};
+    for (const d of Object.keys(days)) { const n = Number(days[d]); if (n > 0) cleanDays[d] = n; }
+    saveSalesTargets(clean); saveDayTargets(cleanDays); triggerSaved(); onClose();
   };
   return (
     <Modal onClose={onClose} scrim={0.35} zIndex={500} cardStyle={{ maxWidth: 460, maxHeight: "88vh", overflowY: "auto", padding: 26 }}>
@@ -131,7 +146,7 @@ function TargetEditor({ onClose }) {
           <div style={{ fontSize: 18, fontWeight: 800, color: C.txt, flex: 1 }}>Monthly Sales Targets</div>
           <IconBtn icon="close" title="Close" onClick={onClose} />
         </div>
-        <div style={{ fontSize: 13, color: C.mut, marginBottom: 16 }}>Set a sales goal for each month. These repeat every year, so busy seasons can carry higher targets. The daily gauge uses the month's target split evenly across its days.</div>
+        <div style={{ fontSize: 13, color: C.mut, marginBottom: 16 }}>Set a sales goal for each month. These repeat every year, so busy seasons can carry higher targets. The daily gauge uses the month's target split evenly across its days, unless that date has an override below.</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {MONTH_NAMES.map((name, i) => {
             const m = i + 1;
@@ -144,6 +159,47 @@ function TargetEditor({ onClose }) {
             );
           })}
         </div>
+
+        {/* Per-day overrides (#31) — for the days monthly/days is simply wrong:
+            a holiday, a sale, a market day. Kept in a separate kv doc so
+            clearing one never disturbs the monthly figures. */}
+        <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1.5px solid ${C.bdr}` }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.txt }}>Specific days</div>
+          <div style={{ fontSize: 13, color: C.mut, marginTop: 4, marginBottom: 12 }}>
+            Override a single date when the even split isn't realistic — a holiday, a sale,
+            a market day. The month's total stays as you set it above.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ flex: "1 1 150px" }}>
+              <label style={lbl()}>Date</label>
+              <input type="date" value={dayDate} onChange={e => setDayDate(e.target.value)}
+                style={inp({ fontSize: 14, padding: "8px 10px" })} />
+            </div>
+            <div style={{ flex: "1 1 110px" }}>
+              <label style={lbl()}>Target</label>
+              <input type="number" min="0" inputMode="numeric" value={dayAmt} onChange={e => setDayAmt(e.target.value)}
+                placeholder="0" style={inp({ fontSize: 14, padding: "8px 10px" })} />
+            </div>
+            <Btn onClick={addDay} style={{ flex: "0 0 auto" }}><Icon name="add" size={16} />Add</Btn>
+          </div>
+          {Object.keys(days).length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+              {Object.keys(days).sort().map(d => (
+                <div key={d} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "7px 11px",
+                  background: C.inset, border: `1.5px solid ${C.bdr}`, borderRadius: 9,
+                }}>
+                  <span style={{ fontSize: 13, color: C.txt, flex: 1 }}>{fmtDate(d)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.txt, fontFamily: "'IBM Plex Mono',monospace" }}>
+                    ${Number(days[d]).toLocaleString()}
+                  </span>
+                  <IconBtn icon="delete" danger title="Remove override" onClick={() => removeDay(d)} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
           <OBtn onClick={onClose}>Cancel</OBtn>
           <Btn onClick={save}>Save targets</Btn>
@@ -169,7 +225,7 @@ function StoreUpdate({ user }) {
   };
   useEffect(() => { load(); }, [refresh]);
 
-  const { monthly, daily, weekly } = currentSalesTargets();
+  const { monthly, daily, weekly, dayOverridden } = currentSalesTargets();
   const connected = !!sales;
   const currency = sales?.currency ? (sales.currency === "USD" || sales.currency === "CAD" ? "$" : sales.currency + " ") : "$";
   // Not connected → illustrative sample (62% of target) so the gauges + layout
@@ -200,7 +256,7 @@ function StoreUpdate({ user }) {
       )}
 
       <div style={{ display: "flex", gap: 22, flexWrap: "wrap", justifyContent: "center", background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 14, padding: "26px 20px" }}>
-        <Speedometer label="Today" value={todayVal} target={daily} currency={currency} sample={!connected} timePeriod="day" />
+        <Speedometer label={dayOverridden ? "Today (set target)" : "Today"} value={todayVal} target={daily} currency={currency} sample={!connected} timePeriod="day" />
         <Speedometer label="This week" value={weekVal} target={weekly} currency={currency} sample={!connected} timePeriod="week" />
         <Speedometer label="Month to date" value={monthVal} target={monthly} currency={currency} sample={!connected} timePeriod="month" />
       </div>

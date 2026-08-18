@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  parseMentionText,
   C, FONT_CAPS, uid, nowISO, CATEGORY_COLORS, inp,
   getCampaigns, addCampaign, updateCampaign, deleteCampaign, defCampaign,
   getContentItems, addContentItem, updateContentItem, deleteContentItem, defContentItem,
@@ -427,6 +428,29 @@ function ContentLinkRow({ link, nav, onChange, onRemove }) {
   );
 }
 
+/* #34: the assembled GBP post as plain text, for pasting straight into Google
+   Business Profile by hand. GBP has no post-create API access here yet (#22 is
+   blocked on Google), so staff retype these — and retyping is where the CTA
+   link quietly goes missing.
+
+   Mentions are flattened to their labels and magnet codes stripped: an
+   internal `gk:` link is meaningless outside this app, and pasting one into a
+   public post would be worse than dropping it. */
+function gbpPostText(item) {
+  // parseMentionText already splits @[Label](kind:id) tokens; take the labels.
+  // linkifyMagnets first, so a bare `gk:` code becomes a mention token and is
+  // flattened to a readable label too rather than pasted as a raw code.
+  const body = parseMentionText(linkifyMagnets(item.body || ""))
+    .map(seg => (seg.mention ? seg.mention.label : seg.text))
+    .join("");
+  const cta = GBP_CTA_TYPES.find(c => c.key === item.ctaType);
+  const parts = [body.trim()];
+  if (cta && cta.key && (item.ctaUrl || "").trim()) {
+    parts.push(`${cta.label}: ${item.ctaUrl.trim()}`);
+  }
+  return parts.filter(Boolean).join("\n\n");
+}
+
 /* Compact read-only mockup of how a GBP post will look — internal preview
    only (no client-approval step; this app has no client portal). */
 function GbpPreview({ form }) {
@@ -437,6 +461,22 @@ function GbpPreview({ form }) {
     <div style={{ background: C.sur, border: `1.5px solid ${C.bdr}`, borderRadius: 11, overflow: "hidden" }}>
       {img && <img src={img.src} alt="" style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />}
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* #34 — one-click copy of the assembled post while GBP publishing
+            (#22) is still blocked on Google API access. */}
+        <button type="button" onClick={() => {
+          const text = gbpPostText(form);
+          if (!text) { triggerToast("Nothing to copy yet"); return; }
+          try { navigator.clipboard.writeText(text); triggerToast("Post text copied"); }
+          catch { triggerToast("Couldn't copy — select the text manually"); }
+        }} title="Copy the post text + CTA link for pasting into Google Business Profile"
+          style={{
+            alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 5,
+            background: "none", border: `1.5px solid ${C.bdr}`, borderRadius: 8,
+            color: C.moss, fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+            padding: "4px 9px", cursor: "pointer",
+          }}>
+          <Icon name="content_copy" size={14} />Copy post text
+        </button>
         {cat && <Pill color={C.moss}>{cat.label}</Pill>}
         <div style={{ fontSize: 13, color: C.txt, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
           {form.body ? <MentionText text={linkifyMagnets(form.body)} /> : <span style={{ color: C.faint }}>Post text preview…</span>}
