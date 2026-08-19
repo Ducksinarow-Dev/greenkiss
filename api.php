@@ -1349,10 +1349,33 @@ switch ($action) {
         $wtd = shopifySumSales($weekStart->format('c'), $token);
         $mtd = shopifySumSales($monthStart->format('c'), $token);
         if ($today === null || $wtd === null || $mtd === null) respond(502, ['error' => 'Shopify request failed while summing orders.']);
+
+        // #30 comparison: the SAME slice of last month (1st through the same
+        // day-of-month, up to the same clock time), so an 18th-of-the-month
+        // figure is compared with another 18-day figure rather than a whole
+        // month. Clamped to the last day of the shorter month, so the 31st
+        // compares against Feb 28 instead of silently rolling into March.
+        //
+        // NOT "same month last year": Shopify's read_orders scope only exposes
+        // ~60 days, so a year-ago figure would come back as a confident zero.
+        // That needs read_all_orders, which is a request to Shopify — see
+        // BACKLOG #30.
+        $lastMonthStart = (clone $monthStart)->modify('first day of last month')->setTime(0, 0, 0);
+        $lastMonthDays = (int)$lastMonthStart->format('t');
+        $dayOfMonth = min((int)$now->format('j'), $lastMonthDays);
+        $lastMonthEnd = (clone $lastMonthStart)->setDate(
+            (int)$lastMonthStart->format('Y'), (int)$lastMonthStart->format('n'), $dayOfMonth
+        )->setTime((int)$now->format('H'), (int)$now->format('i'), (int)$now->format('s'));
+        // A failure here must not take the whole gauge set down — the
+        // comparison is context, the live numbers are the point.
+        $lastMonth = shopifySumSales($lastMonthStart->format('c'), $token, $lastMonthEnd->format('c'));
+
         respond(200, ['sales' => [
             'today' => $today,
             'weekToDate' => $wtd,
             'monthToDate' => $mtd,
+            'lastMonthToDate' => $lastMonth,   // null if that request failed
+            'lastMonthLabel' => $lastMonthStart->format('F'),
             'currency' => $currency,
             'timezone' => $tz,
             'asOf' => $now->format('c'),
@@ -2051,9 +2074,13 @@ function shopifyApiCall($pathOrUrl, $token) {
 // Returns a float, or null if any page request fails.
 // ponytail: 40-page cap (~10k orders) bounds runtime — a single shop day/month
 // won't approach that; raise if it ever does.
-function shopifySumSales($minIso, $token) {
+// $maxIso bounds the range at the top end (#30's comparison needs a CLOSED
+// window — last month's same period — not "everything since"). Omitted, it
+// behaves exactly as before: everything from $minIso to now.
+function shopifySumSales($minIso, $token, $maxIso = null) {
     $sum = 0.0;
-    $next = '/orders.json?status=any&limit=250&fields=total_price,cancelled_at&created_at_min=' . rawurlencode($minIso);
+    $next = '/orders.json?status=any&limit=250&fields=total_price,cancelled_at&created_at_min=' . rawurlencode($minIso)
+        . ($maxIso ? '&created_at_max=' . rawurlencode($maxIso) : '');
     $pages = 0;
     while ($next && $pages < 40) {
         $res = shopifyApiCall($next, $token);
