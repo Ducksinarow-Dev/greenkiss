@@ -2863,6 +2863,44 @@ function publishContentWithRecurrence(id, changes = {}) {
   return next;
 }
 
+/** Refresh Omnisend stats for every email item that's linked to a campaign
+ * (#29), so the numbers can be shown inline instead of only inside whichever
+ * item someone happened to open.
+ *
+ * Sequential on purpose: Omnisend rate-limits, and a shop's month of email is
+ * a handful of items — firing them in parallel risks 429s for no gain at this
+ * size. One item's failure never stops the rest; the caller gets counts back.
+ * ponytail: on-demand only, no polling and no cache layer — these numbers move
+ * slowly and nobody needs them live to the second.
+ * @returns {Promise<{updated:number, failed:number, skipped:number}>} */
+async function refreshAllOmnisendStats(fetchStats = fetchOmnisendCampaignStats) {
+  const items = getContentItems().filter(i => i.channel === "email" && i.omnisendCampaignId);
+  let updated = 0, failed = 0, skipped = 0;
+  for (const item of items) {
+    try {
+      const stats = await fetchStats(item.omnisendCampaignId);
+      if (!stats) { skipped++; continue; }
+      updateContentItem(item.id, { omnisendStats: { ...stats, fetchedAt: new Date().toISOString() } });
+      updated++;
+    } catch { failed++; }
+  }
+  return { updated, failed, skipped };
+}
+
+/** Total revenue attributed to a campaign's email items (#29) — only counts
+ * items whose stats have actually been fetched, and says how many those were,
+ * so a partial number can never masquerade as the campaign's full total. */
+function campaignEmailRevenue(campaignId, items = getContentItems()) {
+  let revenue = 0, withStats = 0, emails = 0;
+  items.forEach(i => {
+    if (i.campaignId !== campaignId || i.channel !== "email") return;
+    emails++;
+    const r = Number(i.omnisendStats?.revenue);
+    if (Number.isFinite(r)) { revenue += r; withStats++; }
+  });
+  return { revenue, withStats, emails, partial: withStats < emails };
+}
+
 const deleteContentItem = (id) => {
   const next = getContentItems().filter(c => c.id !== id);
   if (REMOTE_MODE) { _cache.set("content", next); _remoteCollectionDelete("content_delete", id); return; }
@@ -3212,7 +3250,7 @@ export {
   getPlaybook, savePlaybook, savePlaybookSection, deletePlaybookSection, seedPlaybookIfEmpty,
   getImageRepo, saveImageRepo, saveImageRepoBlock, deleteImageRepoBlock, seedImageRepoIfEmpty, letterOf,
   getToolsPrompts, saveToolsPromptsItem, deleteToolsPromptsItem,
-  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, getIcsSubscribeUrl,
+  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, refreshAllOmnisendStats, campaignEmailRevenue, getIcsSubscribeUrl,
   fetchShopifySales, getSalesTargets, saveSalesTargets, currentSalesTargets, MONTH_NAMES,
   getDayTargets, saveDayTargets, dayTargetFor, salesPace,
   getRevisions, getRevision, restoreRevision,

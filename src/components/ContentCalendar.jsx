@@ -11,7 +11,7 @@ import {
   campaignChannelCounts, processAndStoreImage, linkifyMagnets,
   copyMagnet, createTaskFromItem, taskPrefillFromItem,
   getTasks, getProjects, taskOnCalendar, navigateItem,
-  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, triggerToast, RECURRENCE_OPTIONS, advanceDate, publishContentWithRecurrence,
+  fetchOmnisendCampaigns, fetchOmnisendCampaignStats, refreshAllOmnisendStats, campaignEmailRevenue, triggerToast, RECURRENCE_OPTIONS, advanceDate, publishContentWithRecurrence,
   parseDate, todayLocalISO, daysBetween, addDaysISO, MONTHS_ABBR, TIMELINE_ZOOMS,
 } from '../globals.js';
 import { Btn, OBtn, IconBtn, Icon, Pill, Avatar, SectionHeader, EmptyState, lbl, LinkPopover, ItemLink, Popover, MentionText, RichMentionField, Modal, Segmented } from './shared.jsx';
@@ -67,7 +67,10 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function tabStyle(active) {
   return {
-    padding: "9px 16px", borderRadius: 9, fontSize: 13, fontWeight: active ? 600 : 500, cursor: "pointer",
+    // Tighter than the app's other tabs on purpose: these share one row with
+    // four filter selects (see the control row below), and the row is what
+    // keeps the calendar from being pushed down a second bar's worth.
+    padding: "8px 12px", borderRadius: 9, fontSize: 12.5, fontWeight: active ? 600 : 500, cursor: "pointer",
     border: `1.5px solid ${active ? C.moss : C.bdr}`,
     textTransform: "uppercase", fontFamily: FONT_CAPS, letterSpacing: "0.07em",
     background: active ? C.mossSoft : C.sur, color: active ? C.moss : C.mut,
@@ -95,6 +98,7 @@ function ContentChip({ item, campaign, onClick, onDragStart, draggable }) {
       <span style={{ fontSize: 10, fontWeight: 600, color: C.txt, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {item.title || "Untitled"}
       </span>
+      <EmailStats item={item} />
     </div>
   );
 }
@@ -315,6 +319,7 @@ function ItemRail({ items, campaigns, onOpenItem }) {
             <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono',monospace", color: overdue ? C.red : C.faint, fontWeight: overdue ? 700 : 400 }}>
               {it.publishDate ? fmtDateShort(it.publishDate) : "Unscheduled"}
             </span>
+            <EmailStats item={it} size="row" />
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: C.mut }}>
               <span style={{ width: 6, height: 6, borderRadius: 99, background: sm.col }} />{sm.label}
             </span>
@@ -484,6 +489,38 @@ function gbpPostText(item) {
     parts.push(`${cta.label}: ${item.ctaUrl.trim()}`);
   }
   return parts.filter(Boolean).join("\n\n");
+}
+
+/* #29 — email performance inline, so opens/clicks/revenue are visible without
+   opening each item. Renders nothing unless stats have actually been fetched:
+   an absent number must read as "not fetched yet", never as a zero. */
+function EmailStats({ item, size = "chip" }) {
+  const st = item.omnisendStats;
+  if (item.channel !== "email" || !st) return null;
+  const small = size === "chip";
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  // A calendar cell is ~90px wide: three metrics truncate to a bare number
+  // that reads as noise. Chips get revenue only — the one figure worth
+  // glancing at — and the full breakdown lives on the list row and editor.
+  const parts = small
+    ? [num(st.revenue) !== null ? `$${Math.round(num(st.revenue)).toLocaleString()}` : null].filter(Boolean)
+    : [
+      num(st.opens) !== null ? `${num(st.opens)} opens` : null,
+      num(st.clicks) !== null ? `${num(st.clicks)} clicks` : null,
+      num(st.revenue) !== null ? `$${Math.round(num(st.revenue)).toLocaleString()}` : null,
+    ].filter(Boolean);
+  if (!parts.length) return null;
+  return (
+    <span title={`Omnisend${st.fetchedAt ? " · as of " + fmtDateShort(st.fetchedAt) : ""}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: small ? 4 : 6, flexShrink: 0,
+        fontSize: small ? 9.5 : 11, color: C.mut, whiteSpace: "nowrap",
+        fontFamily: "'IBM Plex Mono',monospace",
+      }}>
+      <Icon name="insights" size={small ? 10 : 12} style={{ color: C.moss, flexShrink: 0 }} />
+      {parts.join(" · ")}
+    </span>
+  );
 }
 
 /* Compact read-only mockup of how a GBP post will look — internal preview
@@ -995,6 +1032,7 @@ function CampaignModal({ initial, users, onSave, onDelete, onClose, isNew }) {
 function CampaignCard({ campaign, items, users, editable, onOpen, onEdit }) {
   const sm = campaignStatusMeta[campaign.status] || CAMPAIGN_STATUSES[0];
   const counts = campaignChannelCounts(campaign.id, items);
+  const rev = campaignEmailRevenue(campaign.id, items);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const staff = (campaign.assigneeIds || []).map(id => users.find(u => u.id === id)).filter(Boolean);
   return (
@@ -1020,6 +1058,21 @@ function CampaignCard({ campaign, items, users, editable, onOpen, onEdit }) {
             </span>
           ) : null)}
           {total === 0 && <span style={{ fontSize: 12, color: C.faint }}>No content items yet</span>}
+          {/* #29 — attributed email revenue for the campaign. Says "so far"
+              when only some of its emails have had stats fetched, so a partial
+              figure can never be mistaken for the campaign's full total. */}
+          {rev.withStats > 0 && (
+            <span title={rev.partial
+              ? `From ${rev.withStats} of ${rev.emails} email items — refresh stats on the rest for a full total`
+              : `From all ${rev.emails} email items`}
+              style={{
+                display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700,
+                color: C.moss, background: C.mossSoft, borderRadius: 99, padding: "3px 9px",
+              }}>
+              <Icon name="payments" size={12} />
+              ${Math.round(rev.revenue).toLocaleString()}{rev.partial ? " so far" : ""}
+            </span>
+          )}
         </div>
         {staff.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1465,19 +1518,19 @@ function ReportsView({ items, campaigns, editable, bump }) {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
           <label style={lbl()}>Range</label>
-          <select value={rangeMode} onChange={e => setRangeMode(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+          <select value={rangeMode} onChange={e => setRangeMode(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
             {REPORT_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
           </select>
         </div>
         {rangeMode === "custom" && (
           <>
-            <div><label style={lbl()}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
-            <div><label style={lbl()}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })} /></div>
+            <div><label style={lbl()}>From</label><input type="date" value={from} onChange={e => setFrom(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })} /></div>
+            <div><label style={lbl()}>To</label><input type="date" value={to} onChange={e => setTo(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })} /></div>
           </>
         )}
         <div>
           <label style={lbl()}>Channel</label>
-          <select value={channel} onChange={e => setChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+          <select value={channel} onChange={e => setChannel(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
             <option value="">All channels</option>
             {CONTENT_CHANNELS.map(ch => <option key={ch.key} value={ch.key}>{ch.label}</option>)}
           </select>
@@ -1589,6 +1642,23 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
   const openNew = (dateStr) => setModal({ item: { ...defContentItem(), publishDate: dateStr || "" }, isNew: true });
   const openNewForCampaign = (campId) => setModal({ item: { ...defContentItem(), campaignId: campId }, isNew: true });
   const restatusItem = (id, status) => { updateContentItem(id, { status }); triggerSaved(); bump(); };
+  // #29 bulk stats refresh.
+  const [statsBusy, setStatsBusy] = useState(false);
+  const hasLinkedEmail = allItems.some(i => i.channel === "email" && i.omnisendCampaignId);
+  const refreshEmailStats = async () => {
+    setStatsBusy(true);
+    try {
+      const { updated, failed, skipped } = await refreshAllOmnisendStats();
+      // Report what actually happened rather than a blanket "done" — a silent
+      // partial refresh is how a stale number gets trusted.
+      const bits = [`${updated} updated`];
+      if (skipped) bits.push(`${skipped} with no stats yet`);
+      if (failed) bits.push(`${failed} failed`);
+      triggerToast(bits.join(" · "));
+    } catch (err) { triggerToast(err.message || "Couldn't refresh stats"); }
+    setStatsBusy(false);
+    bump();
+  };
   /* #27 drag-to-reschedule: move a content item to another day. Only
      publishDate changes — status is deliberately untouched, since dragging a
      published item to a future date shouldn't quietly un-publish it. */
@@ -1681,6 +1751,16 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
         sub={`${allItems.length} content item${allItems.length === 1 ? "" : "s"} · ${upcoming} upcoming`}
         right={editable && (
           <>
+            {/* #29 — lives in the header, not the filter row: the tabs and
+                filters are meant to fit ONE row and a fifth control there
+                pushed them onto a second. */}
+            {hasLinkedEmail && (
+              <OBtn onClick={refreshEmailStats} disabled={statsBusy}
+                title="Fetch Omnisend opens, clicks and revenue for every linked email item">
+                <Icon name={statsBusy ? "hourglass_empty" : "insights"} size={16} />
+                {statsBusy ? "Refreshing…" : "Email stats"}
+              </OBtn>
+            )}
             <Btn onClick={e => setAddAnchor(e.currentTarget.getBoundingClientRect())}><Icon name="add" size={17} />Add</Btn>
             {addAnchor && (
               <Popover anchorRect={addAnchor} onClose={() => setAddAnchor(null)} width={190}>
@@ -1714,21 +1794,21 @@ function ContentCalendar({ user, focusItemId, focusCampaignId, onClearFocus, onC
 
         {(tab === "calendar" || tab === "list") && (
         <>
-          <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+          <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
             <option value="">All channels</option>
             {CONTENT_CHANNELS.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
           {campaigns.length > 0 && (
-            <select value={filterCampaign} onChange={e => setFilterCampaign(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+            <select value={filterCampaign} onChange={e => setFilterCampaign(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
               <option value="">All campaigns</option>
               {campaigns.map(c => <option key={c.id} value={c.id}>{c.name || "Untitled campaign"}</option>)}
             </select>
           )}
-          <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+          <select value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
             <option value="">All assignees</option>
             {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp({ width: "auto", fontSize: 13, padding: "8px 12px" })}>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp({ width: "auto", fontSize: 12.5, padding: "7px 9px" })}>
             <option value="">All statuses</option>
             {CONTENT_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>

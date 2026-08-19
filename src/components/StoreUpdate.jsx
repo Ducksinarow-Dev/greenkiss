@@ -236,6 +236,14 @@ function StoreUpdate({ user }) {
   // #30: computed from the same figure the month gauge shows, so the sample
   // state gets a coherent sample pace rather than a blank or a wrong one.
   const pace = salesPace(monthVal);
+  /* #30 comparison. Only shown with a real connection and a real previous
+     figure: comparing the 62% SAMPLE against a live last month would invent a
+     trend out of a placeholder. A previous month of exactly 0 is skipped too —
+     "up 100%" from nothing is noise, not information. */
+  const prevMonth = connected ? sales?.lastMonthToDate : null;
+  const vsLast = (Number.isFinite(prevMonth) && prevMonth > 0 && monthVal >= 0)
+    ? { prev: prevMonth, pct: ((monthVal - prevMonth) / prevMonth) * 100, up: monthVal >= prevMonth, days: new Date().getDate() }
+    : null;
 
   return (
     <div className="gk-fade-in">
@@ -285,6 +293,17 @@ function StoreUpdate({ user }) {
               through {pace.days} completed {pace.days === 1 ? "day" : "days"} this month.
               Today isn't counted yet.
             </div>
+            {/* #30 comparison — the same slice of last month, so an 18th-of-
+                the-month figure meets another 18-day figure. */}
+            {vsLast && (
+              <div style={{ fontSize: 12.5, color: C.mut, marginTop: 3 }}>
+                <span style={{ color: vsLast.up ? C.moss : C.clay, fontWeight: 700 }}>
+                  {vsLast.up ? "▲" : "▼"} {Math.abs(vsLast.pct).toFixed(0)}%
+                </span>{" "}
+                vs the same {pace.days === 1 ? "day" : `${vsLast.days} days`} of {sales?.lastMonthLabel || "last month"}
+                {" "}({currency}{Math.round(vsLast.prev).toLocaleString()})
+              </div>
+            )}
           </div>
         </div>
       )}
